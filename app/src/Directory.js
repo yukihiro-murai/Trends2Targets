@@ -100,7 +100,7 @@ function appNormalizeName_(s) {
 
 /**
  * ZAC の名前から、ふつうに使う表記を作る: 半角カナ・全角英数を直す（NFKC）、株式会社・（株）・合同会社などを除く、空白をそろえる。
- * 例: ｱｽﾄﾗｾﾞﾈｶ(株) → アストラゼネカ。合わないものは管理者が「クライアント」の画面で決める（CLIENT_NAMES）
+ * 例: ｻﾝﾌﾟﾙﾌｧｰﾏ(株) → サンプルファーマ。合わないものは管理者が「クライアント」の画面で決める（CLIENT_NAMES）
  */
 function appClientDisplayName_(raw) {
   return String(raw || '').normalize('NFKC')

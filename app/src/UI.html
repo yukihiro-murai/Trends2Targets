@@ -936,7 +936,7 @@ var COLMIN_CTX = null;
 function colMinStyle(names){
   if (COLMIN_CTX === null) { try { COLMIN_CTX = document.createElement('canvas').getContext('2d'); COLMIN_CTX.font = '14px ' + getComputedStyle(document.body).fontFamily; } catch (e) { COLMIN_CTX = false; } }
   var ctx = COLMIN_CTX, w = (names || []).reduce(function(m, s){
-    // 空白で区切った語ごと（「ノバルティス ファーマ」は空白で折り返してよい。語の途中では折らない）
+    // 空白で区切った語ごと（「サンプル ファーマ」は空白で折り返してよい。語の途中では折らない）
     return String(s == null ? '' : s).split(/\s+/).reduce(function(m2, t){ var x = 0;
       if (ctx) x = ctx.measureText(t).width; else for (var i = 0; i < t.length; i++) x += t.charCodeAt(i) > 255 ? 14 : 10;
       return Math.max(m2, x); }, m); }, 0);

@@ -43,7 +43,7 @@ assert.equal(pf.plans[1].p50, null, 'まだ予測していない');
 assert.ok(pf.plans[1].stepsTotal > 0, '手順の進みの行がある');
 
 // ==== 3b. 画面の名前: 半角カナを全角に、株式会社・（株）などを除く。ZAC の名前（計画の CONFIG）はそのまま ====
-for (const [raw, want] of [['ｱｽﾄﾗｾﾞﾈｶ(株)', 'アストラゼネカ'], ['株式会社テスト', 'テスト'], ['ｳﾞｨｱﾄﾘｽ製薬合同会社', 'ヴィアトリス製薬'], ['ＡＢＣ製薬㈱', 'ABC製薬'], ['（株）サンプル　ファーマ', 'サンプル ファーマ']]) {
+for (const [raw, want] of [['ｻﾝﾌﾟﾙﾌｧｰﾏ(株)', 'サンプルファーマ'], ['株式会社テスト', 'テスト'], ['ｳﾞｪﾙﾃﾞ製薬合同会社', 'ヴェルデ製薬'], ['ＡＢＣ製薬㈱', 'ABC製薬'], ['（株）サンプル　ファーマ', 'サンプル ファーマ']]) {
   assert.equal(env.run(`appClientDisplayName_(${JSON.stringify(raw)})`), want, raw);
 }
 const kana = env.runJob('PLAN.CREATE', { clientName: 'ｻﾝﾌﾟﾙ製薬(株)', fy: 2027, peopleCsv: '鷹野' });
