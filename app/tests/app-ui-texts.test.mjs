@@ -997,6 +997,17 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
     S.fc.ver = { planId: 'P', pending: { no: 3, versionId: 'V', rowVersion: 1 } }; verDecide('APPROVED');`);
   assert.equal(JSON.stringify(run('__asks')), JSON.stringify([['承認する', true]]));
   assert.match(uiHtml, /ask\(msg, '承認して反映', function\(\)\{[^\n]*\}, true\);/, '承認して反映も「やめる」が先');
+  // 仕組みの確認（管理者のホーム）: 失敗の数に出ない止まり方も出す（手入れが終わらない・自動の調べのトリガーが無い・動いていない・古いままの計画）
+  const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+  const sysItems = (sys) => Array.from(run('homeSysItems(__s)', { __s: sys })).map((x) => x[1]);
+  const okBackup = { enabled: true, count: 3, ageHours: 5 };
+  const arOk = { enabled: true, failures7d: 0, trigger: { installed: true }, lastTickAt: ago(20), stalePlans: [] };
+  assert.deepEqual(sysItems({ housekeeping: { at: ago(20), ok: true }, backup: okBackup, autoResearch: arOk }), [], 'ふだんは何も出さない');
+  assert.match(sysItems({ housekeeping: { at: ago(30), ok: true }, backup: okBackup, autoResearch: arOk })[0], /毎日の手入れが、最後に終わってから 30 時間たっています/);
+  assert.match(sysItems({ backup: okBackup, autoResearch: Object.assign({}, arOk, { trigger: { installed: false, reason: 'TRIGGER_LIMIT', reasonLabel: 'トリガーの数に余裕が無い' } }) })[0], /トリガーを作れていません/);
+  assert.match(sysItems({ backup: okBackup, autoResearch: Object.assign({}, arOk, { lastTickAt: ago(80) }) })[0], /市場の自動の調べが、3 日動いていません/);
+  assert.match(sysItems({ backup: okBackup, autoResearch: Object.assign({}, arOk, { stalePlans: [{ planId: 'A', lastAt: ago(24 * 20) }, { planId: 'B', lastAt: ago(24 * 8) }, { planId: 'C', lastAt: '' }] }) })[0],
+    /^1 メーカーの市場の調べが、14 日以上新しくなっていません$/, '一度も集めていない計画と 14 日に満たない計画は数えない');
 }
 
 console.log('app-ui-texts: all tests passed');

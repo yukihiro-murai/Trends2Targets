@@ -1807,6 +1807,7 @@ function homeInsightCard(plans){
 
 // ---- よみのセリフ ----
 function homeDays(iso){ if (!iso) return null; var t = Date.parse(String(iso).replace(/([+-]\d\d)(\d\d)$/, '$1:$2')); return isNaN(t) ? null : Math.floor((Date.now() - t) / 864e5); }
+function homeHours(iso){ if (!iso) return null; var t = Date.parse(String(iso).replace(/([+-]\d\d)(\d\d)$/, '$1:$2')); return isNaN(t) ? null : Math.floor((Date.now() - t) / 36e5); }
 /** 所有者がエディタから直すときの案内（管理の画面は外した。README の「所有者の操作」） */
 function homeOwnerTip(json, effect){ return '直し方（所有者）: Apps Script のエディタで、スクリプト プロパティ OWNER_TASK に ' + json + ' を入れて apiOwnerTask を実行します' + (effect ? '。' + effect : '') + '（README「所有者の操作」）'; }
 /** 仕組みの気になる点（管理者だけ。サーバーが h.system を返すのは管理者だけ）: [短い名前, 文, 説明] */
@@ -1816,6 +1817,11 @@ function homeSysItems(sys){
   var hk = sys.housekeeping, b = sys.backup, ba = sys.backupAuto || {}, ar = sys.autoResearch;
   if (hk && hk.ok === false) it.push(['毎日の手入れ', '毎日の手入れで、確認が ' + (hk.problems || []).length + ' 件あります',
     (hk.problems || []).slice(0, 3).map(function(x){ return '・' + plainMsg(x); }).join('\n') + '\n' + homeOwnerTip('{"action":"health"}', '中身が分かります')]);
+  // 手入れは毎日 3 時ごろ（バックアップの後）。1 回の実行の時間切れなどで終わらないと結果を控えられず、前の日の結果が残るので、古さでも気づけるようにする
+  var hkH = hk ? homeHours(hk.at) : null;
+  if (hkH !== null && hkH > 26 && !(b && b.enabled === false)) it.push(['毎日の手入れ', '毎日の手入れが、最後に終わってから ' + hkH + ' 時間たっています',
+    '毎日 3 時ごろに動きます。途中で止まっている（時間切れ・トリガーが無い）と、結果が新しくなりません。止まっている間は、市場の自動の調べも見送ります\n'
+    + homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"HOUSEKEEPING"}', '最後に動いた時刻と理由が分かります')]);
   if (b) {
     if (b.error) it.push(['バックアップ', 'バックアップの状態を読めません', homeOwnerTip('{"action":"health"}', '状態が分かります')]);
     // 毎日のバックアップのトリガーは、所有者が開いたときに自動で作る（2026-10-07）。ba = 止めるスイッチ（off）と、最後に確かめた結果（reason）・今日もう確かめたか（checkedToday）
@@ -1835,6 +1841,18 @@ function homeSysItems(sys){
     else if (ar.enabled === false) it.push(['市場の自動の調べ', '市場の自動の調べを止めてあります', '動かすときは、所有者がスクリプト プロパティ AUTO_RESEARCH_ENABLED を消します（README「市場の動きの自動収集」）']);
     else if (ar.failures7d > 0) it.push(['市場の自動の調べ', '市場の自動の調べが、この 7 日で ' + ar.failures7d + ' 回うまくいきませんでした',
       last + homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"AUTO.RESEARCH"}', '失敗の理由が分かります')]);
+    else {
+      // 失敗の数に出ない止まり方: トリガーが無い・毎日の回が動いていない（見送りが続く）・市場の調べが古いままの計画がある
+      var tickH = homeHours(ar.lastTickAt), why = ar.lastTick && ar.lastTick.reasonLabel ? '最後の回: ' + (ar.lastTick.statusLabel || '') + '（' + ar.lastTick.reasonLabel + '）\n' : '';
+      var old = (ar.stalePlans || []).filter(function(p){ var d = homeDays(p.lastAt); return d !== null && d >= 14; });
+      var arLog = homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"AUTO.RESEARCH"}', '動いた時刻と理由が分かります');
+      if (ar.trigger && ar.trigger.installed === false && ar.trigger.reason) it.push(['市場の自動の調べ', '市場の自動の調べのトリガーを作れていません',
+        (ar.trigger.reasonLabel ? '理由: ' + ar.trigger.reasonLabel + '\n' : '') + '所有者が開いたときに（1 日 1 回）もう一度作ります\n' + arLog]);
+      else if (tickH !== null && tickH > 48) it.push(['市場の自動の調べ', '市場の自動の調べが、' + Math.floor(tickH / 24) + ' 日動いていません',
+        '毎日 ' + ((ar.schedule && ar.schedule.label) || '4:15 ごろ') + 'に動きます\n' + why + last + arLog]);
+      else if (old.length) it.push(['市場の自動の調べ', old.length + ' メーカーの市場の調べが、14 日以上新しくなっていません',
+        '週に 1 回集め直す決まりです。準備ができていない・見送りが続くと古いままになります\n' + why + arLog]);
+    }
   }
   return it;
 }
