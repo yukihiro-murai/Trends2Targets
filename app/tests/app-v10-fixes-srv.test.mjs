@@ -552,7 +552,7 @@ const NEW_TABLES = ['INPUT_LOG', 'AI_RESEARCH_LOG', 'LAYER_EFFECTS', 'HIT_RECORD
 {
   const readme = await readFile(path.join(appDir, 'README.md'), 'utf8');
   const plan = await readFile(path.join(appDir, 'SCHEMA_PLAN_v10-12_JA.md'), 'utf8');
-  assert.match(readme, /## 表の版 10（[^）]*v0\.30\.0 で作り終えた・未公開）/, 'README: 版 10 を作り終えた');
+  assert.match(readme, /## 表の版 10（[^）]*v0\.30\.0・@66 公開）/, 'README: 版 10 は @66 で公開した');
   assert.match(readme, /空の `seed_rule` は、`seed` で読み分けます: 64 文字の 16 進なら `INPUT_V1`（v0\.29\.0・@65 の回）、`RUN-…` なら実行ごとの種（v0\.28\.0 まで）/);
   assert.match(readme, /公開した後の最初の予測は、数字が少し動きます[^\n]*`APP_VERSION`[^\n]*−0\.56%/);
   assert.match(plan, /^- 日付: 2026-10-08。\*\*版 10 は作りました\*\*（v0\.30\.0/m, 'SCHEMA_PLAN: 状態の行');

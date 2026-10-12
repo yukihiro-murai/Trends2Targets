@@ -1,0 +1,5 @@
+# 端末ごとのもの（Git に置かない）
+.DS_Store
+# Claude Code の作業コピー（.claude/worktrees/）と手元のプレビュー設定
+.claude/
+node_modules/
