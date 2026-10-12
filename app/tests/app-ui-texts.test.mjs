@@ -966,4 +966,32 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   assert.equal(one.tip, '霧：' + run(`skyRule('mikakunin')`));
 }
 
+// ==== エラーの文: 計算用の表の名前は画面の名前に、プログラムの例外と通信の切れは中身を見せず、分かる文に（2026-10-13） ====
+{
+  const ui = loadUi();
+  ui.console = { error() {} };
+  const run = (code, extra) => { Object.assign(ui, extra || {}); return vm.runInContext(code, ui); };
+  assert.equal(run('plainMsg(__s)', { __s: 'SALES_MONTHLYの月次列が48ヶ月分ありません' }), '「月ごとの売上」の月次列が48ヶ月分ありません');
+  assert.equal(run('plainMsg(__s)', { __s: 'CONFIG!B2 にクライアントを設定してください' }), '「計画の設定」 にクライアントを設定してください');
+  assert.equal(run('plainMsg(__s)', { __s: 'AI_RESEARCH_STRUCTURED の見出しが違います' }), '「市場の調査（話題ごと）」 の見出しが違います');
+  assert.equal(run('plainMsg(__s)', { __s: 'IMPORT.SALES・VERTEX_PROJECT_ID・MY_TABLE はそのまま' }), 'IMPORT.SALES・VERTEX_PROJECT_ID・MY_TABLE はそのまま', '知らない名前は変えない');
+  assert.equal(run('plainMsg(__s)', { __s: 'A-2 売上データの取り込みで止まりました' }), '売上を取り込むで止まりました', '旧来の番号は今までどおり');
+  assert.match(run('errText(__s)', { __s: "TypeError: Cannot read properties of undefined (reading 'p50')" }), /^思いがけないエラーで止まりました/);
+  assert.match(run('errText(__s)', { __s: 'NetworkError: Connection failure due to HTTP 503' }), /^通信が途中で切れました/);
+  assert.equal(run('errText(__s)', { __s: 'ほかの処理が終わるまでお待ちください' }), 'ほかの処理が終わるまでお待ちください', 'サーバーの日本語の文はそのまま');
+  assert.doesNotMatch(JSON.stringify(run('FC_ACTION_FULL')), /ZAC/, '操作の名前（閲覧の人にも出る）に裏側の名前を出さない');
+  // 幅に収まった割合の注意は、サーバー（appInsightHealth_）と同じ決まり: 4 か月以上・80% の確かさの幅が 80% を含まないときだけ
+  assert.deepEqual([run('covOff(2, 3)'), run('covOff(0, 3)'), run('covOff(1, 4)'), run('covOff(3, 4)'), run('covOff(12, 12)'), run('covOff(8, 10)')], ['', '', 'low', '', 'high', '']);
+  const homeCov = (n, out) => { const c = run('homeInsightCard(__p)', { __p: [{ planId: 'P', clientName: 'A', rangeN: n, rangeOut: out }] }); return (c.match(/幅に収まった割合[\s\S]{0,400}/) || [''])[0]; };
+  assert.doesNotMatch(homeCov(3, 1), /狭すぎるよう|広すぎるよう/, '3 か月で 2 か月収まった（67%）だけでは注意にしない（前は 3 か月だと必ず注意だった）');
+  assert.match(homeCov(6, 4), /狭すぎるよう/, '6 か月で 2 か月しか収まらなければ注意');
+  assert.equal(run('accRough(__a)', { __a: { coverage: 0.25, coverageN: 4 } }), true, '学びの「荒れている」も同じ決まり');
+  // 雪（予算があるのに売上が 0 の月）は、着地と予算の比では決めないので「予算を 10% 以上下回る」とは言わない
+  const says = (plans) => Array.from(run('yomiSays(__h)', { __h: { fy: '2026', plans } })).map((x) => x.text).join('\n');
+  const snowSay = says([{ planId: 'S', clientName: '雪の製薬', fy: '2026', sky: 'sekka', budget: 600, landing: 572 }]);
+  assert.match(snowSay, /1 メーカーは、予算があるのに売上が 0 の月があります（雪）/);
+  assert.doesNotMatch(snowSay, /10% 以上下回る/);
+  assert.match(says([{ planId: 'K', clientName: '曇りの製薬', fy: '2026', sky: 'kumori', budget: 600, landing: 500 }]), /1 メーカーが、予算を 10% 以上下回る見込みです（曇り）/);
+}
+
 console.log('app-ui-texts: all tests passed');

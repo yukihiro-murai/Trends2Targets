@@ -278,6 +278,20 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   const cf = vm.runInContext(`viewForecast()`, ui);
   assert.match(cf, /極端な入力[\s\S]*増減率 \+80%[\s\S]*このまま実行/, '確認のカードが予測と予算のタブに出る');
   assert.equal(vm.runInContext(`S.fc.tab`, ui), 'forecast');
+  // 旧来の計算の文（表の名前・Step・kTotal・OK/キャンセル）は、画面の言葉とボタンの名前で見せる
+  const legacyMsgs = [
+    'Stepが極端です（±100%以上）。\n\nシート: PRODUCT / 担当: 鷹野 / 月: 2026/05 / Step: 120%\n\nプロモーション終了などで意図した入力ならOKで続行できます。\n修正する場合はキャンセルしてください。',
+    'Stepがやや大きめです（±30%以上）。\n\nシート: OPINIONS / 担当: 鷹野 / 月: 2026/05 / Step: 35%\n\n修正する場合はキャンセル、続行する場合はOKを押してください。',
+    'DEV/SPOT固定が大きい月があります（2026/06 / 1,200,000円, BASE平均比 130.0%）。\n\n意図した大型案件ならOKで続行できます。\n修正する場合はキャンセルしてください。',
+    '主観/AIの合成係数が極端です（2026/07 / kTotal=1.734）。\n\n意図した戦略変更ならOKで続行できます。\n修正する場合はキャンセルしてください。'];
+  for (const m of legacyMsgs) {
+    vm.runInContext(`JOB_DONE['FORECAST.RUN_CALC']({ needConfirm: { key: 'extreme', title: '注意（影響が大きい入力）', message: ${JSON.stringify(m)} } }, { planId: S.fc.planId, confirms: [] })`, ui);
+    const card = vm.runInContext(`viewForecast()`, ui);
+    const pre = (card.match(/<div class="pre">([\s\S]*?)<\/div>/) || [])[1] || '';
+    assert.doesNotMatch(pre, /PRODUCT|OPINIONS|Step|DEV\/SPOT|BASE|kTotal|OK|キャンセル/, '旧来の言葉を見せない: ' + pre);
+    assert.match(pre, /このまま実行|やめる/, pre);
+  }
+  vm.runInContext(`S.fc.confirm = null`, ui);
   assert.doesNotMatch(vm.runInContext(`viewForecast()`, ui), /value="[0-9]+\.[0-9]+"/, '採用予測の欄は小数を見せない');
   // 検証のタブの、精度の推移と学習の影
   ui.__learn = env.call('apiLearningView(__in)', { __in: { planId } });

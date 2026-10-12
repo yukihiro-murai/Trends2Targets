@@ -557,7 +557,7 @@ function isNum(v){ return typeof v === 'number' && isFinite(v); }
 var toastT = null;
 /** 通知。エラーは消えないよう画面の上にも残す（閉じるまで）。エラーの文の中の旧来の番号（A-2 など）はふつうの言葉に直す */
 function toast(msg, err){
-  if (err) msg = plainMsg(msg);
+  if (err) msg = errText(msg);
   var el = $('toast');
   el.className = 'toast on' + (err ? ' err' : '');
   el.innerHTML = (err ? '' : '<span class="tc">' + YOMI_POSE.done + '</span>') + '<span>' + esc(msg) + '</span>';
@@ -673,7 +673,7 @@ function load(key, fn, args, onOk){
   var t = { loading: true, start: Date.now() };
   S.ld[key] = t;
   var ok = function(r){ if (S.ld[key] !== t) return; S.ld[key] = { at: Date.now(), ms: Date.now() - t.start }; if (onOk) onOk(r); };
-  var fail = function(e){ if (S.ld[key] !== t) return false; S.ld[key] = { error: plainMsg((e && e.message) || String(e)), at: Date.now() }; render(); return false; };
+  var fail = function(e){ if (S.ld[key] !== t) return false; S.ld[key] = { error: errText((e && e.message) || String(e)), at: Date.now() }; render(); return false; };
   if (typeof fn === 'function') fn(ok, fail); else call(fn, args || [], ok, fail);
 }
 /** 読み込みの表示: 読み込み中・まだ始めていない → よみの「観測中…」（label）、失敗 → 理由と「もう一度読み込む」（retryJs を実行）、読めた → ''（呼び出し側が中身を描く） */
@@ -774,7 +774,7 @@ function pollJob(){
   }).withFailureHandler(function(e){
     if (!S.job || S.job.id !== j.id) return;
     j.fails++;
-    if (j.fails >= 5) { done(); jobFail(j.kind, { status: 'LOST', error: (e && e.message) || String(e) }, j.payload); toast('処理の状態を確かめられません: ' + ((e && e.message) || e), true); return; }
+    if (j.fails >= 5) { done(); jobFail(j.kind, { status: 'LOST', error: (e && e.message) || String(e) }, j.payload); toast('処理の状態を確かめられません。画面を読み直して、処理が終わったか確かめてください。', true); try { console.error(e); } catch (x) { /* コンソールが無い */ } return; }
     setTimeout(pollJob, 5000);   // 一時的な通信の失敗は、少し待って尋ね直す（処理は裏で続いている）
   }).apiJobStatus({ jobId: j.id });
 }
@@ -911,7 +911,7 @@ function qTh(k, cls){ return '<th class="' + (cls === undefined ? 'num' : cls) +
 /** 操作の名前: ボタン（8 字まで）と、確かめる文・説明・進み・知らせに使う完全な名前 */
 var FC_ACTION_SHORT = { 'IMPORT.SALES': '売上を取り込む', 'SALES.AGGREGATE': '月ごとに集計', 'AI.RESEARCH': '市場を調べる', 'IMPORT.ACTUALS': '実績を取り込む',
   'EVAL.REPORT': '当たり具合を計算', 'EVAL.INSIGHTS': '外れの原因を整理', 'LEARN.MONTHLY': '補正を学び直す', 'REVIEW.GENERATE': '見直し案を作る', 'REVIEW.APPLY': '見直しを反映' };
-var FC_ACTION_FULL = { 'IMPORT.SALES': '売上を取り込む（ZAC の実績から過去の売上）', 'SALES.AGGREGATE': '売上を月ごとに集計する', 'AI.RESEARCH': '市場・競合の動きを AI で調べる',
+var FC_ACTION_FULL = { 'IMPORT.SALES': '売上を取り込む（過去 4 年の売上）', 'SALES.AGGREGATE': '売上を月ごとに集計する', 'AI.RESEARCH': '市場・競合の動きを AI で調べる',
   'IMPORT.ACTUALS': '確定した月の実績を取り込む', 'EVAL.REPORT': '予測と実績を比べて当たり具合を計算する', 'EVAL.INSIGHTS': '外れた月の原因を整理する',
   'LEARN.MONTHLY': '実績から補正を学び直す（次の予測に効く）', 'REVIEW.GENERATE': 'AI の見直し案を作る', 'REVIEW.APPLY': '承認した見直し案を反映する',
   'EVAL.DASHBOARD': '指標の更新', 'INPUT.SAVE': '入力の保存', 'BUDGET.SAVE': '予算の保存', 'INSIGHT.SAVE': '振り返りの記入の保存', 'REVIEW.DECIDE': '見直し案の判断の保存', 'SETUP.PEOPLE': '担当者の保存',
@@ -925,9 +925,44 @@ var CODE_WORDS = { 'A-1': '計画を作る', 'A-2': '売上を取り込む', 'A-
 var CODE_RE = new RegExp('(^|[^A-Za-z0-9_-])([ABC]-\\d{1,2})(?!\\d)(?:[ 　]?(?:初期セットアップ|売上データの取り込み|売上データを取り込む|売上データ取り込み|売上データの加工|売上データ加工|検証用の実績の取り込み|検証実績取り込み'
   + '|AI ?調査詳細|AI ?調査|予測実行|予測の実行|検証レポートの更新|検証レポート|ダッシュボードの更新|ダッシュボード|学習インサイトの更新|学習インサイト|月次の自動学習|自動学習'
   + '|四半期レビューの提案|四半期レビュー|承認した提案の適用|製品ごとの動向を入力|クライアント動向を入力|担当者意見を入力|開発\\/スポット要因を入力|予算を策定))?', 'g');
+/** サーバー・旧来の計算の文に出る計算用の表の名前（と後ろのセルの番地）を、画面の名前に直す（裏側の名前を見せない） */
+var TABLE_WORDS = { CONFIG: '計画の設定', SALES_INPUT: '取り込んだ売上', SALES_MONTHLY: '月ごとの売上', PRODUCT: '製品の入力', CLIENT: 'メーカー全体の入力', OPINIONS: '見解',
+  DEV_SPOT: 'スポット案件', OUTPUT: '予算と予測', ACTUAL_EVAL_MONTHLY: '検証用の実績', AI_RESEARCH: '市場の調査', AI_RESEARCH_STRUCTURED: '市場の調査（話題ごと）',
+  RUN_LOG: '実行の記録', FORECAST_SNAPSHOT: '予測の記録', EVAL_LOG: '当たり具合の記録', EVAL_COMPARE_MONTHLY: '予測と実績の比べ', EVAL_INSIGHTS: '外れた月の振り返り',
+  PROCESS_STATUS: '進み', DASHBOARD: '指標', AI_SCORE_HISTORY: '市場の調査の記録', AI_IMPACT_HISTORY: 'AI の効きの記録', SUBJECTIVE_IMPACT_HISTORY: '入力の効きの記録',
+  CALIBRATION_STATE: '補正', CALIBRATION_HISTORY: '補正の記録', QUARTERLY_REVIEW: '見直し案', QUARTERLY_REVIEW_LOG: '見直し案の記録', SOURCE_RELIABILITY: '信頼度',
+  RELIABILITY_EVIDENCE: '信頼度の記録', POOL_PRIOR: '全計画の学び', LANDING_FORECAST: '着地見込み', VERTEX_FORECAST_LOG: 'AI の見立ての記録' };
+var TABLE_RE = /(^|[^A-Za-z0-9_])([A-Z][A-Z0-9_]+)(?:!\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)?(?![A-Za-z0-9_])/g;
 function plainMsg(s){
-  return String(s == null ? '' : s).replace(CODE_RE, function(m, pre, code){ return CODE_WORDS[code] ? pre + CODE_WORDS[code] : m; }).replace(/Vertex( AI)?/g, 'AI');
+  return String(s == null ? '' : s).replace(CODE_RE, function(m, pre, code){ return CODE_WORDS[code] ? pre + CODE_WORDS[code] : m; }).replace(/Vertex( AI)?/g, 'AI')
+    .replace(TABLE_RE, function(m, pre, name){ return TABLE_WORDS.hasOwnProperty(name) ? pre + '「' + TABLE_WORDS[name] + '」' : m; });
 }
+/**
+ * エラーの知らせ・エラーの欄・読み込みの失敗に出す文。プログラムの例外（英語の TypeError など）は中身を見せず、元の文はコンソールに残す。
+ * 通信が切れたときは、待ってやり直すよう言う。ほかは plainMsg（旧来の番号・表の名前をふつうの言葉に）
+ */
+var NET_ERR = /NetworkError|Failed to fetch|HTTP 50\d|ネットワーク/;
+var RAW_ERR = /^(Uncaught\s+)?(TypeError|ReferenceError|RangeError|SyntaxError|InternalError|Exception|ScriptError)\b|Cannot read propert|is not a function|is not defined|undefined is not|of undefined|of null\b/;
+function errText(s){
+  s = String(s == null ? '' : s);
+  if (NET_ERR.test(s) || RAW_ERR.test(s)) { try { console.error(s); } catch (e) { /* コンソールが無い */ } }
+  if (NET_ERR.test(s)) return '通信が途中で切れました。少し待って、もう一度試してください（裏の処理は続いていることがあります）。';
+  if (RAW_ERR.test(s)) return '思いがけないエラーで止まりました。もう一度試し、続くときは管理者に知らせてください。';
+  return plainMsg(s);
+}
+/**
+ * 旧来の計算が予測の前に確かめる文（極端な入力）を、画面の言葉とボタンの名前に直す（旧来の計算は変えない）。
+ * 旧来の文は表の名前（PRODUCT など）・Step・kTotal・「OK」「キャンセル」で書かれているが、画面のボタンは「このまま実行」「やめる」
+ */
+var CONFIRM_WORDS = [
+  [/シート: PRODUCT/g, '入力: 製品'], [/シート: CLIENT/g, '入力: メーカー全体'], [/シート: OPINIONS/g, '入力: 見解'], [/シート: DEV_SPOT/g, '入力: スポット案件'],
+  [/Step: /g, '増減率: '], [/Step(?=が)/g, '増減率'], [/DEV\/SPOT固定/g, 'スポット案件の金額'], [/, BASE平均比 ([\d.]+)%/g, '、過去の売上の月平均の $1%'],
+  [/主観\/AIの合成係数/g, '入力と AI の効きを掛け合わせた倍率'], [/kTotal=([\d.]+)/g, '$1 倍'],
+  [/ならOKで続行できます。\s*修正する場合はキャンセルしてください。/g, 'なら「このまま実行」で続けられます。直す場合は「やめる」を押してください。'],
+  [/修正する場合はキャンセル、続行する場合はOKを押してください。/g, '直す場合は「やめる」、続ける場合は「このまま実行」を押してください。'],
+  [/OKで続行/g, '「このまま実行」で続行'], [/キャンセル/g, '「やめる」']
+];
+function confirmText(s){ return CONFIRM_WORDS.reduce(function(t, w){ return t.replace(w[0], w[1]); }, plainMsg(s)); }
 /**
  * 見通しの空模様（サーバーの統計的な推定 p.sky。画面では計算し直さない）。8 つをいつもこの順に出す（2026-10-06 村井さん）。
  * rule は説明（ツールチップ）に使う
@@ -988,9 +1023,17 @@ function accWeather(mape, turbulent){
  */
 function accRough(a){
   if (!a || !isNum(a.coverage) || !(a.coverageN >= 4)) return false;
-  var n = a.coverageN, p = Math.round(a.coverage * n) / n, z = 1.2815515655446004, z2 = z * z, den = 1 + z2 / n;
-  var hi = Math.min(1, ((p + z2 / (2 * n)) + z * Math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))) / den);
-  return hi < 0.8;
+  return covOff(Math.round(a.coverage * a.coverageN), a.coverageN) === 'low';
+}
+/**
+ * 見通しの幅に収まった割合（n か月のうち k か月）が、目安の 80% から外れているか: 'low'（幅が狭すぎ）・'high'（広すぎ）・''。
+ * 4 か月以上比べて、80% の確かさの幅（Wilson）が 80% を含まないときだけ（サーバーの appInsightHealth_ の coverage_low・coverage_high と同じ）。
+ * 月が少ないうちは 80% から離れても偶然の範囲なので、注意にしない
+ */
+function covOff(k, n){
+  if (!(n >= 4) || !isNum(k)) return '';
+  var p = k / n, z = 1.2815515655446004, z2 = z * z, den = 1 + z2 / n, mid = (p + z2 / (2 * n)) / den, half = z * Math.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / den;
+  return Math.min(1, mid + half) < 0.8 ? 'low' : Math.max(0, mid - half) > 0.8 ? 'high' : '';
 }
 /** 人ごとの当たり・担当の名前を見せてよいか（サーバーの appInsightDetail_ と同じ: 予算策定担当以上の役割がある。学びの画面と同じ決まり） */
 function seePeople(){ var lv = ['VIEWER', 'CONTRIBUTOR', 'PLANNER', 'APPROVER', 'ADMIN']; return ((B.user && B.user.roles) || []).some(function(r){ return lv.indexOf(r.role) >= 2; }); }
@@ -1702,14 +1745,15 @@ function homeInsightCard(plans){
       '締まった月の予測（中心）の合計 ' + yenU(fc) + ' と、実績の合計 ' + yenU(act) + ' を比べています。強気は予測が実績より高いこと、弱気は低いことです']);
   }
   if (rn) {
-    var hit = 1 - ro / rn;
-    out.push([hit < 0.7 || hit > 0.9 ? 'warn' : 'ok', '幅に収まった割合', '実績が見通しの幅に収まった月は ' + (hit * 100).toFixed(0) + '% です（目安 80%）',
-      '見通しの幅（下振れ〜上振れ）は、10 回に 8 回は実績が収まるように作っています。80% より低いと幅が狭すぎ、高いと広すぎます（メーカーごとの月を合わせて ' + rn + ' か月分）']);
+    var hit = 1 - ro / rn, off = covOff(rn - ro, rn);
+    out.push([off ? 'warn' : 'ok', '幅に収まった割合', '実績が見通しの幅に収まった月は ' + (hit * 100).toFixed(0) + '% です（目安 80%）' + (off === 'low' ? '。幅が狭すぎるようです' : off === 'high' ? '。幅が広すぎるようです' : ''),
+      '見通しの幅（下振れ〜上振れ）は、10 回に 8 回は実績が収まるように作っています。80% より低いと幅が狭すぎ、高いと広すぎます（メーカーごとの月を合わせて ' + rn + ' か月分）。'
+      + '月が少ないうちは 80% から離れても偶然の範囲なので、4 か月以上比べて偶然では説明しにくい差のときだけ注意にします']);
   }
   if (both) {
-    var deep = plans.filter(function(p){ var k = skyKey(p); return k === 'kumori' || k === 'ame' || k === 'sekka'; }).length;
+    var deep = plans.filter(function(p){ var k = skyKey(p); return k === 'kumori' || k === 'ame'; }).length;
     out.push([below ? 'warn' : 'ok', '予算への着地', both + ' メーカーのうち ' + below + ' メーカーが、予算に届かない見込みです' + (below && deep && deep < below ? '（うち 10% 以上下回る ' + deep + '）' : ''),
-      '着地の推定が年間予算より小さいメーカーの数です（着地と予算の両方があるメーカーで数えます）。10% 以上下回るのは、空模様が曇り・雨・雪のメーカーです']);
+      '着地の推定が年間予算より小さいメーカーの数です（着地と予算の両方があるメーカーで数えます）。10% 以上下回るのは、空模様が曇り・雨のメーカーです（雪は、予算があるのに売上が 0 の月があるメーカー）']);
   }
   out.push([official === plans.length ? 'ok' : 'info', '予算の承認', '承認済みは ' + official + ' / ' + plans.length + ' メーカーです' + (offPend ? '（うち ' + offPend + ' は新しい版が承認待ち）' : ''),
     '年間予算が承認済みのメーカーの数です（新しい版が承認待ちのメーカーも、前の版が承認済みなら数えます。メーカーの画面では、新しい版が承認待ちのメーカーは「承認待ち」に数えます）' + (pending ? '\n承認待ちの版があるメーカー: ' + pending : '')]);
@@ -1773,10 +1817,14 @@ function yomiSays(h){
   var errs = plans.filter(function(p){ return (p.stepErrors || []).length; });
   // 手順が止まっている計画が 1 つなら、その計画の「進み」を開く（ボタンには名前を出さない）
   if (errs.length) add(3, 'warn', 'discover', n(errs) + 'で、手順が止まっています。予測の画面の「進み」で確かめてください。', '', errs.length === 1 ? ['進みを見る', "openPlan('" + esc(errs[0].planId) + "','steps')"] : mk);
-  var below = plans.filter(function(p){ var k = skyKey(p); return k === 'kumori' || k === 'ame' || k === 'sekka'; });
+  // 曇り・雨は予算を 10% 以上下回る見込み。雪（予算があるのに売上が 0 の月）は着地と予算の比では決めないので、別の文で言う
+  var below = plans.filter(function(p){ var k = skyKey(p); return k === 'kumori' || k === 'ame'; });
+  var snow = plans.filter(function(p){ return skyKey(p) === 'sekka'; });
   var short = plans.filter(function(p){ var b = planBudget(p); return isNum(b) && b > 0 && isNum(p.landing) && p.landing < b; }).length;
-  if (below.length) add(4, 'warn', 'discover', n(below) + 'が、予算を 10% 以上下回る見込みです（曇り・雨・雪）。',
-    ['kumori', 'ame', 'sekka'].map(function(k){ return skyName(k) + ' ' + below.filter(function(p){ return skyKey(p) === k; }).length + '（' + skyRule(k) + '）'; }).join('\n')
+  if (below.length || snow.length) add(4, 'warn', 'discover', (below.length ? n(below) + 'が、予算を 10% 以上下回る見込みです（' + (below.some(function(p){ return skyKey(p) === 'ame'; }) ? '曇り・雨' : '曇り') + '）。' : '')
+      + (snow.length ? n(snow) + 'は、予算があるのに売上が 0 の月があります（雪）。' : ''),
+    ['kumori', 'ame', 'sekka'].filter(function(k){ return below.concat(snow).some(function(p){ return skyKey(p) === k; }); })
+      .map(function(k){ return skyName(k) + ' ' + below.concat(snow).filter(function(p){ return skyKey(p) === k; }).length + '（' + skyRule(k) + '）'; }).join('\n')
       + (short > below.length ? '\n着地が予算に届かないメーカーは、ほかも含めて全部で ' + short + '（データからわかること）' : ''), mk);
   var items = homeSysItems(sys);
   if (items.length === 1) add(5, 'warn', 'explain', items[0][1] + '。', items[0][2], null, true);
@@ -2155,7 +2203,7 @@ function fcForecastTab(d, v){
   var ran = !!l || isNum(annual.p50) || ms.some(function(m){ return isNum(m.p50); });
   var cf = S.fc.confirm && S.fc.confirm.planId === S.fc.planId ? S.fc.confirm : null;
   var cfHtml = cf ? '<div class="card caution" role="alert"><div class="card-head"><h2 class="warn-text">' + esc(cf.title) + '</h2></div>'
-    + '<div class="pre">' + esc(plainMsg(cf.message)) + '</div>'
+    + '<div class="pre">' + esc(confirmText(cf.message)) + '</div>'
     + '<div class="card-foot"><button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="fcConfirmRun()">このまま実行</button>'
     + actBtn('<button class="btn btn-ghost" onclick="S.fc.confirm=null;render()">やめる</button>', '入力を直す場合は「やめる」を押し、「入力」タブで直してから実行します') + '</div></div>' : '';
   var sh = d.shadow && d.shadow.planId === S.fc.planId ? d.shadow : null, al = sh && sh.aligned;   // 試しの数（年度の見込み・予算に届く見込み。保存している数字は変えない）
@@ -2876,7 +2924,7 @@ function fcRvWeather(a){
   return '<div class="card"><div class="card-head"><h2>精度の天気' + tip('この計画の月の外れ幅（予測の中心と実績の差の平均）から決めた天気です。\n快晴 10% 未満・晴れのち曇り 15% 未満・曇り 20% 未満・雨 30% 未満・台風 30% 以上。\n見通しの幅に収まった割合が 80% より低いとき（荒れている）も台風です') + '</h2></div>'
     + '<div class="fc-wx"><span class="fc-wxch" role="img" aria-label="' + esc(skyName(key)) + '">' + (CHAR_SVG[key] || '') + '</span><div class="fc-wxnm" data-tip="' + esc(accRule(key) + (rough ? '\n見通しの幅に収まった割合が 80% より低く、荒れています（外れ幅 ' + pct0(a.mape) + '）' : '')) + '">' + esc(skyName(key)) + '</div>'
     + '<div class="fc-stats">' + stat('外れ幅', pct0(a.mape), '', '月の予測（中心）と実績の差の平均（' + a.n + ' か月）' + (a.trend ? '\n直近 ' + pct0(a.trend.recent) + '（その前 ' + pct0(a.trend.before) + '）' : ''))
-    + stat('幅に収まった割合', isNum(cov) ? Math.round(cov * 100) + '%' : '-', '目安 80%', '実績が 下振れ〜上振れ の幅に入った月の割合（' + (a.coverageN || 0) + ' か月）。80% より低いときは、幅が狭すぎます')
+    + stat('幅に収まった割合', isNum(cov) ? Math.round(cov * 100) + '%' : '-', '目安 80%', '実績が 下振れ〜上振れ の幅に入った月の割合（' + (a.coverageN || 0) + ' か月）。4 か月以上比べて、80% より偶然では説明しにくいほど低いときは、幅が狭すぎます')
     + stat('読みのクセ', lean, isNum(b) ? pct1(b) : '', isNum(b) ? (b > 0 ? '予測が実績より高め（強気）です。' : '予測が実績より低め（弱気）です。') + '新しい月ほど重く数えています' : '') + '</div></div></div>';
 }
 /** 精度の推移（月ごとの外れの折れ線。表で見る = 月ごとの 下振れ・中心・上振れ と実績） */
