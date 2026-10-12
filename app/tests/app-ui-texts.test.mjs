@@ -992,6 +992,11 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   assert.match(snowSay, /1 メーカーは、予算があるのに売上が 0 の月があります（雪）/);
   assert.doesNotMatch(snowSay, /10% 以上下回る/);
   assert.match(says([{ planId: 'K', clientName: '曇りの製薬', fy: '2026', sky: 'kumori', budget: 600, landing: 500 }]), /1 メーカーが、予算を 10% 以上下回る見込みです（曇り）/);
+  // 元に戻せない承認（公式版の承認・却下、見直し案の承認して反映）は、確かめる画面で「やめる」を先に選んでおく
+  run(`globalThis.__asks = []; ask = function(m, l, f, d){ __asks.push([l, !!d]); };
+    S.fc.ver = { planId: 'P', pending: { no: 3, versionId: 'V', rowVersion: 1 } }; verDecide('APPROVED');`);
+  assert.equal(JSON.stringify(run('__asks')), JSON.stringify([['承認する', true]]));
+  assert.match(uiHtml, /ask\(msg, '承認して反映', function\(\)\{[^\n]*\}, true\);/, '承認して反映も「やめる」が先');
 }
 
 console.log('app-ui-texts: all tests passed');

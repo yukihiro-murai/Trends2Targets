@@ -531,6 +531,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .tabs{gap:var(--s2)}   /* 予測の 6 つのタブが 358px に入る */
   .toast{bottom:calc(var(--bnav-h) + 16px)}
 }
+/* 幅 400px 以下のスマホ（375・360px）: 下のメニューの 5 つは同じ幅で画面に収め（「学び」が右で切れない）、予測の 6 つのタブは間を詰めて「進み」まで見せる */
+@media (max-width:400px){
+  .sidenav{grid-auto-columns:minmax(0,1fr)}
+  .navbtn{min-width:0;padding:0 2px}
+  .tabs{gap:var(--s1)}
+  .tab{padding-left:1px;padding-right:1px}
+}
 </style>
 </head>
 <body>
@@ -595,7 +602,7 @@ function actBtn(btnHtml, text){ return '<span class="act"' + (text ? ' data-tip=
   window.addEventListener('scroll', hide, true);
 })();
 /** 説明（data-tip）の付いた数字・文・見出しを、キーボードでも選べるようにする（描いた後に呼ぶ。グラフの中・ボタン・欄はそのまま） */
-var TIP_FOCUS = '.kpi[data-tip],.todo [data-tip],.hm-lrbox[data-tip],.hm-lrt[data-tip],.anbh[data-tip],.anx[data-tip],.meta[data-tip],.fc-say[data-tip],.fc-wxnm[data-tip],.fc-stats [data-tip],.bubble [data-tip],th[data-tip],.lr-err[data-tip],.chip[data-tip],.skycell[data-tip]';
+var TIP_FOCUS = '.kpi[data-tip],.todo [data-tip],.hm-lrbox[data-tip],.hm-lrt[data-tip],.anbh[data-tip],.anx[data-tip],.meta[data-tip],.fc-say[data-tip],.fc-wxnm[data-tip],.fc-stats [data-tip],.bubble [data-tip],th[data-tip],td[data-tip],.fc-src[data-tip],.lr-err[data-tip],.chip[data-tip],.skycell[data-tip]';
 function tipFocus(root){
   root = root || document;
   if (!root || !root.querySelectorAll) return;
@@ -618,15 +625,24 @@ function tipFocus(root){
  */
 var ASK = null;
 function ask(msg, okLabel, onOk, danger){
-  ASK = { ok: onOk };
+  ASK = { ok: onOk, back: document.activeElement || null };   // 閉じたら、押したボタンへ戻す
   var w = $('askwrap');
   w.innerHTML = '<div class="card" role="dialog" aria-modal="true" aria-label="確認"><div class="guide"><div class="charbox">' + YOMI_POSE[danger ? 'discover' : 'explain'] + '</div><div class="bubble">' + esc(msg) + '</div></div>'
     + '<div class="card-foot"><button class="btn" id="askOk" onclick="askDone(true)">' + esc(okLabel || 'はい') + '</button><button class="btn btn-ghost" id="askNo" onclick="askDone(false)">やめる</button></div></div>';
   w.classList.add('on');
   var f = $(danger ? 'askNo' : 'askOk'); if (f && f.focus) f.focus();
 }
-function askDone(yes){ var a = ASK; ASK = null; var w = $('askwrap'); w.classList.remove('on'); w.innerHTML = ''; if (yes && a && a.ok) a.ok(); }
-document.addEventListener('keydown', function(e){ if (ASK && e.key === 'Escape') askDone(false); });
+function askDone(yes){
+  var a = ASK; ASK = null; var w = $('askwrap'); w.classList.remove('on'); w.innerHTML = '';
+  if (a && a.back && a.back.focus && a.back.isConnected !== false) { try { a.back.focus(); } catch (e) { /* 描き直しで無くなった */ } }
+  if (yes && a && a.ok) a.ok();
+}
+// Esc で閉じる。Tab は確かめる画面の 2 つのボタンの間だけを動く（後ろの画面へ抜けない）
+document.addEventListener('keydown', function(e){
+  if (!ASK) return;
+  if (e.key === 'Escape') { askDone(false); return; }
+  if (e.key === 'Tab') { var o = $('askOk'), n = $('askNo'); if (o && n && o.focus) { e.preventDefault(); (document.activeElement === o ? n : o).focus(); } }
+});
 function errorBanner(){
   if (!S.lastError) return '';
   return '<div class="card alert" role="alert"><div class="card-head"><h2 class="err-text">エラー（' + esc(S.lastError.at) + '）</h2>'
@@ -803,7 +819,34 @@ function viewTitle(head){
 }
 /** 画面の中のタブ（下線）。list: [[key, 名前]]、onclick: 押したときに呼ぶ関数の名前（key を渡す） */
 function subTabs(list, cur, onclick){ return '<div class="tabs" role="tablist">' + list.map(function(t){ return '<button class="tab' + (cur === t[0] ? ' on' : '') + '" role="tab" aria-selected="' + (cur === t[0]) + '" onclick="' + onclick + '(\'' + t[0] + '\')">' + t[1] + '</button>'; }).join('') + '</div>'; }
+/**
+ * 描き直す前に、キーボードで選んでいた欄・ボタン（メニューと画面の中）を控え、描き直した後に同じもの（同じ種類・同じ操作・同じ名前）を選び直す。
+ * 打っていた欄は、カーソルの位置も戻す。画面を切り替えたときは、画面の題（#vh）を選ぶ（読み上げとキーボードが画面の先頭から始まる）
+ */
+function focusKey(el){
+  if (!el || !el.getAttribute || !el.tagName) return '';
+  return [el.tagName, el.id || '', el.getAttribute('onclick') || '', el.getAttribute('oninput') || '', el.getAttribute('onchange') || '', el.getAttribute('aria-label') || ''].join('|');
+}
+function focusSave(){
+  try {
+    var a = document.activeElement, root = a && a.closest ? a.closest('#main,#nav') : null;
+    if (!root) return null;
+    return { key: focusKey(a), tag: a.tagName, root: root.id, view: S.view, s: typeof a.selectionStart === 'number' ? a.selectionStart : null, e: typeof a.selectionEnd === 'number' ? a.selectionEnd : null };
+  } catch (e) { return null; }
+}
+function focusRestore(f){
+  if (!f) return;
+  try {
+    var root = $(f.root), list = root && root.querySelectorAll ? root.querySelectorAll(f.tag) : [], hit = null;
+    for (var i = 0; i < list.length && !hit; i++) if (focusKey(list[i]) === f.key) hit = list[i];
+    if (!hit && f.view !== S.view && f.root === 'nav') hit = $('vh');
+    if (!hit || !hit.focus) return;
+    hit.focus({ preventScroll: true });
+    if (f.s !== null && hit.setSelectionRange && typeof hit.value === 'string') hit.setSelectionRange(Math.min(f.s, hit.value.length), Math.min(f.e, hit.value.length));
+  } catch (e) { /* 選び直せなくても描き直しは続ける */ }
+}
 function render(){
+  var fk = focusSave();
   $('hdrUser').innerHTML = B.user && B.user.email ? '<b>' + esc(B.user.email.split('@')[0]) + '</b>' : '';
   $('hdrVer').textContent = B.user && B.user.isAdmin && B.app ? 'v' + B.app.version : '';
   var nav = navItems();
@@ -822,6 +865,7 @@ function render(){
     if (r.right > pr.right) tb.scrollLeft += r.right - pr.right + 8; else if (r.left < pr.left) tb.scrollLeft -= pr.left - r.left + 8;
   }
   if (S.jobScroll) { S.jobScroll = false; jobBoxIntoView(); }
+  focusRestore(fk);
 }
 /** 裏で動いている処理の進み（画面の上にも出す） */
 function jobBanner(){
@@ -2750,6 +2794,7 @@ function fcInputTab(d, v){
   var cellHtml = function(c, r, i){ return histHtml(c, r, cellIn(c, r, i), !canPlan); };
   var cellIn = function(c, r, i){
     var val = r[c[0]] === null || r[c[0]] === undefined ? '' : r[c[0]], on = 'onchange="fcInput(' + i + ',\'' + c[0] + '\',this.value)" aria-label="' + esc(c[1]) + '"';
+    var typed = 'oninput="fcInputType(' + i + ',\'' + c[0] + '\',this.value)" aria-label="' + esc(c[1]) + '"';   // 文字・数の欄は打つたびに控える
     if (!canPlan) return esc(c[2] === 'month' ? String(val).replace('-', '/') : val);
     if (c[2] === 'people') return '<select class="inp cell" ' + on + '>' + opts(withCur(boot.setup.people, val), val) + '</select>';
     if (c[2] === 'products') return '<select class="inp cell" ' + on + '>' + opts(withCur(boot.products, val), val) + '</select>';
@@ -2757,7 +2802,7 @@ function fcInputTab(d, v){
     if (c[2] === 'step') return '<select class="inp cell" ' + on + '>' + opts(withCur(boot.stepOptions, val), val) + '</select>';
     if (c[2] === 'selfconf') return '<select class="inp cell" ' + on + '>' + opts(FC_CONF_LEVELS, val) + '</select>';
     var num = c[2] === 'conf' || c[2] === 'money';
-    return '<input class="inp cell' + (num ? ' num' : '') + '" type="' + (num ? 'number' : 'text') + '"' + (c[2] === 'conf' ? ' min="0" max="1" step="0.1"' : c[2] === 'money' ? ' step="10000"' : '') + ' value="' + esc(val) + '" ' + on + '>';
+    return '<input class="inp cell' + (num ? ' num' : '') + '" type="' + (num ? 'number' : 'text') + '"' + (c[2] === 'conf' ? ' min="0" max="1" step="0.1"' : c[2] === 'money' ? ' step="10000"' : '') + ' value="' + esc(val) + '" ' + typed + '>';
   };
   var html = '<div class="tabs sub">' + INPUT_KINDS.map(function(k){ return '<button class="tab' + (kind === k[0] ? ' on' : '') + '" onclick="S.fc.inputKind=\'' + k[0] + '\';render()">' + k[1] + (S.fc.inputDirty[k[0]] ? ' ●' : '') + '</button>'; }).join('') + '</div>';
   html += '<div class="card"><h2>' + esc((INPUT_KINDS.filter(function(k){ return k[0] === kind; })[0] || ['', ''])[1]) + 'の入力' + (canPlan ? '' : tip('入力は予算策定担当ができます。')) + '</h2><div class="tblwrap"><table class="tbl scroll fc-in' + (canPlan ? ' edit' : '') + '" style="--inw:' + inw + 'px"><colgroup>' + cols.map(function(c){ return '<col' + (c[3] ? ' style="width:' + c[3] + 'px"' : '') + '>'; }).join('') + (canPlan ? '<col style="width:152px">' : '') + '</colgroup>'
@@ -2804,6 +2849,19 @@ function fcDraftOk(kind, rows){
   return !!pid && rows.planId === pid && (!f.planId || f.planId === pid) && rows.src === fcInputSrc(kind);
 }
 function fcInput(i, k, val){ fcDraft(S.fc.inputKind)[i][k] = val; if (!S.fc.inputDirty[S.fc.inputKind]) { S.fc.inputDirty[S.fc.inputKind] = true; render(); } }
+/**
+ * 文字・数の欄（理由・補足・案件名・確度・金額）は、打つたびに入力中の値へ控える（読み込みや処理の終わりで描き直しても、打ちかけの文字を消さない）。
+ * 描き直すと打っている欄から外れるので、描き直さずに、保存のボタン・未保存の印・種類のタブの ● だけを付ける（人の記入の欄と同じ）
+ */
+function fcInputType(i, k, val){
+  var kind = S.fc.inputKind;
+  fcDraft(kind)[i][k] = val;
+  if (S.fc.inputDirty[kind]) return;
+  S.fc.inputDirty[kind] = true;
+  fcMarkDirty('fcSaveInput()');
+  var t = document.querySelector('#main .tabs.sub .tab.on');
+  if (t && !/●$/.test(t.textContent || '')) t.textContent = (t.textContent || '') + ' ●';
+}
 function fcInputAdd(){ fcDraft(S.fc.inputKind).push({}); S.fc.inputDirty[S.fc.inputKind] = true; render(); }
 function fcInputDel(i){ fcDraft(S.fc.inputKind).splice(i, 1); S.fc.inputDirty[S.fc.inputKind] = true; render(); }
 /**
@@ -3046,7 +3104,7 @@ function fcRvGo(){
       + (ng || hold ? (ng ? '却下 ' + ng + ' 件' : '') + (ng && hold ? '・' : '') + (hold ? '保留 ' + hold + ' 件' : '') + 'は反映しません。' : '')
       + '\n判断を保存してから反映します（3〜6 分ほど）。反映した補正は、次の予測から効きます。';
   var planId = S.fc.planId;
-  ask(msg, '承認して反映', function(){ rvChainSet({ planId: planId, at: Date.now() }); fcEdit('REVIEW.DECIDE', { rows: rows }); });
+  ask(msg, '承認して反映', function(){ rvChainSet({ planId: planId, at: Date.now() }); fcEdit('REVIEW.DECIDE', { rows: rows }); }, true);   // 元に戻せないので「やめる」を先に
 }
 /**
  * 承認して反映の続き（判断の保存が終わったら反映を始める）。画面を読み直しても続けられるよう、このタブの sessionStorage にも控える。
@@ -3079,7 +3137,8 @@ function rvChainGet(planId){
 
 // ---- 公式版（確定した予測と予算）と承認 ----
 var VER_STATE = { SUBMITTED: ['承認待ち', 'warn'], APPROVED: ['承認済み', 'ok'], REJECTED: ['却下', 'ng'], SUPERSEDED: ['置き換え済み', 'off'], WITHDRAWN: ['取り下げ', 'off'] };
-function verChip(st){ var x = VER_STATE[st] || ['-', 'off']; return '<span class="chip ' + x[1] + '">' + x[0] + '</span>'; }
+/** 版の状態の札。表の状態の列（col: true）は、ほかの表の状態の列と同じ幅（.chip.st）にそろえる */
+function verChip(st, col){ var x = VER_STATE[st] || ['-', 'off']; return '<span class="chip ' + (col ? 'st ' : '') + x[1] + '">' + x[0] + '</span>'; }
 function fcLoadVersions(){ var id = S.fc.planId; S.fc.ver = null; load('fcVer', function(ok, fail){ call('apiVersionList', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.ver = r; }); }
 function verWho(email, at){ return email ? esc(fcWho(email)) + '<div class="note">' + esc(fcDate(at, true).slice(5)) + '</div>' : '-'; }
 function verDiff(a, b){ return !isNum(a) || !isNum(b) ? '-' : (a - b > 0 ? '+' : '') + yen(a - b); }
@@ -3197,7 +3256,7 @@ function fcVersionTab(d, v){
   // 版の一覧
   html += '<div class="card"><h2>版の一覧</h2>' + (r.versions.length ? '<div class="tblwrap"><table class="tbl fc-vers"><colgroup><col style="width:56px"><col style="width:120px"><col style="width:128px"><col style="width:128px"><col style="width:112px"><col style="width:112px"><col><col style="width:152px"></colgroup>'
     + '<thead><tr><th>版</th><th>状態</th><th class="num" data-tip="最終予算の年度合計。下の段は、出したときにこの最終予算に届く見込み（前の版には無い）">最終予算</th>' + qTh('p50') + '<th>出した人</th><th>判断した人</th><th class="colmin" style="--colmin:64px">メモ</th><th></th></tr></thead><tbody>'
-    + r.versions.map(function(x){ return '<tr><td>v' + x.no + '</td><td>' + verChip(x.state) + '</td><td class="num">' + yen(x.budget.final) + verReachCell(x) + '</td><td class="num"' + (verMidTip(x) ? ' data-tip="' + esc(verMidTip(x)) + '"' : '') + '>' + yen(verMid(x)) + '</td><td>' + verWho(x.submittedBy, x.submittedAt) + '</td><td>' + verWho(x.decidedBy, x.decidedAt) + '</td>'
+    + r.versions.map(function(x){ return '<tr><td>v' + x.no + '</td><td>' + verChip(x.state, true) + '</td><td class="num">' + yen(x.budget.final) + verReachCell(x) + '</td><td class="num"' + (verMidTip(x) ? ' data-tip="' + esc(verMidTip(x)) + '"' : '') + '>' + yen(verMid(x)) + '</td><td>' + verWho(x.submittedBy, x.submittedAt) + '</td><td>' + verWho(x.decidedBy, x.decidedAt) + '</td>'
       + '<td data-tip="' + esc((x.note || '') + (x.decisionNote ? ' / ' + x.decisionNote : '')) + '">' + esc(x.note || '') + (x.decisionNote ? '<div class="note">' + esc(x.decisionNote) + '</div>' : '') + '</td>'
       + '<td><button class="btn btn-ghost btn-sm" data-tip="この版と今の数字を、月ごとに比べます" onclick="S.fc.verCmp=\'' + esc(x.versionId) + '\';render()">今と比べる</button></td></tr>'; }).join('')
     + '</tbody></table></div>' : '<p class="note">まだ版がありません。</p>') + '</div>';
@@ -3230,7 +3289,7 @@ function verDecide(decision){
   if (hint) hint.textContent = '';
   ask('v' + p.no + ' を' + (decision === 'APPROVED' ? '承認' : '却下') + 'しますか？', decision === 'APPROVED' ? '承認する' : '却下する', function(){
     call('apiVersionDecide', [{ versionId: p.versionId, decision: decision, note: note, rowVersion: p.rowVersion }], function(x){ toast('v' + x.version.no + ' を' + (decision === 'APPROVED' ? '公式版にしました' : '却下しました')); crossStale(); fcLoadVersions(); });
-  }, decision === 'REJECTED');
+  }, true);   // 承認も却下も元に戻せない（開き直す操作は無い）ので「やめる」を先に
 }
 // ---- 進み（手順を実行する順に・動詞で。旧来の番号は出さない。指標の更新は出さない） ----
 var STEP_NAMES = { step1_status: '売上を取り込む', step1a_status: '月ごとに集計する', step2_status: '実績を取り込む', step3_status: '市場を調べる', step3a_status: '市場を詳しく調べる',

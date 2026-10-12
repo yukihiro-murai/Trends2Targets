@@ -95,7 +95,7 @@ const run = (code, vars) => { Object.assign(ui, vars || {}); return vm.runInCont
 flush();   // 起動のときのホームの読み込み
 timers.length = 0;
 /** 入力の表の、理由の欄の値（行の順） */
-const reasons = (html) => [...html.matchAll(/<input class="inp cell" type="text" value="([^"]*)" onchange="fcInput\(\d+,'reason'/g)].map((m) => m[1]);
+const reasons = (html) => [...html.matchAll(/<input class="inp cell" type="text" value="([^"]*)" oninput="fcInputType\(\d+,'reason'/g)].map((m) => m[1]);
 const grid = () => run(`S.fc.inputKind = 'product'; viewForecast()`);
 const lastStart = () => started[started.length - 1];
 
@@ -220,6 +220,19 @@ assert.equal(run('S.fc.inputDirty.product'), undefined, '保存した種類の�
   s = lastStart();
   assert.ok(!('fromRow' in s.payload.args.rows[0]), '空にした行には付けない: ' + JSON.stringify(s.payload.args.rows[0]));
   assert.equal(s.payload.args.rows[1].fromRow, 1, 'ほかの行はそのまま');
+  finishJobs();
+}
+
+// ==== 6. 文字の欄は打つたびに控える: 描き直しても（読み込みの終わりなど）打ちかけの文字が残り、保存できる（2026-10-13） ====
+{
+  run(`openPlan('${X}', 'input')`); flush();
+  const before = reasons(grid());
+  run(`fcInputType(0, 'reason', '打ちかけの理由')`);
+  assert.equal(run('S.fc.inputDirty.product'), true, '打ったら未保存の印（描き直さずに付ける）');
+  assert.equal(reasons(grid())[0], '打ちかけの理由', '描き直しても打ちかけの文字が残る（前は欄を離れるまで控えなかった）');
+  assert.equal(reasons(grid())[1], before[1]);
+  run('fcSaveInput()'); flush();
+  assert.equal(lastStart().payload.args.rows[0].reason, '打ちかけの理由');
   finishJobs();
 }
 
