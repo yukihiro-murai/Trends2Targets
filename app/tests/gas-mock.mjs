@@ -498,6 +498,7 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
     },
     Utilities: {
       getUuid: () => (++state.uuid).toString(16).padStart(8, '0') + '-0000-4000-8000-000000000000',
+      sleep: () => {},   // 待たない（待ちの長さを確かめるテストは、待つ関数そのものを差し替える）
       formatDate: fmtDate,
       DigestAlgorithm: { SHA_256: 'sha256', MD5: 'md5', SHA_1: 'sha1' }, Charset: { UTF_8: 'utf8' },
       base64Encode: (b) => Buffer.from(typeof b === 'string' ? b : b.map((x) => x & 255)).toString('base64'),

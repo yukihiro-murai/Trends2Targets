@@ -54,4 +54,34 @@ assert.equal(ng.status, 'FAILED');
 assert.match(ng.error, /Vertex調査に失敗しました/);
 assert.match(ng.error, /問い合わせの失敗（\d+ 件）/);
 assert.match(ng.error, /gemini-test:generateContent → 403 PERMISSION_DENIED Permission denied on resource project/);
+// 一時的な失敗（429・5xx・通信の例外）は、待ってから同じ問い合わせをし直す（2 回まで・区切りを過ぎない範囲）。話題を欠かさずに終える
+env.run(`(() => {
+  globalThis.__calls = []; globalThis.__waits = []; globalThis.__seen = {};
+  const gemini = (text) => JSON.stringify({ candidates: [{ content: { parts: [{ text }] }, groundingMetadata: { groundingChunks: [{ web: { uri: 'https://example.com/a', title: 'a' } }] } }],
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
+  globalThis.UrlFetchApp = { fetch: (u, o) => {
+    __calls.push(u);
+    const key = u + '|' + o.payload, n = (__seen[key] = (__seen[key] || 0) + 1);
+    if (n === 1) return { getResponseCode: () => 429, getContentText: () => JSON.stringify({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'busy' } }) };
+    if (n === 2 && /generateContent/.test(u) && JSON.parse(o.payload).generationConfig && JSON.parse(o.payload).generationConfig.responseMimeType) throw new Error('Address unavailable');
+    const structured = !!(JSON.parse(o.payload).generationConfig && JSON.parse(o.payload).generationConfig.responseMimeType);
+    return { getResponseCode: () => 200, getContentText: () => gemini(structured ? JSON.stringify({ rows: [] }) : '市場は横ばい。（し直し）') };
+  } };
+  appAiWait_ = (ms) => { __waits.push(ms); };
+  appAiDeadline_ = (t0) => t0 + 600000;
+})()`);
+const rt = env.runJob('PLAN.RUN', { planId, action: 'AI.RESEARCH' });
+assert.equal(rt.status, 'DONE', rt.error);
+const waits = env.run('__waits');
+assert.ok(waits.length >= 8 && waits.every((w) => w === 2000 || w === 6000), '429 のたびに 2 秒、続けて失敗したら 6 秒待ってし直す: ' + JSON.stringify(waits));
+assert.ok(waits.includes(6000), '通信の例外も一時的な失敗として、もう一度待ってし直す');
+assert.equal(env.table('ENG_AI_RESEARCH_STRUCTURED').filter((r) => r.plan_id === planId).length, 4, 'し直して、4 つの話題を欠かさずに残す');
+const lastCalc = env.audit().filter((a) => a.action === 'PLAN.AI.RESEARCH.CALC' && a.phase === 'END').pop();
+assert.ok(JSON.parse(lastCalc.after_json).aiCalls.retries > 0, 'し直した回数を実行の記録に残す');
+// 待つと区切りを過ぎるときは、し直さない（今までどおり失敗の答えを返して先へ進む）
+env.run(`(() => { globalThis.__waits = []; globalThis.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 503, getContentText: () => 'unavailable' }) };
+  appAiDeadline_ = (t0) => t0 + 1000; })()`);
+const late = env.runJob('PLAN.RUN', { planId, action: 'AI.RESEARCH' });
+assert.equal(late.status, 'FAILED');
+assert.equal(env.run('__waits.length'), 0, '区切りまで 2 秒も無ければ待たない');
 console.log('app-ai: all tests passed');
