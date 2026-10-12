@@ -290,6 +290,7 @@ function legacySpec() {
   env.fireTriggers('triggerRunJob');
   // 未定義の処理・見つからない処理
   assert.throws(() => env.call(`apiStartJob({ kind: 'NOPE' })`), /未定義の処理/);
+  for (const k of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) assert.throws(() => env.call(`apiStartJob({ kind: '${k}' })`), /未定義の処理/, k);
   assert.throws(() => env.call(`apiJobStatus({ jobId: 'JOB-none' })`), /見つかりません/);
   // 失敗はエラーの文言を返し、エラーのログにも残す
   assert.match(jobError('PLAN.CREATE', {}), /メーカーを選んでください/);

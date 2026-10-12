@@ -609,11 +609,14 @@ function appPlanRunSave_(ctx, p, job) {
 }
 
 /**
- * 画面から渡された保存の中身を確かめる。Sheets は「=」（と、「+」「-」の後に英字や括弧が続くもの）で始まる文字を数式として動かすので、
- * 計算用ブックで所有者の権限のまま外部を読む数式（IMPORTXML など）が動かないよう、受け付けない
+ * 画面から渡された保存の中身を確かめる。Sheets は「=」（と、「+」「-」の後が式として読めるもの）で始まる文字を数式として動かすので、
+ * 計算用ブックで所有者の権限のまま外部を読む数式（IMPORTXML など）が動かないよう、受け付けない。
+ * 「+」「-」で始まる文は、すぐ後が英字・括弧・@・記号（+ - " ' {）のもの（「--IMPORTXML(…)」「+"a"&…」「+{…}」も）と、
+ * どこかに関数の呼び出し（英字のすぐ後の「(」。「+1+IMPORTXML(…)」）があるものを止める。数・増減率・「- 前年の反動（=見込み）」のような文は通す
  */
 function appPlanCheckArgs_(args) {
-  const bad = v => typeof v === 'string' && (/^\s*=/.test(v) || /^\s*[+\-]\s*[A-Za-z_$(@]/.test(v));
+  const bad = v => typeof v === 'string' && (/^\s*=/.test(v)
+    || (/^\s*[+\-]/.test(v) && (/^\s*[+\-]\s*[A-Za-z_$(@+\-"'{]/.test(v) || /[A-Za-z_][A-Za-z0-9_.]*\s*\(/.test(v))));
   const walk = v => {
     if (Array.isArray(v)) { v.forEach(walk); return; }
     if (v && typeof v === 'object') { Object.keys(v).forEach(k => walk(v[k])); return; }
