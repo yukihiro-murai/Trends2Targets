@@ -1,0 +1,8 @@
+{
+  "name": "trends2targets",
+  "private": true,
+  "description": "Trends2Targets 売上予測と予算策定（Apps Script。依存パッケージなし。テストはローカルの GAS の模擬）",
+  "scripts": {
+    "test": "node app/tools/run-tests.mjs"
+  }
+}

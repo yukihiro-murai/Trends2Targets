@@ -437,53 +437,19 @@ Trends2Targets_System/
 
 ## 確かめ方と反映
 
-```bash
-node app/tests/app-contract.test.mjs
-```
+テストは全部（`app/tests/*.test.mjs` と旧来の計算の `tests/*.test.mjs`）を 1 つのコマンドで動かします。1 本ずつ別の node で並べて動かし、止まったテストは出力の終わりを見せます（どれか止まれば終了コード 1）。
 
 ```bash
-node app/tests/app-codec.test.mjs
+node app/tools/run-tests.mjs
 ```
 
-```bash
-node app/tests/app-engine.test.mjs
-```
+ファイル名の一部で絞れます（例: 版 11 と着地見込みのテストだけ）。
 
 ```bash
-node app/tests/app-forecast.test.mjs
+node app/tools/run-tests.mjs v11 landing
 ```
 
-```bash
-node app/tests/app-plan.test.mjs
-```
-
-```bash
-node app/tests/app-pipeline.test.mjs
-node app/tests/app-ai.test.mjs
-node app/tests/app-portfolio.test.mjs
-node app/tests/app-versions.test.mjs
-node app/tests/app-admin.test.mjs
-node app/tests/app-basis.test.mjs
-node app/tests/app-plan-privacy.test.mjs
-node app/tests/app-learning.test.mjs
-node app/tests/app-maintenance.test.mjs
-node app/tests/app-readiness.test.mjs
-node app/tests/app-year-snapshot.test.mjs
-node app/tests/app-year-close.test.mjs
-node app/tests/app-owner-task.test.mjs
-node app/tests/app-calibration.test.mjs
-node app/tests/app-ui-texts.test.mjs
-node app/tests/app-forecast-seed.test.mjs
-node app/tests/app-reach.test.mjs
-node app/tests/app-eval-columns.test.mjs
-node app/tests/app-v10-base.test.mjs
-node app/tests/app-v10-migrate.test.mjs
-node app/tests/app-v10-append.test.mjs
-node app/tests/app-v10-hits.test.mjs
-node app/tests/app-v10-fix2-srv.test.mjs
-node app/tests/app-v10-fix3-srv.test.mjs
-node app/tests/app-ui-v10-fix3.test.mjs
-```
+1 本だけなら `node app/tests/app-contract.test.mjs` のように直接動かせます。新しいテストは `app/tests/` に `*.test.mjs` で置けば、一覧に足さなくても入ります。
 
 GAS のモック（`app/tests/gas-mock.mjs`）の上での契約テストです（GAS 上での動作確認の代わりではありません）。反映は `app/` の中で行います（ルートの `.clasp.json` を拾わないよう `-P .` を付ける）。
 

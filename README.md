@@ -10,7 +10,7 @@
 |---|---|
 | `app/` | Trends2Targets（Apps Script の Web アプリ。`app/.clasp.json`） |
 | `Forecast_Agent.js`・`Forecast_WebApp.js` | 計算の元。`app/src/LegacyEngine.js` にそのまま包んで使う（変えたら `node app/tools/build-engine.mjs`） |
-| `tests/` | 計算の元のテスト（`node tests/forecast-autolearn.test.mjs` など） |
+| `tests/` | 計算の元のテスト。新アプリのテスト（`app/tests/`）と合わせて `node app/tools/run-tests.mjs`（または `npm test`）で全部動く |
 | `assets/`・`characters.config.json` | 案内役のキャラの素材（`app/src/Assets.js` の元） |
 | `DESIGN_RECOMMENDATION_JA.md` ほか `DESIGN_*.md` | 計算の設計（三角測量・学習・横断プール）と、データ基盤の設計（`DESIGN_data_platform_JA.md`） |
 | `archive/` | 使わなくなったものの写し（消さずに残す） |
