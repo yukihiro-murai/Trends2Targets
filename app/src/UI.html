@@ -21,6 +21,8 @@
   --navy:#0F3557; --navy-2:#0B2A47; --text:#22374C; --muted:#52687D;
   --primary:#00A0E9; --primary-dark:#0F5788; --primary-soft:#E5F6FD; --primary-soft-2:#F2FAFE; --primary-line:#9AD8F4;
   --line:#D9E4EE; --line-soft:#E8EFF6; --line-strong:#C8D7E5; --soft:#E8F1F8; --gray:#EDF1F5;
+  /* 入力欄と枠のボタン（btn-ghost）の枠: 部品の境目は地の色と 3:1 以上（白 3.46・画面の地 3.22・水色の吹き出し 3.12・エラーのカード 3.08）。ほかの線（表・カード・押せない部品）は --line のまま */
+  --line-ctl:#788CA1; --line-ctl-hover:#52687D;
   --ok-bg:#E5F6FD; --ok-fg:#0F5788; --warn-bg:#FFF4E2; --warn-fg:#8A5300; --error:#9E3A2E; --error-bg:#FBEFED; --focus:#0A84C1;
   /* グラフの色: 予算を上回る＝暖色・予算ぐらい＝灰・予算を下回る＝寒色（ほかは 1 色。色だけに頼らず、名前・説明・表も付ける） */
   --warm:#D9622B; --neutral:#8A97A5; --cool:#0F5788; --grid:var(--line);
@@ -129,8 +131,9 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 .btn:hover:not(:disabled){background:var(--navy-2);box-shadow:0 4px 12px rgba(15,53,87,.18)}
 .btn:active:not(:disabled){transform:scale(.98)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
-.btn-ghost{background:#fff;color:var(--navy);border:1.5px solid var(--line-strong)}
-.btn-ghost:hover:not(:disabled){background:var(--primary-soft-2);border-color:var(--primary-line);box-shadow:none}
+.btn-ghost{background:#fff;color:var(--navy);border:1.5px solid var(--line-ctl)}
+.btn-ghost:hover:not(:disabled){background:var(--primary-soft-2);border-color:var(--primary);box-shadow:none}
+.btn-ghost:disabled{border-color:var(--line-strong)}   /* 押せないボタンの見た目は今までどおり（淡い枠を半分の濃さで） */
 /* ボタンの幅は 格子の 1 マス 160px（8 字まで）。表の中・ホームの一覧の小さいボタンは 128px（6 字まで）。並んだボタンの頭が格子にそろう */
 .btn-sm{height:var(--h-btn-sm);min-width:var(--w-btn-sm);padding:0 12px;font-size:var(--fs-m)}
 .btn-icon{height:var(--h-btn-sm);width:var(--h-btn-sm);min-width:0;padding:0;font-size:18px;line-height:1}
@@ -154,8 +157,8 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 .row.nowrap{flex-wrap:nowrap}
 .field{display:flex;flex-direction:column;gap:var(--s1)}
 .field label{font-size:var(--fs-s);color:var(--muted)}
-.inp{height:var(--h-input);padding:0 14px;border:1.5px solid var(--line);border-radius:var(--radius-s);width:var(--w-inp);max-width:100%;background:#fff;font-size:var(--fs-b);transition:border-color var(--ease),box-shadow var(--ease)}   /* 狭い画面では、欄が枠からはみ出さない */
-.inp:hover{border-color:var(--line-strong)}
+.inp{height:var(--h-input);padding:0 14px;border:1.5px solid var(--line-ctl);border-radius:var(--radius-s);width:var(--w-inp);max-width:100%;background:#fff;font-size:var(--fs-b);transition:border-color var(--ease),box-shadow var(--ease)}   /* 狭い画面では、欄が枠からはみ出さない */
+.inp:hover{border-color:var(--line-ctl-hover)}
 .inp:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(0,160,233,.16)}
 .inp:focus-visible{outline:2px solid var(--focus);outline-offset:2px}   /* キーボードで選んだときは、ボタンと同じ濃い線 */
 .inp::placeholder{color:#6E7F91}
