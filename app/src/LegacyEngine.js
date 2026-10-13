@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.4.0-dev、SHA-256 6a19638d0a20258ea8271db654e30769704239a8c243712563250d4a2a76cae5）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.4.0-dev、SHA-256 52591cd515942346426ec8ccb600bb675fa7301393eac1ee05bd7012e7366315）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -5527,6 +5527,7 @@ function writeAIResearchSummaryView_(ss, client, asOf, structuredRows, aiScores)
       sh.getRange(row, 1).setValue(topic).setFontWeight('bold').setBackground('#f3f3f3');
       const reportCell = sh.getRange(row, 2, 1, viewCols - 1);
       reportCell.merge();
+      if (isFormulaLikeText_(topicSummary[topic].report)) reportCell.setNumberFormat('@');   // AI の要約文が = + - @ で始まっても数式にしない
       reportCell.setValue(topicSummary[topic].report || '').setWrap(true).setVerticalAlignment('top');
       sh.setRowHeight(row, topicSummary[topic].report ? 90 : 36);
       row++;
@@ -5562,7 +5563,7 @@ function writeAIResearchSummaryView_(ss, client, asOf, structuredRows, aiScores)
     sh.getRange(row, 1).setValue('（明細なし）');
   } else {
     const detailRows = rows.map(r => buildAIResearchDetailSummaryRow_(r));
-    sh.getRange(row, 1, detailRows.length, detailHeaders.length).setValues(detailRows);
+    setAiTextValues_(sh, row, 1, detailRows);   // 根拠の文が = + - @ で始まっても数式にしない
     sh.getRange(row, 4, detailRows.length, 1).setNumberFormat('0.0');
     sh.getRange(row, 5, detailRows.length, 1).setNumberFormat('0.00');
     sh.getRange(row, 6, detailRows.length, 1).setNumberFormat('0.0');
@@ -6041,6 +6042,7 @@ function runVertexAIResearch() {
     const outRows = [];
     const reportParts = [];
     const neutralTopics = [];
+    const unsourcedTopics = [];
     const stats = {
       webError: 0,
       ragError: 0,
@@ -6055,6 +6057,8 @@ function runVertexAIResearch() {
       const webDuration = durationSec_(webStarted);
       const webCitations = extractGeminiGroundingCitations_(web.raw);
       const webLow = (!web.ok || !web.text || webCitations.length === 0);
+      // 出典（Web の根拠の URL）が 0 件か、Web 検索が失敗した話題の出来事（event 行）は、予測に効かせない（2026-10-13 村井さん承認）
+      const webUnsourced = (!web.ok || webCitations.length === 0);
       if (!web.ok) stats.webError++;
       if (webLow) stats.lowConfidence++;
       appendAIResearchRawRow_(ss, SHEETS.AI_RESEARCH_RAW, {
@@ -6099,6 +6103,8 @@ function runVertexAIResearch() {
         : { ok: false, skipped: true, endpoint: 'skipped', summary: '', citations: [], documents: [], error: 'rag_not_configured' };
       const ragDuration = durationSec_(ragStarted);
       const ragLow = vertex.ragReady && (!rag.ok || !rag.summary || !rag.citations || rag.citations.length === 0);
+      // 購入レポート（RAG）の材料が何も無い（設定なし・失敗・文書も出典も 0 件）話題の比べ（benchmark 行）も、予測に効かせない
+      const ragUnsourced = (!rag.ok || (!(rag.citations || []).length && !(rag.documents || []).length));
       if (vertex.ragReady && !rag.ok) stats.ragError++;
       if (ragLow) stats.lowConfidence++;
       appendAIResearchRawRow_(ss, SHEETS.AI_RESEARCH_RAW, {
@@ -6145,7 +6151,8 @@ function runVertexAIResearch() {
           { config: vertex }
         );
         if (structured.ok) {
-          topicRows = buildVertexStructuredRows_(targetClient, asOf, topic, structured.json);
+          topicRows = buildVertexStructuredRows_(targetClient, asOf, topic, structured.json, { webUnsourced, ragUnsourced });
+          if (webUnsourced && topicRows.some(r => r[3] === 'event')) unsourcedTopics.push(topic);
         }
       }
       const structureDuration = durationSec_(structureStarted);
@@ -6190,7 +6197,7 @@ function runVertexAIResearch() {
     outRows.forEach((r, i) => { r[18] = (i === 0 ? reportText : ''); });
     const out = ss.getSheetByName(SHEETS.AI_RESEARCH_STRUCTURED);
     out.getRange(2, 1, Math.max(1, out.getMaxRows() - 1), 22).clearContent();
-    out.getRange(2, 1, outRows.length, 22).setValues(outRows);
+    setAiTextValues_(out, 2, 1, outRows);   // AI の文が = + - @ で始まっても数式にしない
 
     let summaryAiScores = null;
     try {
@@ -6215,7 +6222,7 @@ function runVertexAIResearch() {
       safeLogRun_('runVertexForecastAssist_', targetClient, 'warning', 0, started, String(assistErr && assistErr.message || assistErr));
     }
 
-    const warnText = buildVertexWarningSummary_(stats, neutralTopics, outRows.length);
+    const warnText = buildVertexWarningSummary_(stats, neutralTopics, outRows.length, unsourcedTopics);
     updateProcessStatus_('step3_status', 'success', targetClient, outRows.length, 'Vertex AI research');
     updateProcessStatus_('step3a_status', 'success', targetClient, outRows.length, warnText);
     safeLogRun_('runVertexAIResearch', targetClient, 'success', outRows.length, started, warnText);
@@ -6485,9 +6492,10 @@ function buildWebResearchPrompt_(client, topic) {
     '',
     `現在のTopic「${topic}」について、上記の向きに沿って最新Web情報を調査してください。`,
     '上振れ/下振れ/中立、影響の強さ、根拠URLが分かるように日本語で要約してください。',
-    '観測できた範囲で必ず向き（上振れ/下振れ/中立）と影響の強さを述べてください。弱くても実在する動きは拾い、その弱さは「低信頼」と明記して表現してください。環境がほぼ動いていない場合のみ「中立」とし、その場合も理由を述べてください。',
+    '根拠となるWeb情報（URL）がある範囲で、向き（上振れ/下振れ/中立）と影響の強さを述べてください。弱くても実在する動きは拾い、その弱さは「低信頼」と明記して表現してください。環境がほぼ動いていない場合は「中立」とし、その場合も理由を述べてください。',
+    '根拠となるWeb情報（URL）が見つからない場合は、向きは「中立」、影響の強さは 0 とし、「根拠が見つからなかった」と書いてください（推測で向きや強さを付けないでください）。',
     '影響の強さは中庸に丸めず、明確な動きには大きい強さ、弱い動きには小さい強さと、メリハリをつけて述べてください。根拠があるのに無難な中程度（中位）へ寄せることは避けてください。',
-    '推測で数値や向きを創作しないでください（中立もゼロも捏造しない）。根拠が弱い場合は低信頼と明記してください。'
+    '推測で数値や向きを創作しないでください。根拠がある動きを中立やゼロに丸めることもしないでください。根拠が弱い場合は低信頼と明記してください。'
   ].join('\n');
 }
 
@@ -6526,9 +6534,10 @@ function buildVertexStructureSystemInstruction_() {
     'impact_score は 0〜100 の「影響の大きさ」です（0=影響なし、100=最大）。50は中立ではありません。向きは direction（up/down/neutral）で表し、impact_score には大きさだけを入れてください（例: 弱い=10前後、強い=80前後）。',
     'impact_score は中庸に丸めず（40〜60付近へ寄せず）、根拠の強さに応じてレンジ全体（弱い動き=10〜30、明確な動き=70〜100）を使ってください。topic 間で無難に横並びにせず、強い topic と弱い topic の差がはっきり出るように評価してください。',
     'Web検索結果はevent行、購入レポート/RAG結果はbenchmark行に分けてください。',
-    '【重要・event行は必ず向きを評価】web側では、観測できた範囲で direction（up/down/neutral）と impact_score を必ず付けてください。環境がほぼ動いていない場合のみ direction=neutral とし、その場合も impact_score は実態に合わせた小さい値（例 5〜15）を入れ、空欄にしないでください。弱くても実在する動きは捨てずに拾ってください（根拠の弱さは impact_score と confidence の低さで表現します）。',
+    '【重要・event行の向き】web側では、Web検索結果に根拠（Web citations の URL）がある範囲で direction（up/down/neutral）と impact_score を付けてください。環境がほぼ動いていない場合は direction=neutral とし、impact_score は実態に合わせた小さい値（例 5〜15）を入れてください。弱くても実在する動きは捨てずに拾ってください（根拠の弱さは impact_score と confidence の低さで表現します）。',
+    '【重要・出典が無いとき】Web検索結果が空、または Web citations が 0 件のときは、web の direction=neutral・impact_score=0・confidence=0 とし、evidence に「出典なし」と書いてください（推測で向きや強さを付けないでください）。',
     'confidence と relative_confidence は、その行を実際に出力するなら必須です。空欄にせず 0〜1 の数値を入れてください（自信がなければ低い値、例 0.3）。',
-    '根拠が無いのに数値や向きを創作しないでください。根拠が弱いときは値を低くし、根拠がまったく無いときは benchmark を空にしてください（中立を捏造しない / ゼロを捏造しない、の両方を守ってください）。',
+    '根拠が無いのに数値や向きを創作しないでください。根拠が弱いときは値を低くし、根拠がまったく無いときは benchmark を空にし、web は上の「出典が無いとき」に従ってください（根拠がある動きを中立やゼロへ寄せることもしないでください）。',
     '【report_text の書き方・厳守】report_text は当該 topic の「最重要ポイントだけ」を 2〜3文・最大120字程度に圧縮した要約にしてください。長文の列挙・転記は禁止です。',
     '- 競合や他社の製品別シェア・個別製品の販促状況などの明細は report_text に列挙しないでください。「競合各社の販促活動が活発化している」のように、外部環境の動きの方向と強さが分かる一言に集約してください（個別の根拠は evidence / relative_reason 側に置く）。',
     '- ソースの文章をそのまま転記・引用しないでください。出典マーカー（[1] / [2] 等）や箇条書きの羅列を report_text に持ち込まないでください。',
@@ -6549,7 +6558,7 @@ function buildVertexStructureUserContent_(client, topic, web, rag) {
     `向き（符号）: ${topic} は順方向（Market=市場拡大が上振れ / Competitor=競合活動の活発化が上振れ / Channel=販促・MR活動の活発化が上振れ / DX=DX投資量の増加が上振れ・内製成熟度では見ない）。`,
     '',
     '次のJSON schemaで返してください。',
-    'impact_score は 0〜100（0=影響なし・100=最大、50は中立ではない）。web の direction/impact_score/confidence は原則必ず記入（動きが無い場合のみ direction=neutral + 小さい impact_score）。',
+    'impact_score は 0〜100（0=影響なし・100=最大、50は中立ではない）。web の direction/impact_score/confidence は根拠がある範囲で記入（動きが無い場合は direction=neutral + 小さい impact_score）。Web検索結果が空か Web citations が 0 件なら direction=neutral・impact_score=0・confidence=0・evidence=「出典なし」。',
     'impact_score と relative_percentile は中庸に丸めず（中位へ寄せず）、根拠の強さに応じてレンジ全体を使い、topic 間で差がはっきり出るようにしてください（根拠が無い benchmark は従来どおり空のまま）。',
     'report（benchmark）は根拠があるときだけ記入。根拠が無ければ relative_percentile / relative_position_label / peer_universe / peer_basis を null（空）にし、50 や middle のプレースホルダを入れないこと。',
     'report_text は最重要ポイントだけの 2〜3文・最大120字程度の圧縮要約にすること。競合や他社の製品別明細を列挙せず、出典マーカーやソース文の転記もしないこと（詳細は evidence / relative_reason に置く）。',
@@ -6569,8 +6578,16 @@ function buildVertexStructureUserContent_(client, topic, web, rag) {
   ].join('\n');
 }
 
-function buildVertexStructuredRows_(client, asOf, topic, obj) {
+/**
+ * 1 つの話題の構造化の答え（obj）を AI_RESEARCH_STRUCTURED の行（出来事 event・比べ benchmark）にする。
+ * opt.webUnsourced: Web の出典が 0 件か Web 検索が失敗した → 出来事の行は 向き neutral・強さ 0・確からしさ 0・点数 0 にし、
+ *   根拠の文の頭に「出典が見つからなかったため、予測には効かせていません」と AI の元の見立てを書く（確からしさ 0 なので readAIResearchScores_ は採らない）。
+ * opt.ragUnsourced: 購入レポート（RAG）の材料が何も無い → 比べの行は 相対位置・確からしさを空と 0・点数 0 にし、同じく根拠の文の頭に書く。
+ * （2026-10-13 村井さん承認。出典の無い主張を予測の数字に効かせない。opt を渡さなければ前と同じ）
+ */
+function buildVertexStructuredRows_(client, asOf, topic, obj, opt) {
   const src = obj || {};
+  const o = opt || {};
   const topicNorm = normalizeAiTopic_(src.topic || topic) || topic;
   const web = src.web || src.event || {};
   const report = src.report || src.benchmark || {};
@@ -6584,15 +6601,17 @@ function buildVertexStructuredRows_(client, asOf, topic, obj) {
   const eventScoreRaw = (isFinite(impact) && isFinite(confidence)) ? sign * (impact / 100) * 50 * confidence : NaN;
   const eventScore = isFinite(eventScoreRaw) ? clamp_(eventScoreRaw, -50, 50) : '';
   if (direction || isFinite(impact) || isFinite(confidence) || web.evidence) {
+    const evidence = normalizeAiCellValue_(web.evidence || '');
+    const unsourced = !!o.webUnsourced;
     rows.push([
       client,
       asOf,
       topicNorm,
       'event',
-      direction,
-      isFinite(impact) ? impact : '',
-      isFinite(confidence) ? confidence : '',
-      normalizeAiCellValue_(web.evidence || ''),
+      unsourced ? 'neutral' : direction,
+      unsourced ? 0 : (isFinite(impact) ? impact : ''),
+      unsourced ? 0 : (isFinite(confidence) ? confidence : ''),
+      unsourced ? unsourcedAiEvidence_(unsourcedAiView_(direction, impact), evidence) : evidence,
       normalizeAiCellValue_(web.time_horizon || ''),
       normalizeAiCellValue_(web.business_relevance_reason || ''),
       normalizeAiCellValue_(web.market_size_ref || ''),
@@ -6604,7 +6623,7 @@ function buildVertexStructuredRows_(client, asOf, topic, obj) {
       '',
       '',
       '',
-      eventScore,
+      unsourced ? 0 : eventScore,
       '',
       ''
     ]);
@@ -6618,6 +6637,9 @@ function buildVertexStructuredRows_(client, asOf, topic, obj) {
   const benchmarkScoreRaw = (isFinite(relPct) && isFinite(relConf)) ? (relPct - 50) * relConf * qMul : NaN;
   const benchmarkScore = isFinite(benchmarkScoreRaw) ? clamp_(benchmarkScoreRaw, -50, 50) : '';
   if (isFinite(relPct) || isFinite(relConf) || report.peer_universe || report.peer_basis || report.evidence) {
+    const evidence = normalizeAiCellValue_(report.evidence || '');
+    const label = normalizeAiCellValue_(report.relative_position_label || '');
+    const unsourced = !!o.ragUnsourced;
     rows.push([
       client,
       asOf,
@@ -6626,31 +6648,76 @@ function buildVertexStructuredRows_(client, asOf, topic, obj) {
       '',
       '',
       '',
-      normalizeAiCellValue_(report.evidence || ''),
+      unsourced ? unsourcedAiEvidence_(isFinite(relPct) ? '相対位置 ' + relPct : label, evidence) : evidence,
       '',
       '',
       normalizeAiCellValue_(report.market_size_ref || ''),
       normalizeAiCellValue_(report.peer_universe || ''),
       normalizeAiCellValue_(report.peer_basis || ''),
-      normalizeAiCellValue_(report.relative_position_label || ''),
-      isFinite(relPct) ? relPct : '',
-      isFinite(relConf) ? relConf : '',
+      unsourced ? '' : label,
+      unsourced ? '' : (isFinite(relPct) ? relPct : ''),
+      unsourced ? 0 : (isFinite(relConf) ? relConf : ''),
       quality,
       normalizeAiCellValue_(report.relative_reason || ''),
       '',
       '',
-      benchmarkScore,
+      unsourced ? 0 : benchmarkScore,
       ''
     ]);
   }
   return rows;
 }
 
+/** 出典が無いので効かせなかった行の根拠の文: 頭に断りと AI の元の見立て（view）を書き、元の根拠の文を続ける */
+function unsourcedAiEvidence_(view, evidence) {
+  const head = '出典が見つからなかったため、予測には効かせていません' + (view ? '（AI の見立て: ' + view + '）' : '') + '。';
+  return evidence ? head + ' ' + evidence : head;
+}
+
+/** AI の元の見立て（向きと強さ）を、ふつうの言葉で（出典が無いので効かせなかった出来事の行に残す） */
+function unsourcedAiView_(direction, impact) {
+  const dir = { up: '上向き', down: '下向き', neutral: '横ばい' }[direction] || '';
+  const strength = isFinite(impact) && impact > 0 ? '強さ ' + impact : '';
+  return [dir, strength].filter(Boolean).join('・');
+}
+
+/**
+ * AI（LLM）や Web の文をセルに書くとき、先頭が = + - @ の文は Sheets が数式として読む（2026-10-13 の点検: AI の要約文の
+ * =IMAGE("https://…"&CONFIG!B2) が数式のまま残り、外へ読みに行く形になった）。そういう文のセルだけ、書式を文字（@）にしてから書く。
+ * 新アプリは書式も控えて書式 → 値の順に組み立て直すので、次に組み立てたときも文字のまま（先頭に ' を付けると、組み立て直すときに値だけが戻り数式になる）
+ */
+function isFormulaLikeText_(v) {
+  return typeof v === 'string' && /^\s*[=+\-@]/.test(v);
+}
+
+/** rows（2 次元）のうち数式に見える文のセルだけ、書式を文字にする（row・col は 1 始まりの左上） */
+function markFormulaLikeCellsAsText_(sh, row, col, rows) {
+  (rows || []).forEach((r, i) => (r || []).forEach((v, j) => {
+    if (isFormulaLikeText_(v)) sh.getRange(row + i, col + j).setNumberFormat('@');
+  }));
+}
+
+/** AI の文を含む行をまとめて書く（数式に見える文のセルだけ文字にしてから） */
+function setAiTextValues_(sh, row, col, rows) {
+  if (!rows || !rows.length) return;
+  markFormulaLikeCellsAsText_(sh, row, col, rows);
+  sh.getRange(row, col, rows.length, rows[0].length).setValues(rows);
+}
+
+/** AI の文を含む 1 行を末尾に足す。数式に見える文が無ければ、今までどおり appendRow */
+function appendAiTextRow_(sh, values) {
+  if (!values.some(isFormulaLikeText_)) { sh.appendRow(values); return; }
+  const row = sh.getLastRow() + 1;
+  if (row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), row - sh.getMaxRows());
+  if (values.length > sh.getMaxColumns()) sh.insertColumnsAfter(sh.getMaxColumns(), values.length - sh.getMaxColumns());
+  setAiTextValues_(sh, row, 1, [values]);
+}
+
 function appendAIResearchRawRow_(ss, sheetName, opt) {
   if (!ss.getSheetByName(sheetName)) ensureAIResearchRuntimeSheets_(ss);
   const target = ss.getSheetByName(sheetName);
   if (!target) return;
-  target.appendRow([
+  appendAiTextRow_(target, [
     opt.client || '',
     opt.asOf || '',
     opt.axis || '',
@@ -6669,7 +6736,7 @@ function appendAIResearchRawRow_(ss, sheetName, opt) {
 function appendAIResearchTaskLog_(ss, opt) {
   const sh = ss.getSheetByName(SHEETS.AI_RESEARCH_TASK_LOG) || ensureSheetReady_(ss, SHEETS.AI_RESEARCH_TASK_LOG, ['run_id','run_at','run_by','client','topic','aspect','model','endpoint','status','duration_sec','prompt_tokens','candidates_tokens','total_tokens','low_confidence_flag','citations_json','error_summary','note']);
   const usage = opt.usage || {};
-  sh.appendRow([
+  appendAiTextRow_(sh, [
     opt.runId || '',
     opt.runAt || new Date(),
     Session.getActiveUser().getEmail() || 'unknown',
@@ -6862,15 +6929,18 @@ function buildVertexBlendLogNote_(rows) {
   return out;
 }
 
-function buildVertexWarningSummary_(stats, neutralTopics, rowCount) {
-  return [
+function buildVertexWarningSummary_(stats, neutralTopics, rowCount, unsourcedTopics) {
+  const parts = [
     `vertex_rows=${Number(rowCount || 0)}`,
     `web_error=${Number((stats || {}).webError || 0)}`,
     `rag_error=${Number((stats || {}).ragError || 0)}`,
     `structure_error=${Number((stats || {}).structureError || 0)}`,
     `low_confidence=${Number((stats || {}).lowConfidence || 0)}`,
     `neutral_topics=[${(neutralTopics || []).join(',')}]`
-  ].join('; ');
+  ];
+  // 出典が無いので出来事（event 行）を予測に効かせなかった話題（2026-10-13〜。無ければ書かない）
+  if ((unsourcedTopics || []).length) parts.push(`unsourced_topics=[${unsourcedTopics.join(',')}]`);
+  return parts.join('; ');
 }
 
 function countAIResearchStructuredRows_() {
@@ -8908,7 +8978,7 @@ function runVertexForecastAssist_(targetClient, ss, vertex, months) {
     const rationale = String(r.json.rationale_ja || '').slice(0, 500);
     const sh = ensureSheetReady_(ss, SHEETS.VERTEX_FORECAST_LOG, getVertexForecastLogHeaders_());
     const runId = Utilities.getUuid();
-    sh.appendRow([
+    appendAiTextRow_(sh, [   // AI の説明の文（rationale_ja）が = + - @ で始まっても数式にしない
       runId, new Date(), targetClient, fy,
       JSON.stringify(targetMonths.map(m => fmtYM_(m))),
       JSON.stringify(adj.map(v => Number(v.toFixed(4)))),
@@ -10690,7 +10760,7 @@ function webAuditLogUrl_() {
     forecastSeasonalWeighted48_: typeof forecastSeasonalWeighted48_ === 'undefined' ? undefined : forecastSeasonalWeighted48_,
     readForecastClosedMonthMode_: typeof readForecastClosedMonthMode_ === 'undefined' ? undefined : readForecastClosedMonthMode_,
     runForecastFYCore_: typeof runForecastFYCore_ === 'undefined' ? undefined : runForecastFYCore_,
-    SOURCE_SHA256: '6a19638d0a20258ea8271db654e30769704239a8c243712563250d4a2a76cae5',
+    SOURCE_SHA256: '52591cd515942346426ec8ccb600bb675fa7301393eac1ee05bd7012e7366315',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }
