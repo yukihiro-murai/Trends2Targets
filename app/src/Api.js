@@ -50,7 +50,7 @@ function apiPortfolio() {
 
 /**
  * 予測の根拠（月ごとの内訳・入力と AI の押し・補正・AI 調査の根拠・前回からの変化）。閲覧は社内全員。
- * 押したものの人や話題ごとの内訳（名前と信頼度）は予算策定担当以上だけ（ほかの人には情報源の種類ごと。appBasisFor_）
+ * 押したものの人や話題ごとの内訳（名前と信頼度）は、その計画のメーカーで予算策定担当以上の人だけ（ほかの人には情報源の種類ごと。appBasisFor_）
  */
 function apiForecastBasis(input) {
   return api_('FORECAST.BASIS', { minRole: 'VIEWER', audit: false }, ctx => appForecastBasis_(ctx, input && input.planId));
@@ -68,7 +68,8 @@ function apiCrossMaker(input) {
 
 /**
  * 学び: 人の学び（外れた月の振り返り・人と話題ごとの当たり・四半期レビューの判断・予算の上乗せの実績）。閲覧は社内全員。読むだけ。
- * 人ごとの当たりと判断した人の名前は予算策定担当以上だけ（ほかの人には情報源の種類ごとのまとめ）。見せ方が違う人に同じ控えを返さないよう、控えの鍵に見せ方も入れる。
+ * 人ごとの当たりと判断した人の名前は予算策定担当以上だけ（メーカーに限った担当は、そのメーカーの計画の分だけ。ほかの人・ほかの計画は情報源の種類ごとのまとめ）。
+ * 見せ方が違う人に同じ控えを返さないよう、控えの鍵に見せ方（appInsightDetail_。メーカーに限った担当はメーカーの組み合わせ）も入れる。
  * hits は当たりの記録の人ごとの当たり（版 10 の 3-4。本人の分は人ごとに違うので、控えの外で見る人に合わせて絞る。HitRecords.js）
  */
 function apiPeopleLearning() {
@@ -78,7 +79,7 @@ function apiPeopleLearning() {
 
 /**
  * 学び: AI の学び（信頼度の学び・全計画で縮めた偏り・精度の推移・補正の変化・承認待ちの提案・気になる点）。閲覧は社内全員。読むだけ。
- * 承認待ちの提案と補正の変化の、人や話題の名前と信頼度の提案の根拠は予算策定担当以上だけ。人の学びと同じく、控えの鍵に見せ方も入れる。
+ * 承認待ちの提案と補正の変化の、人や話題の名前と信頼度の提案の根拠は予算策定担当以上だけ（メーカーに限った担当は、そのメーカーの計画の分だけ）。人の学びと同じく、控えの鍵に見せ方も入れる。
  * landing は着地見込みの τ・w（全計画から学んだ試しの値と、承認して使っている値。appLandingPriorView_。計画の一覧の控えから）。
  * research は AI 調査 1 回ごとの当たり（版 10 の 3-4。当たりの記録の見せ方で絞る。HitRecords.js）
  */
@@ -134,7 +135,7 @@ function apiForecastLatest(input) {
 
 /**
  * 計画の画面（入力・予測と予算・検証・四半期レビュー・進み。閲覧は社内全員）。中身は「今日」でも変わる（既定の年度など）ので、控えの鍵に日付も入れる。
- * 人ごとの当たりと外れた月の担当は予算策定担当以上だけ（appPlanViewFor_）。控えの鍵は見る人ごと
+ * 人ごとの当たりと外れた月の担当は、その計画のメーカーで予算策定担当以上の人だけ（appPlanViewFor_）。控えの鍵は見る人ごと
  */
 function apiPlanView(input) {
   return api_('PLAN.VIEW', { minRole: 'VIEWER', audit: false }, ctx => appCachedRead_('VIEW\u0001' + ctx.actor + '\u0001' + (input && input.planId) + '\u0001' + appToday_(), () => appPlanView_(ctx, input && input.planId)));

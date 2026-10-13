@@ -7,7 +7,8 @@
  *   node app/tests/app-insights.test.mjs
  */
 import assert from 'node:assert/strict';
-import { makeEnv, setUpEnv, STATS, OWNER, MEMBER, OUTSIDER, J } from './gas-mock.mjs';
+import vm from 'node:vm';
+import { makeEnv, setUpEnv, STATS, OWNER, MEMBER, OUTSIDER, J, uiHtml } from './gas-mock.mjs';
 
 const D = (y, m, d = 1) => new Date(y, m - 1, d);
 /** 数の近さ。数でない値（null など）は通さない（null − b は −b になり、b が 0 なら通ってしまう） */
@@ -630,19 +631,85 @@ const ai = env.call('apiAiLearning()');
   assert.deepEqual(env.call('apiPeopleLearning()'), sum);
   assert.deepEqual(env.call('apiAiLearning()'), aiSum);
   assert.equal(STATS.reads, r0, 'どちらも控えから');
-  // クライアント単位の予算策定担当でも、人ごとの行を出す
+  // メーカーに限った予算策定担当（乙製薬 = B だけ）: そのメーカーの計画だけ人ごと。ほかのメーカー（甲製薬 = A）の計画は閲覧の人と同じ（2026-10-13。
+  // 前は、すべてのメーカーで人ごとの当たり・信頼度・人の名前を出していた。V10.js の appLogViewer_ と同じくメーカー単位にそろえる）
   env.as(OWNER);
   env.task(`grantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: '${env.table('PLANS').find((p) => p.plan_id === B).client_id}' })`);
   env.as(MEMBER);
   const planner = env.call('apiPeopleLearning()');
-  assert.equal(planner.detail, 'full');
-  assert.deepEqual([planner.scoreboard, planner.decisions, planner.lessons], [full.scoreboard, full.decisions, full.lessons]);
-  assert.deepEqual(env.call('apiAiLearning()'), aiFull);
+  assert.deepEqual([planner.detail, planner.namedPlans], ['partial', [B]]);
+  const pText = JSON.stringify(planner);
+  for (const s of ['佐藤', 'Market', '的中率', '"decidedBy":"owner"']) assert.ok(!pText.includes(s), 'ほかのメーカーの人や話題・判断した人・根拠は出さない: ' + s);
+  assert.ok(JSON.stringify(full).includes('"decidedBy":"owner"'), '（所有者には出る）');
+  assert.ok(pText.includes('田中'), '担当のメーカーの人は出す');
+  // 当たり: 担当のメーカーの計画の分は人ごと（今の信頼度もその計画の分だけ: 鷹野は乙の 0.9。甲の 1.1 を混ぜない）、ほかは種類ごと
+  const people = planner.scoreboard.filter((s) => 'key' in s), types = planner.scoreboard.filter((s) => !('key' in s));
+  assert.deepEqual(people.map((s) => [s.type, s.key]).sort(), [['opinion', '田中'], ['opinion', '鷹野']]);
+  assert.ok(people.every((s) => s.plans.every((p) => p.planId === B)), '人ごとの行は担当のメーカーの計画の当たりだけ');
+  close(people.find((s) => s.key === '鷹野').appliedR, 0.9, 1e-9, 'ほかのメーカーの同じ名前の人の信頼度を混ぜない');
+  const bOnly = full.scoreboard.find((s) => s.type === 'opinion' && s.key === '鷹野').plans.find((p) => p.planId === B);
+  assert.deepEqual([people.find((s) => s.key === '鷹野').n, people.find((s) => s.key === '鷹野').hit], [bOnly.n, bOnly.hit]);
+  assert.deepEqual(types.map((s) => [s.type, s.sources]).sort(), [['ai_topic', 1], ['factor_product', 1], ['opinion', 1]], 'ほかのメーカーの計画は種類ごと');
+  assert.ok(types.every((s) => !('appliedR' in s) && !('plans' in s)));
+  assert.equal(planner.scoreboard.reduce((n, s) => n + s.n, 0), full.scoreboard.reduce((n, s) => n + s.n, 0), '数えた回数は全部の計画の分');
+  assert.ok(planner.scoreboard.every((s, i) => i === 0 || s.ci80[0] <= planner.scoreboard[i - 1].ci80[0]), '幅の左の端が高い順');
+  // 判断の履歴: 担当のメーカーの計画は判断した人・対象の名前まで、ほかは閲覧の人と同じ。並びは全部の計画の新しい順のまま
+  assert.deepEqual(planner.decisions.map((x) => x.proposalId), full.decisions.map((x) => x.proposalId));
+  planner.decisions.forEach((x) => assert.deepEqual(x, (x.planId === B ? full : sum).decisions.find((y) => y.proposalId === x.proposalId), x.proposalId));
+  // 振り返り: ほかのメーカーの計画の担当は空
+  assert.deepEqual(planner.lessons, full.lessons.map((x) => (x.planId === B ? x : Object.assign({}, x, { owner: '' }))));
+  assert.deepEqual(planner.openActions, full.openActions.map((x) => (x.planId === B ? x : Object.assign({}, x, { owner: '' }))));
+  assert.deepEqual([planner.causes, planner.repeats, planner.summary, planner.uplift], [full.causes, full.repeats, full.summary, full.uplift]);
+  // AI の学び: 承認待ちの提案と補正の変化は、計画ごとに見せ方を決める
+  const plannerAi = env.call('apiAiLearning()');
+  assert.deepEqual([plannerAi.detail, plannerAi.namedPlans], ['partial', [B]]);
+  for (const k of ['pending', 'calibration']) {
+    assert.deepEqual(plannerAi[k].map((x) => x.planId), aiFull[k].map((x) => x.planId), k + ' の並びは同じ');
+    plannerAi[k].forEach((x) => assert.deepEqual(x, (x.planId === B ? aiFull : aiSum)[k].find((y) => y.planId === x.planId), k + ' ' + x.planId));
+  }
+  for (const k of ['curves', 'shrinkage', 'timeline', 'health', 'landing']) assert.deepEqual(plannerAi[k], aiFull[k], k);
+  assert.ok(!JSON.stringify(plannerAi.calibration.find((c) => c.planId === A)).includes('鷹野'), '甲の補正の変化に人の名前を出さない');
+  assert.ok(JSON.stringify(aiFull.calibration.find((c) => c.planId === A)).includes('鷹野'), '（所有者には出る）');
+  // 控えは見せ方ごと（担当のメーカーの組み合わせで分ける）。同じ人がもう一度読むと控えから
+  const r1 = STATS.reads;
+  assert.deepEqual(env.call('apiPeopleLearning()'), planner);
+  assert.equal(STATS.reads, r1, '控えから');
+  // 画面: 担当のメーカーだけ人ごとの形でも描ける（ほかのメーカーの人や話題の名前・根拠・空の値を出さない。担当のメーカーの人は出す）
+  {
+    const js = uiHtml.slice(uiHtml.indexOf('<script>') + 8, uiHtml.lastIndexOf('</script>'))
+      .replace('<?!= charsJs ?>', 'var YOMI_POSE = new Proxy({}, { get: () => "" }); var CHAR_SVG = new Proxy({}, { get: () => "" });')
+      .replace('<?!= bootJson ?>', JSON.stringify({ app: { name: 'T', version: 'x' }, user: { email: MEMBER, isOwner: false, isAdmin: false, roles: [{ role: 'VIEWER' }, { role: 'PLANNER', scopeType: 'CLIENT' }] }, setUp: true, allowed: true }));
+    const el = () => ({ innerHTML: '', classList: { add() {}, remove() {} }, set outerHTML(v) {} });
+    const ui = vm.createContext({ document: { getElementById: el, querySelector: () => null, addEventListener() {} }, setTimeout: () => 0, clearTimeout() {}, confirm: () => false,
+      window: { addEventListener() {}, innerWidth: 1280, innerHeight: 800 },
+      google: { script: { run: new Proxy({}, { get: (t, k) => (k === 'withSuccessHandler' || k === 'withFailureHandler' ? () => ui.google.script.run : () => {}) }) } } });
+    vm.runInContext(js, ui);
+    Object.assign(ui, { __p: planner, __a: plannerAi });
+    const peopleHtml = vm.runInContext('S.lr.people = __p; S.lr.ai = __a; S.lr.tab = "people"; viewLearning()', ui);
+    const aiHtml = vm.runInContext('S.lr.tab = "ai"; viewLearning()', ui);
+    for (const [what, html] of [['人の学び', peopleHtml], ['AI の学び', aiHtml]]) {
+      assert.doesNotMatch(html, /undefined|NaN/, what + ': 空の値を出さない');
+      for (const s of ['佐藤', '的中率', '当たった割合']) assert.ok(!html.includes(s), what + ': ほかのメーカーの人・根拠を出さない: ' + s);
+    }
+    assert.ok(peopleHtml.includes('田中'), '担当のメーカーの人は出す');
+    assert.match(peopleHtml, /一部は種類ごと/, '一部を種類ごとにまとめたことを札で知らせる');
+    assert.equal(vm.runInContext('[lrNamed(__p, "' + B + '"), lrNamed(__p, "' + A + '"), lrNamed({ detail: "full" }, "x"), lrNamed({ detail: "summary" }, "x"), lrNamed(null, "x")].join()', ui),
+      'true,false,true,false,false');
+  }
   env.as(OWNER);
-  // 役割の判定（予算策定担当以上。範囲は問わない。分からなければ出さない）
+  assert.deepEqual(env.call('apiPeopleLearning()'), full, '所有者には全部（担当の控えと混ざらない）');
+  // 横断の見せ方の判定（全体の予算策定担当以上なら全部・メーカーに限った担当はそのメーカーだけ・分からなければ出さない）
   assert.deepEqual(['VIEWER', 'CONTRIBUTOR', 'PLANNER', 'APPROVER', 'ADMIN'].map((r) => env.run(`appInsightDetail_({ roles: [{ role: '${r}', scope_type: 'CLIENT', client_id: 'X' }] })`)),
+    ['summary', 'summary', 'clients:X', 'clients:X', 'clients:X']);
+  assert.deepEqual(['VIEWER', 'CONTRIBUTOR', 'PLANNER', 'APPROVER', 'ADMIN'].map((r) => env.run(`appInsightDetail_({ roles: [{ role: '${r}', scope_type: 'ALL', client_id: '' }] })`)),
     ['summary', 'summary', 'full', 'full', 'full']);
+  assert.equal(env.run(`appInsightDetail_({ roles: [{ role: 'PLANNER', scope_type: 'CLIENT', client_id: 'Y' }, { role: 'PLANNER', scope_type: 'CLIENT', client_id: 'X' }, { role: 'VIEWER', scope_type: 'ALL', client_id: '' }] })`), 'clients:X,Y', '控えの鍵がそろうように並べる');
   assert.equal(env.run('appInsightDetail_(undefined)'), 'summary');
+  // 計画ごとの画面の判定（その計画のメーカーで予算策定担当以上か）
+  const forX = (roles, c) => env.run('appInsightDetailFor_(__c, __id)', { __c: { roles }, __id: c });
+  const px = [{ role: 'PLANNER', scope_type: 'CLIENT', client_id: 'X' }];
+  assert.deepEqual([forX(px, 'X'), forX(px, 'Y'), forX(px, ''), forX([{ role: 'PLANNER', scope_type: 'ALL', client_id: '' }], 'Y'), forX([{ role: 'VIEWER', scope_type: 'ALL', client_id: '' }], 'X')],
+    ['full', 'summary', 'summary', 'full', 'summary']);
   assert.equal(J(env.run('appPeopleLearning_()')).detail, 'summary');
   assert.equal(J(env.run('appAiLearning_()')).detail, 'summary');
 }

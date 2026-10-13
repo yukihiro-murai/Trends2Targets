@@ -119,7 +119,9 @@ function build() {
     basis: (email) => as(email, () => env.call('apiForecastBasis(__in)', { __in: { planId } })),
   };
 }
-const FULL_ROLES = [OWNER, APPROVER, PLANNER_ALL, 'planner.here@bigm2y.com', PLANNER_ELSEWHERE];   // 管理者・承認者・予算策定担当（全体・その計画・ほかのクライアント）
+// 管理者・承認者・予算策定担当（全体・その計画のメーカー）。ほかのメーカーだけの予算策定担当（PLANNER_ELSEWHERE）は、この計画では閲覧の人と同じ
+// （2026-10-13。前は全部の中身を渡していた。計画ごとの画面は、その計画のメーカーで予算策定担当以上かで決める）
+const FULL_ROLES = [OWNER, APPROVER, PLANNER_ALL, 'planner.here@bigm2y.com'];
 const hasName = (text) => NAMES.filter((n) => text.includes(n));
 /** 入力の画面に出すもの（入力の行・担当者の一覧・見解の一文）を除いた写し。残りに人の名前が無いことを確かめる */
 const withoutInputs = (v) => {
@@ -166,6 +168,7 @@ const redactedBasis = (full) => {
   const sum = t.view(MEMBER);
   assert.equal(sum.can.plan, false);
   assert.deepEqual(sum.boot, redactedView(full).boot, '閲覧の人: 信頼度の対象は種類まで・根拠と見込みは空・担当は空。ほかは同じ');
+  assert.deepEqual(t.view(PLANNER_ELSEWHERE).boot, sum.boot, 'ほかのメーカーだけの予算策定担当には、閲覧の人と同じ中身');
   assert.deepEqual(sum.boot.quarterly.proposals.map((p) => [p.pid, p.target, p.current, p.proposed, p.rationale, p.impact]), [
     ['P-B-1', 'reliability:opinion', '', '', '', ''],
     ['P-B-2', 'reliability:factor_product', '', '', '', ''],
@@ -218,6 +221,7 @@ const redactedBasis = (full) => {
 
   const sum = t.basis(MEMBER);
   assert.deepEqual(sum, redactedBasis(full), '閲覧の人: 内訳だけ空。ほかは同じ');
+  assert.deepEqual(t.basis(PLANNER_ELSEWHERE), sum, 'ほかのメーカーだけの予算策定担当には、閲覧の人と同じ根拠');
   assert.deepEqual(sum.monthly.find((m) => m.month === '2026/05').sources.map((s) => [s.type, s.label, Math.round(s.step * 100), s.n, s.keys]),
     [['opinion', '見解', 5, 1, []], ['factor_product', '製品の入力', -3, 1, []], ['ai_topic', 'AI の話題', 2, 1, []]], '種類ごとの押しと数は出す');
   assert.ok(!JSON.stringify(sum).includes('信頼度'), '人や話題ごとの信頼度を出さない');
@@ -271,12 +275,15 @@ const redactedBasis = (full) => {
     const planner = { roles: [{ role: 'PLANNER', scope_type: 'CLIENT', client_id: 'X' }] };
     const sv = appPlanViewFor_(viewer, v), sb = appBasisFor_(viewer, b);
     return { same: [JSON.stringify(v) === v0, JSON.stringify(b) === b0], copy: [sv !== v, sb !== b],
-      planner: [appPlanViewFor_(planner, v) === v, appBasisFor_(planner, b) === b], none: [appPlanViewFor_(undefined, v) !== v, appBasisFor_(undefined, b) !== b],
+      planner: [appPlanViewFor_(planner, v, { client_id: 'X' }) === v, appBasisFor_(planner, b, { client_id: 'X' }) === b],
+      elsewhere: [appPlanViewFor_(planner, v, { client_id: 'Y' }) !== v, appBasisFor_(planner, b, { client_id: 'Y' }) !== b, appPlanViewFor_(planner, v) !== v],
+      none: [appPlanViewFor_(undefined, v) !== v, appBasisFor_(undefined, b) !== b],
       empty: [appPlanViewFor_(viewer, null), appBasisFor_(viewer, null), appPlanViewFor_(viewer, { boot: { quarterly: {}, eval: {} } })] };
   })()`));
   assert.deepEqual(r.same, [true, true], '控えから読んだものを変えない');
   assert.deepEqual(r.copy, [true, true], '閲覧の人には写し');
-  assert.deepEqual(r.planner, [true, true], '予算策定担当以上には、そのまま（前と同じ）');
+  assert.deepEqual(r.planner, [true, true], 'その計画のメーカーの予算策定担当以上には、そのまま（前と同じ）');
+  assert.deepEqual(r.elsewhere, [true, true, true], 'ほかのメーカーだけの担当・計画が分からないときは写し（出さない側）');
   assert.deepEqual(r.none, [true, true], '見る人が分からなければ閲覧の人と同じ（出さない側）');
   assert.deepEqual(r.empty, [null, null, { boot: { quarterly: {}, eval: {} } }], '提案や記入が無くても止まらない');
   // 役割が変われば、同じ人でも形が変わる（役割を付けると控えが古くなる）

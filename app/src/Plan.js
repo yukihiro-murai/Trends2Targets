@@ -237,7 +237,7 @@ function appPlanView_(ctx, planId) {
     try { appJobPutResult_(key, view); } catch (e) { Logger.log('画面の中身を覚えておけません: ' + (e && e.message ? e.message : e)); }
     if (view.builtMs > 20000) appRunLog_({ requestId: ctx.requestId, kind: 'PLAN.VIEW', status: 'SLOW', durationMs: view.builtMs, detail: { planId: plan.plan_id } });
   }
-  const shown = appPlanViewFor_(ctx, view);
+  const shown = appPlanViewFor_(ctx, view, plan);
   return Object.assign({
     plan: { planId: plan.plan_id, clientName: clients[plan.client_id] || plan.client_label, fy: plan.fy, frozen: frozen, measure: appPlanIsMeasure_(plan) },
     inputHash: inputHash,
@@ -388,7 +388,8 @@ function appPlanOwnerNote_(c) {
 }
 
 /**
- * 見る人に合わせた画面の中身。人ごとの当たりと外れた月の担当は、予算策定担当以上の人だけに出す（学びと同じ決まり: appInsightDetail_）。
+ * 見る人に合わせた画面の中身。人ごとの当たりと外れた月の担当は、その計画のメーカーで予算策定担当以上の人だけに出す
+ * （appInsightDetailFor_。メーカーに限った担当は、そのメーカーの計画だけ。2026-10-13 まではほかのメーカーの計画でも出していた）。
  * ほかの人（閲覧・情報提供）には:
  *   - 四半期レビューの提案: 信頼度の対象は種類まで（reliability:<種類>）。その根拠（その人や話題の的中率）と、効かせたときの見込み
  *     （旧来の C-1 は、その人や話題の名前を書く）と、信頼度の今と案の値は空。どちらも学びと同じ appInsightTarget_・appInsightRationale_ で決める
@@ -398,8 +399,8 @@ function appPlanOwnerNote_(c) {
  * 入力の行・担当者の一覧は、これまでどおり出す（入力の画面に出すもの）。
  * 覚えておいた中身は見る人によらず同じものを使うので、写しを直す（覚えておいたものは変えない）
  */
-function appPlanViewFor_(ctx, view) {
-  if (appInsightDetail_(ctx) === 'full' || !view || !view.boot) return view;
+function appPlanViewFor_(ctx, view, plan) {
+  if (appInsightDetailFor_(ctx, plan && plan.client_id) === 'full' || !view || !view.boot) return view;
   const out = appSerialize_(view);
   const q = out.boot.quarterly;
   ((q && q.proposals) || []).forEach(p => {

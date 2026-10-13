@@ -12,6 +12,7 @@
  * 計画ごとの当たりと精度は、入力のハッシュが同じあいだ控える（EVD_・ACC_）。どこかで保存しても、控えが外れるのはその計画の分だけで、
  * 控えの無い計画が少なければ、その計画の行だけを読む（履歴の表を全計画の分は読み直さない）。
  * 人ごとの当たりと判断した人の名前は、予算策定担当以上の人だけに出す（ほかの人には情報源の種類ごとのまとめ。appInsightDetail_）。
+ * メーカーに限った予算策定担当には、そのメーカーの計画の分だけ人ごとに出し、ほかの計画の分は閲覧の人と同じにする（2026-10-13。appInsightNamedPlans_）。
  * AI の学びの承認待ちの提案と補正の変化も同じ（ほかの人には、信頼度の対象は種類まで。信頼度の提案の根拠（その人の的中率）は出さない）。
  * 旧来の記録の 2 つの問題を避けて、ここで数え直す（ここでは旧来の計算と記録は変えない）。旧来の側は 2026-10-07 に直したが、
  * 直す前に書かれた記録はそのまま残るので、元の表から数え直すのを続ける:
@@ -292,10 +293,79 @@ function appInsightRationale_(r, hideKey) {
   return String(r.rationale || '').slice(0, 300);
 }
 
-/** 人ごとの当たり・判断した人の名前を見せるか: 予算策定担当以上の役割（クライアント単位でもよい）があれば 'full'、無ければ 'summary' */
+/**
+ * 横断の画面（人の学び・AI の学び）で、人ごとの当たり・人の名前を見せる範囲（2026-10-13: メーカー単位にそろえる。V10.js の appLogViewer_ と同じ決まり）。
+ * 全体の予算策定担当以上なら 'full'（どの計画も人ごと）、メーカーに限った予算策定担当だけなら 'clients:<メーカーの ID をカンマで>'
+ * （そのメーカーの計画だけ人ごと。appInsightNamedPlans_）、どちらも無ければ 'summary'（どの計画も情報源の種類ごと）。
+ * 前はメーカーに限った担当も、すべてのメーカーで「全部見せる」扱いだった。返り値は控えの鍵にも使う（見せ方が違う人に同じ控えを返さない）
+ */
 function appInsightDetail_(ctx) {
+  const roles = (ctx && ctx.roles) || [];
+  if (appHasRole_(roles, APP_INSIGHT_DETAIL_ROLE)) return 'full';
   const need = APP_ROLES.indexOf(APP_INSIGHT_DETAIL_ROLE);
-  return ((ctx && ctx.roles) || []).some(r => APP_ROLES.indexOf(r.role) >= need) ? 'full' : 'summary';
+  const ids = roles.filter(r => r.scope_type === 'CLIENT' && r.client_id && APP_ROLES.indexOf(r.role) >= need).map(r => String(r.client_id))
+    .filter((v, i, a) => a.indexOf(v) === i).sort();
+  return ids.length ? 'clients:' + ids.join(',') : 'summary';
+}
+
+/**
+ * 計画ごとの画面（予測の画面・予測の根拠）で、人ごとの当たり・人の名前・操作した人を見せるか: その計画のメーカーで予算策定担当以上
+ * （そのメーカーに限った担当を含む）なら 'full'、無ければ 'summary'（閲覧の人と同じ）
+ */
+function appInsightDetailFor_(ctx, clientId) {
+  return appHasRole_((ctx && ctx.roles) || [], APP_INSIGHT_DETAIL_ROLE, clientId ? String(clientId) : undefined) ? 'full' : 'summary';
+}
+
+/**
+ * 横断の画面で人ごとに見せる計画（plans = appInsightPlans_ の形）。返り値 { detail, named: { 計画の ID: true }, namedPlans }。
+ * detail は画面に返す見せ方: 'full'（どの計画も人ごと）・'partial'（namedPlans の計画だけ人ごと。ほかの計画は種類ごと）・'summary'（どれも種類ごと）
+ */
+function appInsightNamedPlans_(ctx, plans) {
+  const d = appInsightDetail_(ctx);
+  const named = {};
+  if (d === 'full') plans.forEach(p => { named[p.planId] = true; });
+  else if (d.indexOf('clients:') === 0) {
+    const ok = appInsightSet_(d.slice('clients:'.length).split(','));
+    const client = {};
+    appReadTable_('PLANS').forEach(p => { client[p.plan_id] = String(p.client_id || ''); });
+    plans.forEach(p => { if (ok[client[p.planId]]) named[p.planId] = true; });
+  }
+  const ids = plans.filter(p => named[p.planId]).map(p => p.planId);
+  const detail = !ids.length ? 'summary' : ids.length === plans.length ? 'full' : 'partial';
+  return { detail: detail, named: named, namedPlans: detail === 'partial' ? ids : undefined };
+}
+
+/**
+ * 計画ごとの一覧（並びは plans の順）を、計画ごとの見せ方で作る。fn(計画の一覧, 隠すか) は、その計画だけの一覧を返す
+ * （補正の変化・承認待ちの提案）。どれも同じ見せ方なら 1 回で作る
+ */
+function appInsightPerPlan_(plans, named, fn) {
+  const mine = plans.filter(p => named[p.planId]);
+  if (!mine.length || mine.length === plans.length) return fn(plans, !mine.length);
+  return [].concat.apply([], plans.map(p => fn([p], !named[p.planId])));
+}
+
+/**
+ * 人と話題ごとの当たりを、見る人に合わせて: 人ごとに見せる計画（named）の当たりは人や話題ごと、ほかの計画の当たりは情報源の種類ごと
+ * （閲覧の人と同じ）にまとめて、1 つの一覧に並べる。人ごとの行の今の信頼度（appliedR）も、人ごとに見せる計画の分だけから出す
+ * （ほかのメーカーの同じ名前の人の信頼度を混ぜない）
+ */
+function appInsightScoreboardFor_(plans, evidence, poolByPlan, relByPlan, named) {
+  const mine = plans.filter(p => named[p.planId]), rest = plans.filter(p => !named[p.planId]);
+  if (!rest.length || !mine.length) return appSourceScoreboard_(plans, evidence, poolByPlan, relByPlan, !mine.length);
+  const pick = list => { const s = appInsightSet_(list.map(p => p.planId)); return evidence.filter(e => s[e.planId]); };
+  const rel = {};
+  mine.forEach(p => { if (relByPlan[p.planId]) rel[p.planId] = relByPlan[p.planId]; });
+  return appSourceScoreboard_(mine, pick(mine), poolByPlan, rel, false).concat(appSourceScoreboard_(rest, pick(rest), poolByPlan, {}, true))
+    .sort((a, b) => b.ci80[0] - a.ci80[0] || b.n - a.n || a.type.localeCompare(b.type) || String(a.key || '').localeCompare(String(b.key || '')));
+}
+
+/** 判断の履歴を、見る人に合わせて（人ごとに見せる計画は判断した人と信頼度の対象の名前まで。ほかの計画は種類まで）。新しい順に APP_INSIGHT_DECISIONS 件まで */
+function appInsightDecisionsFor_(plans, logs, named) {
+  const mine = plans.filter(p => named[p.planId]), rest = plans.filter(p => !named[p.planId]);
+  if (!rest.length || !mine.length) return appInsightDecisions_(plans, logs, !mine.length);
+  return appInsightDecisions_(mine, logs, false).concat(appInsightDecisions_(rest, logs, true))
+    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')) || String(a.planId).localeCompare(String(b.planId))).slice(0, APP_INSIGHT_DECISIONS);
 }
 
 // ---- 共通: ベータ分布と二項の区間 ----
@@ -658,8 +728,10 @@ function appInsightRevision_(r, sums) {
 // ---- 人の学び ----
 
 /**
- * 人の学び（ctx = 見る人。人ごとの当たりと判断した人の名前は予算策定担当以上だけ: appInsightDetail_）。返り値:
- *   detail:      'full'（予算策定担当以上）/ 'summary'（閲覧・情報提供。人の名前を出さない）
+ * 人の学び（ctx = 見る人。人ごとの当たりと判断した人の名前は予算策定担当以上だけ。メーカーに限った担当はそのメーカーの計画だけ: appInsightNamedPlans_）。返り値:
+ *   detail:      'full'（予算策定担当以上）/ 'partial'（メーカーに限った予算策定担当。namedPlans の計画だけ人ごと、ほかの計画は summary と同じ）/
+ *                'summary'（閲覧・情報提供。人の名前を出さない）
+ *   namedPlans:  partial のときだけ、人ごとに見せる計画の ID
  *   lessons:     [{ planId, clientName, fy, ym, actual, pred, err, absErr, direction, directionLabel, range, miss, hypothesis, actionType, actionLabel,
  *                   reflection, owner, status, statusLabel, human, duplicates }]（誤差の大きい順に 50 件。err = (予測 − 実績) / |実績|。summary では owner は空）
  *   causes:      [{ direction, directionLabel, range, actionType, actionTypes, actionLabel, n }]（外れた月の、向き × 幅の外か × 対応（画面に出す名前）の数。
@@ -683,9 +755,9 @@ function appInsightRevision_(r, sums) {
  *                   ratio・upliftRealized は年度が終わるまで null。projected* は統計の着地の見込みから（見込みが無ければ null））
  */
 function appPeopleLearning_(ctx) {
-  const detail = appInsightDetail_(ctx);
-  const hide = detail !== 'full';
   const plans = appInsightPlans_();
+  const view = appInsightNamedPlans_(ctx, plans);
+  const named = view.named;
   const ids = plans.map(p => p.planId);
   const tab = appInsightTables_(ids);
   const noPre = {};
@@ -694,11 +766,13 @@ function appPeopleLearning_(ctx) {
   const current = {};
   const since = {};
   const evidence = appInsightEvidence_(ids, tab, noPre, current, since);
-  const l = appInsightLessons_(plans, tab('EVAL_INSIGHTS'), hide, current, since, appInsightFrozen_(plans));
-  return Object.assign({ detail: detail }, l, {
-    scoreboard: appSourceScoreboard_(plans, evidence, tab('POOL_PRIOR'), tab('SOURCE_RELIABILITY'), hide),
+  const l = appInsightLessons_(plans, tab('EVAL_INSIGHTS'), view.detail === 'summary', current, since, appInsightFrozen_(plans));
+  // 人ごとに見せない計画の振り返りは、担当（人の名前）を空にする（partial のとき）
+  if (view.detail === 'partial') [l.lessons, l.openActions].forEach(list => (list || []).forEach(x => { if (!named[x.planId]) x.owner = ''; }));
+  return Object.assign({ detail: view.detail, namedPlans: view.namedPlans }, l, {
+    scoreboard: appInsightScoreboardFor_(plans, evidence, tab('POOL_PRIOR'), tab('SOURCE_RELIABILITY'), named),
     noPreMonth: appInsightCountMonths_(noPre),
-    decisions: appInsightDecisions_(plans, tab('QUARTERLY_REVIEW_LOG'), hide),
+    decisions: appInsightDecisionsFor_(plans, tab('QUARTERLY_REVIEW_LOG'), named),
     uplift: appInsightUplift_(ids)
   });
 }
@@ -915,8 +989,9 @@ function appInsightUplift_(ids) {
 // ---- AI の学び ----
 
 /**
- * AI の学び（ctx = 見る人。信頼度の提案と補正の、人や話題の名前は予算策定担当以上だけ: appInsightDetail_）。返り値:
- *   detail:      'full'（予算策定担当以上）/ 'summary'（閲覧・情報提供。人や話題の名前を出さない）
+ * AI の学び（ctx = 見る人。信頼度の提案と補正の、人や話題の名前は予算策定担当以上だけ。メーカーに限った担当はそのメーカーの計画だけ: appInsightNamedPlans_）。返り値:
+ *   detail:      'full'（予算策定担当以上）/ 'partial'（メーカーに限った予算策定担当。namedPlans の計画だけ名前まで）/ 'summary'（閲覧・情報提供。人や話題の名前を出さない）
+ *   namedPlans:  partial のときだけ、名前まで見せる計画の ID
  *   curves:      [{ type, label, prior: { alpha0, beta0, mu, precision, from, mean, ci80 }, n, hit,
  *                   quarters: [{ quarter, n, hit, cumN, cumHit, alpha, beta, mean, ci80 }] }]（四半期ごとに積み上げた事後。画面がベータ分布の曲線を描く）
  *   noPreMonth:  その月が始まる前の予測が無いので当たりを数えなかった、締まった月の数（人の学びと同じ。D6）
@@ -930,9 +1005,8 @@ function appInsightUplift_(ids) {
  *   health:      [{ planId, clientName, fy, key, label, value }]（気になる点。key = shadow_worse / factor_clamp / coverage_low / coverage_high）
  */
 function appAiLearning_(ctx) {
-  const detail = appInsightDetail_(ctx);
-  const hide = detail !== 'full';
   const plans = appInsightPlans_();
+  const view = appInsightNamedPlans_(ctx, plans);
   const ids = plans.map(p => p.planId);
   const tab = appInsightTables_(ids);
   const noPre = {};
@@ -971,9 +1045,9 @@ function appAiLearning_(ctx) {
   const factorNow = {};
   ids.forEach(id => { const c = (state[id] || []).slice(-1)[0]; factorNow[id] = c ? appNum_(c.bias_correction_factor) : null; });
   return {
-    detail: detail, curves: curves, noPreMonth: appInsightCountMonths_(noPre), shrinkage: shrinkage, timeline: appInsightTimeline_(accs),
-    calibration: appInsightCalibration_(plans, tab('CALIBRATION_HISTORY'), factorNow, hide),
-    pending: appInsightPending_(plans, tab('QUARTERLY_REVIEW_LOG'), hide),
+    detail: view.detail, namedPlans: view.namedPlans, curves: curves, noPreMonth: appInsightCountMonths_(noPre), shrinkage: shrinkage, timeline: appInsightTimeline_(accs),
+    calibration: appInsightPerPlan_(plans, view.named, (ps, hide) => appInsightCalibration_(ps, tab('CALIBRATION_HISTORY'), factorNow, hide)),
+    pending: appInsightPerPlan_(plans, view.named, (ps, hide) => appInsightPending_(ps, tab('QUARTERLY_REVIEW_LOG'), hide)),
     health: appInsightHealth_(plans, accs, shadow, factorNow)
   };
 }
