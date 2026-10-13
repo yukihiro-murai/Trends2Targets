@@ -214,7 +214,7 @@ const people = env.call('apiPeopleLearning()');
   assert.deepEqual([L[2].miss, L[2].direction, L[2].statusLabel], [false, 'exact', '見守り']);
   // scoredMonths: 今の決まりで B-2 が測った月（甲 5 か月・乙 6 か月）。乙は振り返りの行が無い。
   // waitingMonths: そのうち出せる振り返りの行がまだ無い月（甲 2025/05（数字の違う行だけ）・2026/07、乙 6 か月。どちらも締めていない年度）
-  assert.deepEqual(people.summary, { months: 3, misses: 2, withNotes: 1, duplicatesRemoved: 1, scoredMonths: 11, waitingMonths: 8 });
+  assert.deepEqual(people.summary, { months: 3, misses: 2, withNotes: 1, missesWithNotes: 1, duplicatesRemoved: 1, scoredMonths: 11, waitingMonths: 8 });
   assert.deepEqual(people.openActions.map((x) => [x.ym, x.statusLabel]), [['2026/04', '対応中'], ['2026/05', '未着手']], '済み・見守りは出さない');
   assert.equal(people.causes.reduce((s, c) => s + c.n, 0), 2, '外れた月だけ数える');
   assert.ok(people.causes.some((c) => c.direction === 'under' && c.actionType === '入力を修正' && !c.range));
@@ -473,7 +473,7 @@ const ai = env.call('apiAiLearning()');
   assert.deepEqual([x.plans, x.fys, x.market, x.totals.plans, x.totals.budget, x.totals.p50, x.totals.ratioP50], [[], [], [], 0, null, null, null]);
   const p = e3.call('apiPeopleLearning()');
   assert.deepEqual([p.lessons, p.causes, p.openActions, p.repeats, p.scoreboard, p.decisions, p.uplift], [[], [], [], [], [], [], []]);
-  assert.deepEqual(p.summary, { months: 0, misses: 0, withNotes: 0, duplicatesRemoved: 0, scoredMonths: 0, waitingMonths: 0 });
+  assert.deepEqual(p.summary, { months: 0, misses: 0, withNotes: 0, missesWithNotes: 0, duplicatesRemoved: 0, scoredMonths: 0, waitingMonths: 0 });
   const a = e3.call('apiAiLearning()');
   assert.equal(a.curves.length, 5);
   assert.ok(a.curves.every((c) => c.prior.alpha0 === 2 && c.prior.beta0 === 2 && c.prior.from === 'default' && c.quarters.length === 0 && c.n === 0));
@@ -532,7 +532,7 @@ const ai = env.call('apiAiLearning()');
   assert.deepEqual([by['2026/04'].reflection, by['2026/04'].human, by['2026/04'].duplicates], ['単価の前提を見直す', true, 1], '反映の欄だけの記入も、新しい自動の行に負けない');
   assert.deepEqual([by['2026/05'].human, by['2026/05'].actionLabel], [true, '前提を更新']);
   assert.deepEqual([by['2026/06'].human, by['2026/07'].human, by['2026/07'].reflection], [false, false, '現行運用を継続'], '自動の値だけなら人の記入ではない');
-  assert.deepEqual(p.summary, { months: 4, misses: 3, withNotes: 2, duplicatesRemoved: 1, scoredMonths: 4, waitingMonths: 0 });
+  assert.deepEqual(p.summary, { months: 4, misses: 3, withNotes: 2, missesWithNotes: 2, duplicatesRemoved: 1, scoredMonths: 4, waitingMonths: 0 });
   // 自動の update と、人が選んだ「前提を更新」は画面では同じ名前なので 1 行
   assert.equal(p.causes.length, 1);
   const c = p.causes[0];
@@ -717,9 +717,11 @@ const ai = env.call('apiAiLearning()');
       google: { script: { run: new Proxy({}, { get: (t, k) => (k === 'withSuccessHandler' || k === 'withFailureHandler' ? () => ui.google.script.run : () => {}) }) } } });
     vm.runInContext(js, ui);
     Object.assign(ui, { __p: planner, __a: plannerAi });
-    const peopleHtml = vm.runInContext('S.lr.people = __p; S.lr.ai = __a; S.lr.tab = "people"; viewLearning()', ui);
-    const aiHtml = vm.runInContext('S.lr.tab = "ai"; viewLearning()', ui);
-    for (const [what, html] of [['人の学び', peopleHtml], ['AI の学び', aiHtml]]) {
+    // 学びは 1 カラム（人の学び・AI の学びを縦に）。区切りごとにも確かめる
+    const pageHtml = vm.runInContext('S.lr.people = __p; S.lr.ai = __a; viewLearning()', ui);
+    const peopleHtml = vm.runInContext('lrReviewCard(__p, __a) + lrPeopleView(__p)', ui);
+    const aiHtml = vm.runInContext('lrAiView(__a)', ui);
+    for (const [what, html] of [['学びの画面', pageHtml], ['人の学び', peopleHtml], ['AI の学び', aiHtml]]) {
       assert.doesNotMatch(html, /undefined|NaN/, what + ': 空の値を出さない');
       for (const s of ['佐藤', '的中率', '当たった割合']) assert.ok(!html.includes(s), what + ': ほかのメーカーの人・根拠を出さない: ' + s);
     }
@@ -1034,7 +1036,7 @@ const ai = env.call('apiAiLearning()');
     ['大口の失注', '入力を修正', '見解を見直す', '鷹野', 'in_progress', '対応中', true, 1], '7 月の記入は、最後の行でない人の記入の行から');
   const aug = by['2026/08'];
   assert.deepEqual([aug.pred, aug.hypothesis, aug.owner, aug.status, aug.human, aug.duplicates], [1100, '新しい記入', '鷹野', 'done', true, 1], '8 月は人が書いた一番新しい行の記入');
-  assert.deepEqual(r.summary, { months: 2, misses: 2, withNotes: 2, duplicatesRemoved: 2, scoredMonths: 3, waitingMonths: 1 }, '9 月は B-4 待ち');
+  assert.deepEqual(r.summary, { months: 2, misses: 2, withNotes: 2, missesWithNotes: 2, duplicatesRemoved: 2, scoredMonths: 3, waitingMonths: 1 }, '9 月は B-4 待ち');
   assert.deepEqual(r.openActions.map((x) => [x.ym, x.statusLabel]), [['2026/07', '対応中']], '残っている対応も記入の状態から');
   // 同じ時刻なら後の行
   const tie = run([ins(first - 864e5, '2026/07', 900, { cause_hypothesis: '前' }), ins(first - 864e5, '2026/07', 900, { cause_hypothesis: '後' }), ins(at, '2026/07', 1100)], months);

@@ -457,7 +457,27 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .lr-so{display:none}   /* スマホだけに出す（隠した列の中身） */
 .tbl td.lr-wr{white-space:normal}   /* 折り返す列（スマホでも最小の幅を広げない。.wrap はスマホで 160px より狭くならない） */
 .tbl td.lr-kw{word-break:keep-all}   /* 語の途中で折らない（「（担当A）」の前など、区切りで折る） */
-@media (min-width:761px){.tbl.lr-dec{width:max(100%,880px)}}   /* 判断の履歴: 狭い PC の画面でも「対象」の列を潰さない（入らなければ横に送る） */
+/* 学びの表の列は格子（1 マス 160px・2 マス 332px。lrTable の --w）。残りは最後の空の列が受ける。スマホは --wm（無ければ残りを分ける） */
+.tbl.lr-t col{width:var(--w,auto)}
+.tbl .lr-fill{padding:0}
+.tbl tbody tr:hover td.lr-fill{background:transparent}
+.tbl .lr-sub{display:block;line-height:1.5}   /* セルの 2 行目（作った日・判断した人・区分の札・月の数） */
+.tbl .lr-sub.chip,.tbl .lr-sub .chip{margin:var(--s1) 0 0}
+.tbl td .lr-sub{white-space:nowrap}
+/* 区切り（前提と情報の見直し・補正と重みの調整） */
+.lr-sec{display:flex;align-items:baseline;flex-wrap:wrap;gap:var(--s1) var(--s3);margin:var(--s8) 0 var(--s4);padding-left:var(--s3);border-left:4px solid var(--primary)}
+h1 + .lr-sec{margin-top:0}
+.lr-sec h2{display:flex;align-items:center;gap:10px;font-size:var(--fs-h2);line-height:1.4;color:var(--navy)}
+/* 次の予測で見直すこと（問いかけの並び） */
+.lr-qs{list-style:none;margin:0;padding:0;display:grid;gap:var(--s3)}
+.lr-q{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s3) var(--s4);border:1px solid var(--line);border-radius:var(--radius-s);background:#fff}
+.lr-qn{flex:0 0 28px;width:28px;height:28px;border-radius:50%;background:var(--primary-soft);color:var(--navy);display:flex;align-items:center;justify-content:center;font-size:var(--fs-s);font-variant-numeric:tabular-nums}
+.lr-qb{flex:1;min-width:0;display:grid;grid-template-columns:var(--col) minmax(0,1fr);gap:2px var(--s3);align-items:baseline}
+.lr-qt{grid-row:span 2;font-size:var(--fs-b);color:var(--navy);line-height:1.6}
+.lr-qsay{font-size:var(--fs-b);color:var(--text);line-height:1.6}
+.lr-qa{font-size:var(--fs-s);color:var(--primary-dark);line-height:1.6}
+.lr-qa::before{content:"次の一歩　";color:var(--muted)}
+.lr-qwait{min-height:64px;margin-top:var(--s3)}
 /* グラフの上の凡例（HTML） */
 .lr-key{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:var(--s1)}
 .lr-key span{display:inline-flex;align-items:center;gap:6px}
@@ -503,6 +523,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .lr-wx .skych{width:48px;height:48px}
   .tbl.lr-t{min-width:640px}
   .tbl.lr-t.lr-fit{min-width:0}
+  .tbl.lr-t col{width:var(--wm,auto)}
+  .tbl .lr-fill{display:none}
+  .lr-sec{margin-top:var(--s7)}
+  .lr-sec h2{font-size:var(--fs-h3)}
+  .lr-q{padding:var(--s3)}
+  .lr-qb{grid-template-columns:minmax(0,1fr)}
+  .lr-qt{grid-row:auto}
   .tbl.lr-fit th{white-space:normal;word-break:keep-all;overflow-wrap:normal}   /* 幅に収める表は、見出しも折り返す（語の途中では折らない） */
   .tbl .lr-hm{display:none}
   .tbl .lr-so{display:block}
@@ -619,7 +646,7 @@ function actBtn(btnHtml, text){ return '<span class="act"' + (text ? ' data-tip=
   window.addEventListener('scroll', hide, true);
 })();
 /** 説明（data-tip）の付いた数字・文・見出しを、キーボードでも選べるようにする（描いた後に呼ぶ。グラフの中・ボタン・欄はそのまま） */
-var TIP_FOCUS = '.kpi[data-tip],.todo [data-tip],.hm-lrbox[data-tip],.hm-lrt[data-tip],.anbh[data-tip],.anx[data-tip],.meta[data-tip],.fc-say[data-tip],.fc-wxnm[data-tip],.fc-stats [data-tip],.bubble [data-tip],th[data-tip],td[data-tip],.fc-src[data-tip],.lr-err[data-tip],.chip[data-tip],.skycell[data-tip]';
+var TIP_FOCUS = '.kpi[data-tip],.todo [data-tip],.hm-lrbox[data-tip],.hm-lrt[data-tip],.anbh[data-tip],.anx[data-tip],.meta[data-tip],.fc-say[data-tip],.fc-wxnm[data-tip],.fc-stats [data-tip],.bubble [data-tip],th[data-tip],td[data-tip],.fc-src[data-tip],.lr-err[data-tip],.lr-q [data-tip],.chip[data-tip],.skycell[data-tip]';
 function tipFocus(root){
   root = root || document;
   if (!root || !root.querySelectorAll) return;
@@ -1815,7 +1842,7 @@ function homeSkyCard(plans){
 /** 「荒れている」とみなす学びの気になる点: 補正が上限・下限に張りついた（外れが補正で追いつかない）・見通しの幅に収まる割合が 80% より低い（幅の外の外れが多い） */
 var HOME_ROUGH = { factor_clamp: '補正が上限か下限に張りついたメーカー', coverage_low: '見通しの幅の外れが多いメーカー' };
 var HOME_ROUGH_SHORT = { factor_clamp: '補正が限度', coverage_low: '幅が狭すぎる' };   // 学びの気になる点の札（LR_HEALTH）と同じ名前
-function homeToLearn(){ S.lr.tab = 'ai'; go('learning'); }   // 先にタブを決める（人の学びを読まない）
+function homeToLearn(){ go('learning'); setTimeout(function(){ var el = $('lr-tune'); if (el && el.scrollIntoView) el.scrollIntoView(); }, 0); }   // 学びの「補正と重みの調整」へ
 function homeLearnCard(h, plans){
   var head = '<div class="card-head"><h2>学びの進み' + tip('予測の当たり方（精度の天気）と、承認を待っている AI の見直し案です。見直し案は、承認して反映するまで予測に効きません') + '</h2></div>';
   var d = S.lr.ai, x = S.ld.lrAi;
@@ -3916,26 +3943,35 @@ function anMarket(d){
 // ==== END REGION: ANALYSIS ====
 
 // ==== REGION: LEARNING ====
-// 学び（人の学び: apiPeopleLearning・AI の学び: apiAiLearning）。開いたタブを先に読み、もう一方はタブを開いたときに読む。
-// ホームの「学びの進み」も S.lr.ai と同じ読み込み（key 'lrAi'）を使う。
+// 学び（人の学び: apiPeopleLearning・AI の学び: apiAiLearning）。タブにせず 1 カラムで縦に並べ、開いたら両方を読む（2026-10-13 村井さん）。
+// 2 つの区切り（どちらも大事なので分けて置く）:
+//   前提と情報の見直し（ダブルループ学習）… 人に返す学び。前提・情報の集め方・根拠の置き方を人が見直す。先頭に「次の予測で見直すこと」（数字から人への問いかけ）。
+//     外れた月の振り返り・外れの向きと対応・当たりの確かさ・人ごとの当たり・判断の履歴・予算の上乗せの当たり
+//   補正と重みの調整（シングルループ学習）… 前提はそのままで、AI が補正や重みの数字を直す学び。
+//     精度の天気・承認待ちの見直し案・重みの学び（情報源の信頼度）・調査ごとの当たり・偏りの縮め・外れ幅と幅の当たり（続きやすさ）・補正の履歴・着地の幅の学び
+// ホームの「学びの進み」も S.lr.ai と同じ読み込み（key 'lrAi'・lrLoad('ai')）を使う。
 // 画面の言葉（2026-10-06）: 事前分布 → 最初の見立て（破線）・事後分布 → 学んだ後（実線）・経験ベイズで縮めた偏り → 全体に寄せた偏り。
 // 専門の名前は「詳しく」の説明（カーソル）だけに出す。グラフにはすべて「表で見る」を付ける。道具の名前は lr で始める
-S.lr = { tab: 'people', people: null, ai: null, more: {}, lessonView: 'big', calPlan: '' };
-var LR_TABS = [['people', '人の学び'], ['ai', 'AI の学び']];
+S.lr = { people: null, ai: null, more: {}, lessonView: 'big', calPlan: '' };
 var LR_KEY = { people: 'lrPeople', ai: 'lrAi' };
-function lrEnter(){ lrNeed(S.lr.tab); }
-/** タブの中身が無い・10 分より古いときだけ読む */
+function lrEnter(){ lrNeed('people'); lrNeed('ai'); }
+/** 中身が無い・10 分より古いときだけ読む */
 function lrNeed(t){ if (ldNeed(LR_KEY[t], !!S.lr[t])) lrLoad(t); }
 function lrLoad(t){
   if (t === 'ai') load('lrAi', function(ok, fail){ call('apiAiLearning', [], ok, fail); }, null, function(r){ S.lr.ai = r; });
   else load('lrPeople', function(ok, fail){ call('apiPeopleLearning', [], ok, fail); }, null, function(r){ S.lr.people = r; });
 }
-function lrTab(t){ S.lr.tab = t === 'ai' ? 'ai' : 'people'; lrNeed(S.lr.tab); render(); }
+/** 区切りの見出し（ふつうの言葉。学びの型の名前は説明に） */
+function lrSec(id, title, tipText, sub){ return '<div class="lr-sec" id="' + id + '"><h2>' + esc(title) + tip(tipText) + '</h2>' + (sub ? '<span class="meta">' + esc(sub) + '</span>' : '') + '</div>'; }
+var LR_SEC_HUMAN = 'ダブルループ学習: 補正の数字を直すだけでは足りない外れを、人に返します。何の情報を早く集めるべきだったか、何を根拠に置くべきかなど、前提そのものを見直すための材料です';
+var LR_SEC_TUNE = 'シングルループ学習: 前提はそのままで、外れ方から AI が補正や重みの数字を直します。見直し案は、承認して反映するまで予測に効きません';
 function viewLearning(){
-  var t = S.lr.tab, d = S.lr[t];
-  var html = '<h1>学び</h1>' + subTabs(LR_TABS, t, 'lrTab');
-  if (!d) return html + (slot(LR_KEY[t], '学びを読み込んでいます', "lrLoad('" + t + "')") || loading('学びを読み込んでいます'));
-  return html + (t === 'ai' ? lrAiView(d) : lrPeopleView(d));
+  var p = S.lr.people, a = S.lr.ai;
+  var html = '<h1>学び</h1>' + lrSec('lr-human', '前提と情報の見直し', LR_SEC_HUMAN, '人に返す学び');
+  html += p ? lrReviewCard(p, a) + lrPeopleView(p) : (slot('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')") || loading('人の学びを読み込んでいます'));
+  html += lrSec('lr-tune', '補正と重みの調整', LR_SEC_TUNE, 'AI が直す学び');
+  html += a ? lrAiView(a) : (slot('lrAi', 'AI の学びを読み込んでいます', "lrLoad('ai')") || loading('AI の学びを読み込んでいます'));
+  return html;
 }
 
 // ---- 学びの言葉と小さな道具（この画面だけで使う） ----
@@ -3989,15 +4025,19 @@ function lrCard(title, tipText, body, right){ return '<div class="card"><div cla
 /** 「詳しく」（専門の名前・式はここだけ。カーソルで出す） */
 function lrMore(text){ return '<span class="lr-more" tabindex="0" data-tip="' + esc(text) + '">詳しく</span>'; }
 /**
- * 表。cols: [[見出し, 列のクラス, 幅(px), 見出しの説明]]、rows: セルの並び（HTML の文字列、または { h, tip, cls }）。
- * スマホでは表ごと横に送る（.lr-t の最小の幅）。列のクラスに lr-hm を入れた列はスマホで隠す（.lr-fit の表は横に送らず幅に収める）
+ * 表。cols: [[見出し, 列のクラス, PC の幅(px), 見出しの説明, スマホの幅(px)]]、rows: セルの並び（HTML の文字列、または { h, tip, cls }）。
+ * PC の列は格子（1 マス 160px・2 マス 332px。LR_C1・LR_C2）にそろえ、残りは最後の空の列（lr-fill）が受ける（中身より広い列を作らない。2026-10-13 村井さん）。
+ * 長い文の列は lr-wr で折り返す。スマホは空の列を隠し、幅はスマホの幅（無ければ残りを分ける）。スマホでは表ごと横に送る（.lr-t の最小の幅）。
+ * 列のクラスに lr-hm を入れた列はスマホで隠す（.lr-fit の表は横に送らず幅に収める）
  */
+var LR_C1 = 160, LR_C2 = 332;
 function lrTable(cols, rows, cls){
   var cell = function(v, c){ var o = v && typeof v === 'object' ? v : { h: v }; var k = [c[1], o.cls].filter(Boolean).join(' ');
     return '<td' + (k ? ' class="' + k + '"' : '') + (o.tip ? ' data-tip="' + esc(o.tip) + '"' : '') + '>' + (o.h === undefined || o.h === null || o.h === '' ? '-' : o.h) + '</td>'; };
-  return '<table class="tbl lr-t' + (cls ? ' ' + cls : '') + '"><colgroup>' + cols.map(function(c){ return '<col' + (c[1] ? ' class="' + c[1] + '"' : '') + (c[2] ? ' style="width:' + c[2] + 'px"' : '') + '>'; }).join('') + '</colgroup>'
-    + '<thead><tr>' + cols.map(function(c){ return '<th' + (c[1] ? ' class="' + c[1] + '"' : '') + (c[3] ? ' data-tip="' + esc(c[3]) + '"' : '') + '>' + esc(c[0]) + '</th>'; }).join('') + '</tr></thead>'
-    + '<tbody>' + rows.map(function(r){ return '<tr>' + r.map(function(v, i){ return cell(v, cols[i] || []); }).join('') + '</tr>'; }).join('') + '</tbody></table>';
+  var w = function(c){ var st = (c[2] ? '--w:' + c[2] + 'px;' : '') + (c[4] ? '--wm:' + c[4] + 'px;' : ''); return st ? ' style="' + st + '"' : ''; };
+  return '<table class="tbl lr-t' + (cls ? ' ' + cls : '') + '"><colgroup>' + cols.map(function(c){ return '<col' + (c[1] ? ' class="' + c[1] + '"' : '') + w(c) + '>'; }).join('') + '<col class="lr-fill"></colgroup>'
+    + '<thead><tr>' + cols.map(function(c){ return '<th' + (c[1] ? ' class="' + c[1] + '"' : '') + (c[3] ? ' data-tip="' + esc(c[3]) + '"' : '') + '>' + esc(c[0]) + '</th>'; }).join('') + '<th class="lr-fill" aria-hidden="true"></th></tr></thead>'
+    + '<tbody>' + rows.map(function(r){ return '<tr>' + r.map(function(v, i){ return cell(v, cols[i] || []); }).join('') + '<td class="lr-fill" aria-hidden="true"></td></tr>'; }).join('') + '</tbody></table>';
 }
 /** 丸い札の切り替え（表示の絞り込み） */
 function lrPill(cur, key, label, fn){ return '<button type="button" class="tab' + (cur === key ? ' on' : '') + '" role="tab" aria-selected="' + (cur === key) + '" onclick="' + fn + '(\'' + key + '\')">' + esc(label) + '</button>'; }
@@ -4009,6 +4049,118 @@ function lrLessonView(v){ S.lr.lessonView = v; S.lr.more.lessons = false; render
 function lrOpen(planId, tipText){ return actBtn('<button type="button" class="btn btn-ghost btn-sm" onclick="openPlan(\'' + esc(planId) + '\',\'review\')">開く</button>', tipText || 'この計画の「振り返り」を開きます'); }
 
 // ---- 人の学び ----
+/**
+ * 次の予測で見直すこと（ダブルループ学習の問いかけ）。人の学び p と AI の学び a（まだ無ければ null）の数字から、人に返す問いかけを気になる順（score の大きい順）に。
+ * 1 つずつ { key, score, title（短い名前）, say（数字で見えたこと。断定しすぎない）, act（次の一歩を 1 つ）, tip（根拠の数字） }。決まり:
+ *   src    当たりが基準（いつも同じ向きと言った場合）を下回る情報源の種類: 種類ごとに 当たり < 当たるはずの数 − 0.5 で、回数 6 回以上・差が回数の 5% 以上
+ *          （人の入力・見解 → 根拠を添えて確かめてから入れる。AI → 社内の情報で確かめる）。80% の幅の上の端も基準より下の行があれば「下回っています」、ほかは「下回りがち」
+ *   dir    大きく外れた月の向きの偏り（外れの向きと対応の数）: 3 件以上で、強気か弱気が 7 割以上 → 下げる・上げる材料を早く集める仕組み
+ *   range  大きく外れた月の半分以上が見通しの幅の外（3 件以上）→ 一度きりの出来事・季節の山を予測の前に洗い出す
+ *   bias   読みのクセ（全体に寄せた偏り）: ±5% を超えるメーカーが 2 つ以上で、同じ向きが 6 割以上 → 前提の見直し
+ *   pre    月が始まる前の予測が無い月（noPreMonth）: のべ 2 か月以上で、比べた月との合計の 15% 以上 → 更新の頃合いを決める
+ *   notes  人の振り返りが無い外れ月（misses − missesWithNotes）: 3 件以上で、外れ月の半分以上 → 外れた理由を書く
+ *   cite   AI 調査で出典の無い話題（unsourced）: 出来事の行 4 件以上で、3 割以上 → 社内の情報で補う
+ *   stick  月の外れが続きやすい（persistence.sticky）→ 外れた翌月は締めを待たずに見直す
+ *   rep    同じメーカーの同じ月に、年度をまたいでまた外れた（repeats）→ 毎年の季節の動きを前提に入れる
+ * 人の名前は、サーバーが渡す範囲（人や話題ごとの行 = 見せてよい計画の分）だけを説明に出す。文の本体は種類・数だけ
+ */
+var LR_HUMAN_SRC = { factor_product: 1, factor_client: 1, opinion: 1 };
+function lrFmt1(v){ return (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, ''); }
+function lrReviewItems(p, a){
+  var out = [];
+  p = p || {}; a = a || null;
+  // src: 情報源の種類ごとに足す（人や話題ごとの行も、種類ごとの行も）
+  var byType = {}, types = [];
+  (p.scoreboard || []).forEach(function(r){
+    if (!r || !r.n || !r.type) return;
+    var o = byType[r.type];
+    if (!o) { o = byType[r.type] = { type: r.type, label: r.label, n: 0, hit: 0, exp: 0, below: false, rows: [] }; types.push(o); }
+    o.n += r.n; o.hit += r.hit || 0; o.exp += isNum(r.expected) ? r.expected : lrBase(r) * r.n;
+    if (lrVsBase(r) === 'below') o.below = true;
+    o.rows.push(r);
+  });
+  types.forEach(function(o){
+    var gap = o.exp - o.hit;
+    if (o.n < 6 || gap < 0.5 || gap / o.n < 0.05) return;
+    var name = lrSrc(o.type, o.label), human = !!LR_HUMAN_SRC[o.type];
+    var rowsTip = o.rows.filter(function(r){ return r.key; }).slice(0, 6).map(function(r){ var kn = lrKeyName(r.type, r.key); return (kn || name) + '　' + r.hit + ' / ' + r.n + ' 回（基準なら ' + lrFmt1(isNum(r.expected) ? r.expected : lrBase(r) * r.n) + ' 回）'; });
+    out.push({ key: 'src-' + o.type, score: 60 + 100 * gap / o.n + (o.below ? 15 : 0), title: name + 'の根拠',
+      say: '「' + name + '」の当たりが、いつも同じ向きと言った場合を' + (o.below ? '下回っています。' : '下回りがちです。'),
+      act: human ? '次は根拠（数字・出来事・出典）を添え、確かめてから入れましょう。' : 'AI の見立てをそのまま使わず、社内の情報で確かめてから効かせましょう。',
+      tip: name + ': 当たり ' + o.hit + ' / ' + o.n + ' 回・いつも同じ向きなら ' + lrFmt1(o.exp) + ' 回'
+        + (o.below ? '' : '\nまだ回数が少なく、確かとは言えません（80% の幅が基準をまたいでいます）') + (rowsTip.length ? '\n' + rowsTip.join('\n') : '') });
+  });
+  // dir・range: 大きく外れた月の向きと幅の外
+  var tot = 0, by = { over: 0, under: 0 }, rng = 0;
+  (p.causes || []).forEach(function(c){ var n = c.n || 0; tot += n; if (by[c.direction] !== undefined) by[c.direction] += n; if (c.range) rng += n; });
+  if (tot >= 3) {
+    var dk = by.over >= by.under ? 'over' : 'under', share = by[dk] / tot, rest = tot - by.over - by.under;
+    if (share >= 0.7) out.push({ key: 'dir', score: 50 + 30 * share, title: '外れの向き',
+      say: '大きく外れた月の多く（' + by[dk] + ' / ' + tot + ' 件）は' + (dk === 'over' ? '強気の外れ（予測が高すぎた）' : '弱気の外れ（予測が低すぎた）') + 'です。',
+      act: dk === 'over' ? '下げる材料（競合・在庫・出荷の変化）を早く集める仕組みを作りましょう。' : '上げる材料（新しい採用・処方の伸び）を早く集める仕組みを作りましょう。',
+      tip: '大きく外れた月 ' + tot + ' 件: 強気の外れ ' + by.over + '・弱気の外れ ' + by.under + (rest ? '・ほか ' + rest : '') });
+    if (rng / tot >= 0.5) out.push({ key: 'range', score: 45 + 20 * rng / tot, title: '見通しの幅の外',
+      say: '大きく外れた月の多く（' + rng + ' / ' + tot + ' 件）は、見通しの幅の外でした。',
+      act: '一度きりの出来事や季節の山を、予測の前に洗い出しましょう。',
+      tip: '見通しの幅（下振れ〜上振れ）の外に出た月 ' + rng + ' / ' + tot + ' 件' });
+  }
+  // bias: 読みのクセ（AI の学びの全体に寄せた偏り）
+  var sp = a && a.shrinkage ? (a.shrinkage.plans || []).filter(function(x){ return isNum(x.shrunk); }) : [];
+  var hi = sp.filter(function(x){ return x.shrunk >= 0.05; }), lo = sp.filter(function(x){ return x.shrunk <= -0.05; });
+  var side = hi.length >= lo.length ? hi : lo, multi = lrMultiFy(sp);
+  if (side.length >= 2 && side.length / sp.length >= 0.6) {
+    var up = side === hi;
+    out.push({ key: 'bias', score: 55 + 25 * side.length / sp.length, title: '読みのクセ',
+      say: sp.length + ' メーカーのうち ' + side.length + ' メーカーで、予測がいつも' + (up ? '高め（強気）' : '低め（弱気）') + 'に外れています。',
+      act: up ? '伸びの前提（採用の時期・市場の伸び）が実績に合っているか見直しましょう。' : '控えめにしている前提（競合の影響・採用の遅れ）が今も当てはまるか見直しましょう。',
+      tip: '補正を外した予測の偏りを、全体に寄せた値（プラスは強気・マイナスは弱気）\n' + side.slice(0, 8).map(function(x){ return lrName(x, multi) + '　' + pct1(x.shrunk); }).join('\n') + (side.length > 8 ? '\nほか ' + (side.length - 8) + ' メーカー' : '') });
+  }
+  // pre: 月が始まる前の予測が無い月
+  var noPre = isNum(p.noPreMonth) ? p.noPreMonth : a && isNum(a.noPreMonth) ? a.noPreMonth : 0, sm = p.summary || {}, scored = isNum(sm.scoredMonths) ? sm.scoredMonths : 0;
+  if (noPre >= 2 && noPre / (noPre + scored) >= 0.15) out.push({ key: 'pre', score: 40 + 40 * noPre / (noPre + scored), title: '予測の更新の頃合い',
+    say: '締まった月のうち のべ ' + noPre + ' か月は、その月が始まる前の予測がありませんでした。',
+    act: '月が始まる前に予測を見直す日を、毎月決めておきましょう。',
+    tip: '月が始まる前の予測が無い月は、当たり具合を比べられません（のべ ' + noPre + ' か月。比べた月は のべ ' + scored + ' か月）' });
+  // notes: 人の振り返りが無い外れ月
+  var miss = sm.misses || 0, withN = isNum(sm.missesWithNotes) ? sm.missesWithNotes : (p.lessons || []).filter(function(x){ return x && x.miss && x.human; }).length, none = Math.max(0, miss - withN);
+  if (none >= 3 && none / miss >= 0.5) out.push({ key: 'notes', score: 35 + 30 * none / miss, title: '外れた理由の記入',
+    say: '大きく外れた月のうち ' + none + ' 件に、人の振り返りがありません。',
+    act: '外れた理由を知っている人が、その計画の振り返りに 1 行でも書きましょう。',
+    tip: '大きく外れた月 ' + miss + ' 件のうち、人の記入がある月 ' + withN + ' 件。書いた理由は、次の予測の前提の見直しに使います' });
+  // cite: AI 調査で出典の無い話題
+  var u = a && a.unsourced;
+  if (u && u.events >= 4 && u.unsourced / u.events >= 0.3) out.push({ key: 'cite', score: 30 + 30 * u.unsourced / u.events, title: 'AI の調査の出典',
+    say: 'AI の調査で、出典が見つからなかった話題が ' + u.unsourced + ' / ' + u.events + ' 件あります。',
+    act: '社内の情報（営業の声・卸の数字・購入レポート）で補いましょう。',
+    tip: '出典の無い話題は、予測に効かせていません（いちばん新しい調査の出来事の数）' + ((u.makers || []).length ? '\n' + u.makers.slice(0, 8).join('・') + (u.makers.length > 8 ? ' ほか ' + (u.makers.length - 8) : '') : '') });
+  // stick: 月の外れが続きやすい
+  var ps = a && a.persistence;
+  if (ps && ps.sticky && isNum(ps.rho)) out.push({ key: 'stick', score: 50, title: '外れの続きやすさ',
+    say: '月の外れが、次の月にも続きやすい傾向です。',
+    act: '外れた翌月は、次の締めを待たずに前提を見直しましょう。',
+    tip: '隣り合う月の外れの続きやすさ ' + (ps.rho >= 0 ? '+' : '') + ps.rho.toFixed(2) + '（' + ps.pairs + ' 組・' + ps.plans + ' 計画）。続きやすいと、着地の見込みの幅は狭すぎるかもしれません' });
+  // rep: 同じ月のくり返し
+  var rp = p.repeats || [];
+  if (rp.length) out.push({ key: 'rep', score: 40 + Math.min(20, 5 * rp.length), title: '同じ月のくり返し',
+    say: '同じメーカーの同じ月に、年度をまたいでまた外れたのが ' + rp.length + ' 件あります。',
+    act: '毎年の季節の動き（学会・改定の時期など）を、前提に入れましょう。',
+    tip: rp.slice(0, 8).map(function(r){ return r.clientName + '　' + Number(r.month) + '月（FY' + (r.fys || []).join('・FY') + '）'; }).join('\n') });
+  return out.sort(function(x, y){ return y.score - x.score; });
+}
+/** 次の予測で見直すこと（カード）。人の学びがあれば出す。AI の学びを読み込み中なら、その分はよみの「観測中…」 */
+function lrReviewCard(p, a){
+  var xs = lrReviewItems(p, a), wait = !a && ldBusy('lrAi'), sm = p.summary || {};
+  if (!(sm.scoredMonths > 0 || sm.months > 0 || (p.scoreboard || []).length || xs.length || wait)) return '';
+  var max = (window.innerWidth || 1280) <= 760 ? 3 : 5, shown = S.lr.more.review ? xs : xs.slice(0, max);
+  var body = xs.length ? '<ol class="lr-qs">' + shown.map(function(x, i){
+    return '<li class="lr-q"><span class="lr-qn" aria-hidden="true">' + (i + 1) + '</span><div class="lr-qb"><span class="lr-qt">' + esc(x.title) + '</span>'
+      + '<span class="lr-qsay" tabindex="0" data-tip="' + esc(x.tip) + '">' + esc(x.say) + '</span><span class="lr-qa">' + esc(x.act) + '</span></div></li>'; }).join('') + '</ol>'
+      + (xs.length > max ? lrMoreBtn('review', xs.length - max) : '')
+    : (wait ? '' : '<p class="note">今のところ、前提の見直しを促す偏りは見つかっていません。</p>');
+  if (wait) body += '<div class="hm-wait lr-qwait" role="status"><span class="hm-yomi">' + YOMI_POSE.observe + '</span><span>観測中…</span><span class="note">AI の学びの数字を読み込んでいます</span></div>';
+  return lrCard('次の予測で見直すこと', '外れ方と当たり方の数字から、前提・情報の集め方・根拠の置き方で見直したいことを、気になる順に並べました。数字は傾向で、原因を決めつけるものではありません。文にカーソルを合わせると、もとの数字が出ます',
+    body, xs.length ? '<span class="meta">' + xs.length + ' 件</span>' : '');
+}
 function lrPeopleView(d){
   var full = d.detail === 'full' || d.detail === 'partial';   // 人ごとの中身がある（partial は担当のメーカーの計画だけ。行ごとに lrNamed で決める）
   // 何も無いときは、よみの案内 1 つだけ（空の注記を並べない）。中身の無いカードは出さない
@@ -4092,7 +4244,7 @@ function lrCauseCard(d){
   // スマホのグラフは向きを短く（強気・前提を更新）。対応の名前を切らない。正確な名前はカーソルと 表で見る に
   var narrow = chW() < 480, chLab = function(o){ return narrow ? (o.dir.short || o.dir.name) + '・' + o.act : lab(o); };
   var chart = chartBars(rows.map(function(o){ return { label: chLab(o), value: o.n, tone: o.dir.tone, tip: tipOf(o) }; }), { fmt: intFmt, min: 0, label: '外れの向きと対応（月の数）', labelW: narrow ? 132 : 220 });
-  var table = lrTable([['向き', '', 128], ['対応', 'colmin'], ['月の数', 'num', 112], ['幅の外', 'num', 112, '実績が見通しの幅（下振れ〜上振れ）の外に出た月の数']],
+  var table = lrTable([['向き', '', LR_C1], ['対応', 'lr-wr', LR_C1], ['月の数', 'num', LR_C1], ['幅の外', 'num', LR_C1, '実績が見通しの幅（下振れ〜上振れ）の外に出た月の数']],
     rows.map(function(o){ return [{ h: esc(o.dir.name), tip: o.dir.say }, esc(o.act), o.n, o.range]; }));
   return lrCard('外れの向きと対応', '大きく外れた月を、外れの向き（強気の外れ = 予測が高すぎた・弱気の外れ = 予測が低すぎた）と、決めた対応ごとに数えました。人が決めていない月の対応は、計算が自動で付けたものです。原因の仮説は「大きく外れた月」のカードに出ます', chartOrTable('lrCause', chart, table));
 }
@@ -4130,10 +4282,11 @@ function lrScoreCard(d, full){
   var chart = key + chartIntervals(sc.map(function(r){ return { label: narrow ? short(r) : label(r), lo: r.ci80[0], mid: r.postMean, hi: r.ci80[1], ref: lrBase(r), tip: tipOf(r) }; }),
     { min: Math.max(0, lo), max: Math.min(1, hi), label: '当たりの確かさ', labelW: narrow ? 136 : 220 });
   var mark = function(r){ var v = lrVsBase(r); return v ? ' <span class="chip" tabindex="0" data-tip="' + esc(LR_VS_BASE[v]) + '">' + (v === 'above' ? '上回る' : '下回る') + '</span>' : ''; };
-  var table = lrTable([['情報源', 'wrap colmin'], ['当たり', 'num', 112, '押した向きが実績の動きと合った回数 / 数えた回数'],
-    ['基準', 'num', 96, 'いつも同じ向きと言った場合に当たる割合（同じ計画で、実績がその向きに外れた月の割合）'], ['確かさ', 'num', 96, '今の見立ての当たる割合'],
-    ['80% の幅', 'num', 128, '10 回に 8 回はこの間に入る見込み。左の端が基準より上なら、いつも同じ向きと言うよりも当たっています']].concat(full ? [['今の重み', 'num', 96, '予測に効かせている重み（1.00 = 変えていない）']] : []),
-    sc.map(function(r){ return [{ h: esc(label(r)) + mark(r), tip: tipOf(r) }, r.hit + ' / ' + r.n, lrPct(lrBase(r)), lrPct(r.postMean), lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1])].concat(full ? [wTxt(r)] : []); }));
+  // 列は格子に（1 マスずつ）: 情報源（長い名前は折り返す）・当たり・基準・80% の幅（今の見立てはカーソル）・今の重み（予算策定担当以上）
+  var table = lrTable([['情報源', 'lr-wr', LR_C1], ['当たり', 'num', LR_C1, '押した向きが実績の動きと合った回数 / 数えた回数'],
+    ['基準', 'num', LR_C1, 'いつも同じ向きと言った場合に当たる割合（同じ計画で、実績がその向きに外れた月の割合）'],
+    ['80% の幅', 'num', LR_C1, '10 回に 8 回はこの間に入る見込み（カーソルで今の見立て）。左の端が基準より上なら、いつも同じ向きと言うよりも当たっています']].concat(full ? [['今の重み', 'num', LR_C1, '予測に効かせている重み（1.00 = 変えていない）']] : []),
+    sc.map(function(r){ return [{ h: esc(label(r)) + mark(r), tip: tipOf(r) }, r.hit + ' / ' + r.n, lrPct(lrBase(r)), { h: lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1]), tip: '今の見立て ' + lrPct(r.postMean) }].concat(full ? [wTxt(r)] : []); }));
   var right = (d.detail === 'partial' ? '<span class="chip" tabindex="0" data-tip="担当のメーカーの計画の当たりは人や話題ごと、ほかのメーカーの計画の当たりは情報源の種類ごとにまとめて出しています">一部は種類ごと</span>'
     : full ? '' : '<span class="chip" tabindex="0" data-tip="閲覧の人には、情報源の種類ごとにまとめて出しています。人や話題ごとの当たりは、予算策定担当以上の人に出します">種類ごと</span>')
     + lrMore('当たり = 押した向き（上げる・下げる）が、過去の売上だけの予測から見た実績の動きと同じだった月。基準 = 押した月ごとに、その向きへ実績が外れた月の割合'
@@ -4169,20 +4322,22 @@ function lrDecisionCard(d, full){
   var ds = d.decisions || [];
   if (!ds.length) return '';
   var who = full && ds.some(function(x){ return x.decidedBy !== undefined; }), max = 10, shown = S.lr.more.decisions ? ds : ds.slice(0, max), saved = lrSavedDecisions();
-  // スマホは メーカー（対象と作った日はその下）・判断 だけ（案と判断した人は、判断の札のカーソルに）。対象・値の言い方は振り返りと同じ
-  var cols = [['作った日', 'lr-hm', 112, '見直し案を作った日（判断した日は、判断の札にカーソルを合わせると出ます）'], ['メーカー', 'lr-wr', 160], ['対象', 'lr-wr lr-kw lr-hm'], ['案', 'num lr-wr lr-hm', 184, '今 → 案'], ['判断', 'ctr', 136, '承認・却下・保留。反映済みは、承認して設定に反映した案です']].concat(who ? [['判断した人', 'lr-hm', 128]] : []);
+  // 列は格子に（2026-10-13 村井さん「対象の列が広すぎる」）: メーカー（作った日はその下）1 マス・対象 2 マス（折り返す）・案 1 マス・判断 1 マス（判断した人はその下）。
+  // スマホは メーカー（対象と作った日はその下）・判断 だけ（案は判断の札のカーソルに）。対象・値の言い方は振り返りと同じ
+  var cols = [['メーカー', 'lr-wr', LR_C1, '作った日は、メーカーの下に出ます（判断した日は、判断の札にカーソルを合わせると出ます）'], ['対象', 'lr-wr lr-kw lr-hm', LR_C2], ['案', 'num lr-wr lr-kw lr-hm', LR_C1, '今 → 案'],
+    ['判断', 'ctr', LR_C1, '承認・却下・保留。反映済みは、承認して設定に反映した案です' + (who ? '。判断した人は札の下に出ます' : ''), 136]];
   var rows = shown.map(function(x){
     var nm = full && lrNamed(d, x.planId);   // この計画の人や話題の名前・信頼度の値を見せるか（担当のメーカーでない計画は閲覧の人と同じ）
     var dec = lrDecision(x, saved[x.planId + '\u0001' + x.reviewId + '\u0001' + x.proposalId]), why = qrWhy(x.rationale, x.target, !nm), by = who && x.decidedBy ? String(x.decidedBy) : '';
     var hidVal = !nm && /^reliability:/.test(String(x.target || ''));   // 閲覧の人には信頼度の値を出さない（サーバーも空で渡す）
-    var change = hidVal ? '-' : qrValue(x.target, x.current) + ' → ' + qrValue(x.target, x.proposed), conf = x.confidence ? '確度 ' + qrConf(x.confidence) : '';
+    // 値の中では折り返さない（「3.0% 下げ」の途中で切らない。折り返すのは → の後だけ）
+    var nb = function(v){ return String(v).replace(/ /g, '\u00a0'); };
+    var change = hidVal ? '-' : nb(qrValue(x.target, x.current)) + ' → ' + nb(qrValue(x.target, x.proposed)), conf = x.confidence ? '確度 ' + qrConf(x.confidence) : '';
     var tgt = x.target ? qrTarget(x.target, !nm) : lrWords(x.targetLabel || ''), tgtTip = (x.quarter ? qrQuarter(x.quarter) : '') + (why ? '\n理由: ' + why : '');
-    var r = [lrDate(x.at), esc(x.clientName) + ' <span class="meta">FY' + esc(x.fy) + '</span><span class="lr-so"' + (tgtTip ? ' data-tip="' + esc(tgtTip) + '"' : '') + '>' + esc(tgt) + '</span><span class="lr-so meta">' + esc(lrDate(x.at)) + '</span>',
+    return [esc(x.clientName) + ' <span class="meta">FY' + esc(x.fy) + '</span><span class="lr-so"' + (tgtTip ? ' data-tip="' + esc(tgtTip) + '"' : '') + '>' + esc(tgt) + '</span><span class="lr-sub meta">' + esc(lrDate(x.at)) + '</span>',
       { h: esc(tgt), tip: tgtTip },
       { h: esc(change), tip: '今 ' + qrValue(x.target, x.current) + ' → 案 ' + qrValue(x.target, x.proposed) + (conf ? '（' + conf + '）' : '') },
-      { h: '<span class="chip st ' + dec[1] + '">' + dec[0] + '</span>', tip: dec[2] + '\n案 ' + change + (conf ? '（' + conf + '）' : '') + (by ? '\n判断した人 ' + by : '') }];
-    if (who) r.push(esc(by) || '-');
-    return r;
+      { h: '<span class="chip st ' + dec[1] + '">' + dec[0] + '</span>' + (by ? '<span class="lr-sub meta">' + esc(by) + '</span>' : ''), tip: dec[2] + '\n案 ' + change + (conf ? '（' + conf + '）' : '') + (by ? '\n判断した人 ' + by : '') }];
   });
   return lrCard('判断の履歴', 'AI が四半期ごとに作った見直し案と、人が決めた承認・却下・保留です。承認して反映した案だけが予測に効きます',
     '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit lr-dec') + '</div>' + (ds.length > max ? lrMoreBtn('decisions', ds.length - max) : ''));
@@ -4199,15 +4354,15 @@ function lrUpliftCard(d){
     var kind = c ? '<span class="chip st ok">確定</span>' : '<span class="chip st warn">見込み</span>';
     // 上乗せが予算に比べてとても小さいと割合が大きく振れる（1234% など）。表には端で止めた値、正確な値はカーソルに
     var capPct = function(v){ return !isNum(v) ? '-' : v > 5 ? '500% 超' : v < -1 ? '-100% 未満' : lrPct(v); };
-    return [{ h: esc(u.clientName) + ' <span class="meta">FY' + esc(u.fy) + '</span><span class="lr-so">' + kind + '</span>', tip: money },
-      { h: kind, tip: c ? '12 か月の実績がそろいました' : '年度の途中です。締まった ' + (u.months || 0) + ' か月の実績と、残りの月の予測から推定した着地で見ています', cls: 'ctr' },
-      lrYenCell(u.budgetUplift), lrYenCell(u.budgetFinal), lrYenCell(c ? u.actual : u.landing),
+    return [{ h: esc(u.clientName) + ' <span class="meta">FY' + esc(u.fy) + '</span><span class="lr-sub" data-tip="' + esc(c ? '12 か月の実績がそろいました' : '年度の途中です。締まった ' + (u.months || 0) + ' か月の実績と、残りの月の予測から推定した着地で見ています') + '">' + kind + '</span>', tip: money },
+      lrYenCell(u.budgetUplift), lrYenCell(c ? u.actual : u.landing),
       { h: lrPct(ratio), cls: 'num', tip: c ? '実績 ÷ 最終予算' : '着地の推定 ÷ 最終予算（見込み）' },
       { h: has ? capPct(real) : '-', cls: 'num', tip: has ? '（' + (c ? '実績' : '着地の推定') + ' − 採用した予算）÷ 上乗せ' + (c ? '' : '（見込み）') + (isNum(real) ? ' = ' + lrPct(real) : '') : '上乗せはありません' }];
   });
-  // スマホは メーカー（区分の札はその下）・予算比・上乗せの実現 だけ（金額はメーカーのカーソルに）
-  var cols = [['メーカー', 'lr-wr colmin'], ['区分', 'ctr lr-hm', 136, '確定 = 年度の 12 か月の実績で見た値・見込み = 年度の途中で、着地の推定で見た値'], ['上乗せ', 'num lr-hm', 120, '承認された予算のうち、採用した予算に上乗せした金額'],
-    ['最終予算', 'num lr-hm', 112], ['実績・着地', 'num lr-hm', 128, '確定は年度の実績、見込みは着地の推定'], ['予算比', 'num', 96, '確定は 実績 ÷ 最終予算、見込みは 着地の推定 ÷ 最終予算'], ['上乗せの実現', 'num', 120, '上乗せした分のうち、届いた割合。100% で上乗せどおり、0% 以下は採用した予算にも届かない']];
+  // 列は格子に（1 マスずつ）。区分の札（確定・見込み）はメーカーの下、最終予算はメーカーのカーソルに。スマホは メーカー・予算比・上乗せの実現 だけ（金額はメーカーのカーソルに）
+  var cols = [['メーカー', 'lr-wr', LR_C1, '確定 = 年度の 12 か月の実績で見た値・見込み = 年度の途中で、着地の推定で見た値（札はメーカーの下）。最終予算はカーソルで'],
+    ['上乗せ', 'num lr-hm', LR_C1, '承認された予算のうち、採用した予算に上乗せした金額'], ['実績・着地', 'num lr-hm', LR_C1, '確定は年度の実績、見込みは着地の推定'],
+    ['予算比', 'num', LR_C1, '確定は 実績 ÷ 最終予算、見込みは 着地の推定 ÷ 最終予算', 96], ['上乗せの実現', 'num', LR_C1, '上乗せした分のうち、届いた割合。100% で上乗せどおり、0% 以下は採用した予算にも届かない', 120]];
   return lrCard('予算の上乗せの当たり', '承認された予算の上乗せが、実際に届いたかを見ます。年度の 12 か月がそろうまでは「見込み」として、着地の推定で見ています',
     '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>', '<span class="meta">確定 ' + done + '・見込み ' + (us.length - done) + '</span>');
 }
@@ -4247,8 +4402,8 @@ function lrHitCard(h){
       { h: lrPct(p.base), tip: 'いつも同じ向きと言った場合に当たる割合（割合と同じ重み）' }, p.makers];
   });
   // スマホはメーカーの数を隠す（カーソルに四半期ごと）
-  var cols = [['人', 'wrap colmin'], ['当たり', 'num', 112, '押した向きが当たった四半期 / 数えた四半期'], ['割合', 'num', 96, '新しい四半期ほど重く数えた当たる割合'],
-    ['基準', 'num', 96, 'いつも同じ向きと言った場合に当たる割合（同じ計画で、実績がその向きに外れた四半期の割合）。割合がこれより高くて、はじめて読みが当たっていると言えます'], ['メーカー', 'num lr-hm', 96, '数えたメーカーの数']];
+  var cols = [['人', 'lr-wr lr-kw', LR_C1], ['当たり', 'num', LR_C1, '押した向きが当たった四半期 / 数えた四半期', 80], ['割合', 'num', LR_C1, '新しい四半期ほど重く数えた当たる割合', 72],
+    ['基準', 'num', LR_C1, 'いつも同じ向きと言った場合に当たる割合（同じ計画で、実績がその向きに外れた四半期の割合）。割合がこれより高くて、はじめて読みが当たっていると言えます', 72], ['メーカー', 'num lr-hm', LR_C1, '数えたメーカーの数']];
   var body = ps.length ? '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>' + (ps.length > max ? lrMoreBtn('hits', ps.length - max) : '')
     : '<p class="meta" tabindex="0" data-tip="人ごとの中身は、予算策定担当以上の人に出します（本人の分は本人にも）">当たりの記録 ' + h.hidden + ' 件</p>';
   return lrCard('人ごとの当たり', '入力で押した向き（上げる・下げる）が、締まった四半期の実績が過去の売上だけの予測から外れた向きと合っていたかです。1 人を四半期に 1 回だけ数えます。'
@@ -4264,8 +4419,8 @@ function lrResearchCard(r){
     return [lrDate(x.date) || '-', { h: esc(x.clientName) + ' <span class="meta">FY' + esc(x.fy) + '</span>', tip: t }, { h: x.hit + ' / ' + x.n, tip: t },
       { h: isNum(x.expected) ? x.expected.toFixed(1) + ' / ' + x.n : '-', tip: 'いつも同じ向きと言った場合に当たるはずの四半期の数' }];
   });
-  var cols = [['調べた日', '', 128], ['メーカー', 'wrap colmin'], ['当たり', 'num', 112, 'AI が押した向きが当たった四半期 / 数えた四半期'],
-    ['基準', 'num', 112, 'いつも同じ向きと言った場合に当たるはずの四半期の数（同じ計画で、実績がその向きに外れた四半期の割合から）']];
+  var cols = [['調べた日', '', LR_C1, '', 104], ['メーカー', 'lr-wr', LR_C1], ['当たり', 'num', LR_C1, 'AI が押した向きが当たった四半期 / 数えた四半期', 72],
+    ['基準', 'num', LR_C1, 'いつも同じ向きと言った場合に当たるはずの四半期の数（同じ計画で、実績がその向きに外れた四半期の割合から）', 80]];
   var body = xs.length ? '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>' + (xs.length > max ? lrMoreBtn('research', xs.length - max) : '')
     : '<p class="meta" tabindex="0" data-tip="調査ごとの中身は、予算策定担当以上の人に出します">当たりの記録 ' + r.hidden + ' 件</p>';
   return lrCard('調査ごとの当たり', 'AI 調査 1 回ごとに、その調査を使った予測の押しの向きが、締まった四半期の実績が過去の売上だけの予測から外れた向きと合っていたかです',
@@ -4384,11 +4539,11 @@ function lrPendingCard(pend){
     var list = ps.map(function(q){ var hv = hide && /^reliability:/.test(String(q.target || ''));   // 閲覧の人には信頼度の値を出さない
       return (q.target ? qrTarget(q.target, hide) : lrWords(q.targetLabel || '')) + (hv ? '' : ' ' + qrValue(q.target, q.current) + ' → ' + qrValue(q.target, q.proposed)) + (q.confidence ? '（確度 ' + qrConf(q.confidence) + '）' : '') + (q.decision ? '・' + q.decision : ''); }).join('\n');
     return [{ h: esc(p.clientName) + ' <span class="meta">FY' + esc(p.fy) + '</span><span class="lr-so meta">案 ' + ps.length + ' 件</span>', tip: list },
-      esc(qrQuarter(p.quarter) || '-'), { h: ps.length + ' 件', tip: list, cls: 'num' }, { h: dec + ' / ' + ps.length, cls: 'num' }, lrDate(p.at),
+      esc(qrQuarter(p.quarter) || '-') + '<span class="lr-sub meta">' + esc(lrDate(p.at)) + '</span>', { h: ps.length + ' 件', tip: list, cls: 'num' }, { h: dec + ' / ' + ps.length, cls: 'num' },
       lrOpen(p.planId, 'この計画の「振り返り」を開きます。見直し案の承認はそこでします')];
   });
   // スマホは メーカー（案の数はその下）・開く だけ（開くを横に送らずに押せるように）
-  var cols = [['メーカー', 'wrap colmin'], ['四半期', 'lr-hm', 152, '見直し案の対象の四半期'], ['案', 'num lr-hm', 88, 'カーソルを合わせると、案の中身（今 → 案）が出ます'], ['判断済み', 'num lr-hm', 96, '保存した判断（承認・却下・保留）の数'], ['作った日', 'lr-hm', 112], ['', 'lr-open', 152]];
+  var cols = [['メーカー', 'lr-wr', LR_C1], ['四半期', 'lr-hm', LR_C1, '見直し案の対象の四半期（作った日はその下）'], ['案', 'num lr-hm', LR_C1, 'カーソルを合わせると、案の中身（今 → 案）が出ます'], ['判断済み', 'num lr-hm', LR_C1, '保存した判断（承認・却下・保留）の数'], ['', 'lr-open', LR_C1, '', 152]];
   return lrCard('承認待ちの見直し案', 'AI が四半期ごとに作った見直し案です。承認するまで予測には効きません。承認は、開いた計画の「振り返り」でします', '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>');
 }
 /** 小さなグラフの幅（2 つ並べる。スマホは 1 つ） */
@@ -4406,21 +4561,21 @@ function lrCurveCard(curves){
     // 曲線に名前を付けない（グラフごとの凡例を出さない）。凡例は上に 1 つだけ（lr-key）
     var list = [{ alpha: pr.alpha0, beta: pr.beta0, dashed: true, tone: 'navy',
       tip: lab + '\n最初の見立て（' + (pr.from === 'pool' ? '全計画から作った見立て' : 'まだ全計画の見立てが無いので、いつも同じ向きと同じだけ') + '）\n当たる割合 ' + lrPct(pr.mean) + '（80% の幅 ' + range(pr.ci80) + '）' }];
-    rowsT.push([esc(lab), '最初の見立て', '-', '-', lrPct(base), lrPct(pr.mean), range(pr.ci80)]);
+    rowsT.push([esc(lab), '最初の見立て', '-', lrPct(base), { h: range(pr.ci80), tip: '見立て ' + lrPct(pr.mean) }]);
     qs.forEach(function(q, i){
       var qb = isNum(q.base) ? q.base : base;
       list.push({ alpha: q.alpha, beta: q.beta, opacity: k === 1 ? 1 : 0.25 + 0.75 * i / (k - 1),
         tip: lab + '\n' + lrQ(q.quarter) + 'までに学んだ後' + (i === k - 1 ? '（最新）' : '') + '\n回数 ' + q.cumN + '（この四半期 ' + q.n + '）・当たり ' + q.cumHit
           + '\nいつも同じ向きなら ' + lrPct(qb) + '\n当たる割合 ' + lrPct(q.mean) + '（80% の幅 ' + range(q.ci80) + '）' });
-      rowsT.push([esc(lab), esc(lrQ(q.quarter)), q.cumN, q.cumHit, lrPct(qb), lrPct(q.mean), range(q.ci80)]);
+      rowsT.push([esc(lab), esc(lrQ(q.quarter)), q.cumHit + ' / ' + q.cumN, lrPct(qb), { h: range(q.ci80), tip: '見立て ' + lrPct(q.mean) }]);
     });
     var lastBase = isNum(last.base) ? last.base : base, vs = lrVsBase({ ci80: last.ci80, base: lastBase });
     return '<div class="lr-panel"><div class="lr-ph"><h3>' + esc(lab) + '</h3><span class="meta" tabindex="0" data-tip="' + esc(lab + '\n当たり ' + (last.cumHit || 0) + ' / ' + (last.cumN || 0) + ' 回（' + lrQ(last.quarter) + 'まで）\nいつも同じ向きなら ' + lrPct(lastBase) + '\n今の見立て ' + lrPct(last.mean) + '（80% の幅 ' + range(last.ci80) + '）\n' + LR_VS_BASE[vs]) + '">当たり ' + (isNum(c.hit) ? c.hit : last.cumHit || 0) + ' / ' + (isNum(c.n) ? c.n : last.cumN || 0) + ' 回・今 ' + lrPct(last.mean) + '・基準 ' + lrPct(lastBase) + '</span></div>'
       + chartDensity(list, { w: w, h: 180, ref: lastBase, label: lab + 'の当たる割合の見立て' }) + '</div>';
   }).join('');
   var key = '<p class="lr-key" aria-hidden="true"><span><i class="lr-k-dash"></i>最初の見立て</span><span><i class="lr-k-ln lite"></i><i class="lr-k-ln"></i>学んだ後（四半期ごと。濃いほど新しい）</span><span><i class="lr-k-ref"></i>いつも同じ向き</span></p>';
-  var table = lrTable([['情報源', 'wrap colmin'], ['時点', '', 160], ['回数', 'num', 88, 'その時点までに数えた回数'], ['当たり', 'num', 88],
-    ['基準', 'num', 96, 'いつも同じ向きと言った場合に当たる割合（その時点までの押した月から）'], ['確かさ', 'num', 96, '当たる割合の見立ての平均'], ['80% の幅', 'num', 128, '10 回に 8 回はこの間に入る見込み']], rowsT);
+  var table = lrTable([['情報源', 'lr-wr', LR_C1], ['時点', 'lr-wr', LR_C1], ['当たり', 'num', LR_C1, 'その時点までの当たり / 数えた回数'],
+    ['基準', 'num', LR_C1, 'いつも同じ向きと言った場合に当たる割合（その時点までの押した月から）'], ['80% の幅', 'num', LR_C1, '10 回に 8 回はこの間に入る見込み（カーソルで見立ての平均）']], rowsT);
   return lrCard('重みの学び', '入力・見解・AI の押した向きが当たる割合を、四半期ごとに学び直した見立てです。山の位置が当たる割合、山が細いほど確かです。'
     + '縦の線はいつも同じ向きと言った場合に当たる割合で、80% の幅の左の端がこの線より右なら、いつも同じ向きと言うよりも当たっています',
     chartOrTable('lrCurve', key + '<div class="lr-mult">' + panels + '</div>', table),
@@ -4445,10 +4600,12 @@ function lrShrinkCard(sh){
     + (isNum(p.factorShadow) ? '\n' + facTip(p) : '') + (isNum(p.mapeNow) ? '\n外れ幅 今 ' + pct0(p.mapeNow) + ' → 寄せると ' + pct0(p.mapeShadow) + '（倍率を決めたのと同じ月で測るので、良く見えやすい値です）' : ''); };
   var chart = chartArrows(ps.map(function(p){ return { label: lrName(p, multi), raw: p.bias, shrunk: p.shrunk, tip: tipOf(p) }; }),
     { mu: sh.mu, tau: sh.tau, fmt: lrSPct, rawLabel: '元の偏り', shrunkLabel: '寄せた偏り', bandLabel: '全体の平均 ± ばらつき', label: '偏りの縮め', labelW: chW() < 480 ? 128 : 168 });
-  var table = lrTable([['メーカー', 'wrap colmin'], ['月の数', 'num', 80], ['元の偏り', 'num', 104, '今の補正を外した予測の偏り（予測の合計 ÷ 実績の合計 − 1。新しい月ほど重く）。プラスは予測が高すぎる（強気）、マイナスは低すぎる（弱気）'],
-    ['寄せた偏り', 'num', 104, '全体に寄せた偏り'], ['倍率', 'num', 88, '補正を外した予測から学んだ倍率です。今の補正の代わりに掛ける値で、今の補正に重ねて掛けるものではありません（1 = 補正なし）'],
-    ['外れ幅 今', 'num', 104, '今の予測（補正を掛けた後）の外れ幅'], ['寄せると', 'num', 96, '補正を外した予測に、学んだ倍率だけを掛けたときの外れ幅です。倍率を決めたのと同じ月で測るので、実際より良く見えやすい値です']],
-    ps.map(function(p){ return [{ h: esc(lrName(p, multi)), tip: tipOf(p) }, p.n, pct1(p.bias), pct1(p.shrunk), isNum(p.factorShadow) ? { h: fac(p.factorShadow), tip: facTip(p) } : '-', pct0(p.mapeNow), pct0(p.mapeShadow)]; }));
+  // 列は格子に（1 マスずつ）。月の数はメーカーの下、外れ幅は 今 → 寄せると を 1 列に
+  var table = lrTable([['メーカー', 'lr-wr', LR_C1, '月の数は、メーカーの下に出ます'], ['元の偏り', 'num', LR_C1, '今の補正を外した予測の偏り（予測の合計 ÷ 実績の合計 − 1。新しい月ほど重く）。プラスは予測が高すぎる（強気）、マイナスは低すぎる（弱気）'],
+    ['寄せた偏り', 'num', LR_C1, '全体に寄せた偏り'], ['倍率', 'num', LR_C1, '補正を外した予測から学んだ倍率です。今の補正の代わりに掛ける値で、今の補正に重ねて掛けるものではありません（1 = 補正なし）'],
+    ['外れ幅', 'num', LR_C1, '今 → 寄せると。今 = 今の予測（補正を掛けた後）の外れ幅。寄せると = 補正を外した予測に、学んだ倍率だけを掛けたときの外れ幅です。倍率を決めたのと同じ月で測るので、実際より良く見えやすい値です']],
+    ps.map(function(p){ return [{ h: esc(lrName(p, multi)) + '<span class="lr-sub meta">' + (p.n || 0) + ' か月</span>', tip: tipOf(p) }, pct1(p.bias), pct1(p.shrunk), isNum(p.factorShadow) ? { h: fac(p.factorShadow), tip: facTip(p) } : '-',
+      { h: pct0(p.mapeNow) + ' → ' + pct0(p.mapeShadow), tip: '外れ幅 今 ' + pct0(p.mapeNow) + ' → 寄せると ' + pct0(p.mapeShadow) }]; }));
   return lrCard('偏りの縮め', '計画ごとの読みのクセ（偏り）を、全計画の平均の方へ寄せた値です。偏りは今の補正を外した予測で測ります（補正で直った分を、偏りが無いとは見ません）。月が少ない・ぶれが大きい計画ほど強く寄せます。帯は全体の平均 ± ばらつき。プラスは予測が高すぎる（強気）、マイナスは低すぎる（弱気）。予測には効かせず、見比べるだけです',
     chartOrTable('lrShrink', chart, table),
     lrMore('経験ベイズ（DerSimonian–Laird の τ²）で、計画ごとの偏りを全体の平均 μ へ、標準誤差に応じて縮めます。帯は μ ± τ' + (isNum(sh.mu) ? '（μ = ' + pct1(sh.mu) + '・τ = ' + pct0(sh.tau) + '）' : '') + '。計画が 1 つだけのときは 0 へ縮めます。'
@@ -4476,8 +4633,9 @@ function lrTimeCard(tl, ps){
     { x: x, yFmt: chPct, yMin: 0, h: 240, label: '月の外れ幅' });
   var c2 = chartLine([{ label: '幅に収まった割合', values: tl.map(function(t){ return t.coverage; }) }],
     { x: x, band: tl.map(function(t){ return t.coverageCi80 ? { lo: t.coverageCi80[0], hi: t.coverageCi80[1] } : null; }), bandLabel: '確かさの幅', target: 0.8, targetLabel: '目標 80%', yMin: 0, yMax: 1, yFmt: chPct, h: 240, label: '見通しの幅に収まった割合' });
-  var table = lrTable([['月', '', 96], ['計画の数', 'num', 96], ['外れ幅', 'num', 96, '|予測の中心 − 実績| の合計 ÷ 実績の合計（その月の全計画）'], ['3 か月の平均', 'num', 120, 'その月までの 3 か月をまとめた外れ幅（外れの合計 ÷ 実績の合計）'], ['幅に収まった', 'num', 120, '実績が見通しの幅（下振れ〜上振れ）に収まった割合。目標 80%。かっこの中は比べた計画の数'], ['確かさの幅', 'num', 128, '収まった割合の 80% の確かさの幅（計画が少ない月は広い）']],
-    tl.map(function(t){ return [esc(t.ym), t.n, pct0(t.mape), pct0(t.rolling3), isNum(t.coverage) ? lrPct(t.coverage) + (t.coverageN ? '（' + t.coverageN + '）' : '') : '-', t.coverageCi80 ? lrPct(t.coverageCi80[0]) + '〜' + lrPct(t.coverageCi80[1]) : '-']; }));
+  // 列は格子に（1 マスずつ）。計画の数は月のカーソルに
+  var table = lrTable([['月', '', LR_C1, 'カーソルを合わせると、その月の計画の数が出ます'], ['外れ幅', 'num', LR_C1, '|予測の中心 − 実績| の合計 ÷ 実績の合計（その月の全計画）'], ['3 か月の平均', 'num', LR_C1, 'その月までの 3 か月をまとめた外れ幅（外れの合計 ÷ 実績の合計）'], ['幅に収まった', 'num', LR_C1, '実績が見通しの幅（下振れ〜上振れ）に収まった割合。目標 80%。かっこの中は比べた計画の数'], ['確かさの幅', 'num', LR_C1, '収まった割合の 80% の確かさの幅（計画が少ない月は広い）']],
+    tl.map(function(t){ return [{ h: esc(t.ym), tip: '計画の数 ' + t.n }, pct0(t.mape), pct0(t.rolling3), isNum(t.coverage) ? lrPct(t.coverage) + (t.coverageN ? '（' + t.coverageN + '）' : '') : '-', t.coverageCi80 ? lrPct(t.coverageCi80[0]) + '〜' + lrPct(t.coverageCi80[1]) : '-']; }));
   return lrCard('外れ幅と幅の当たり', '全計画の月ごとの外れ幅（下がるほど良い）と、実績が見通しの幅（下振れ〜上振れ）に収まった割合です。収まった割合は 80% が目標で、低いと幅が狭すぎ、高いと広すぎます',
     chartOrTable('lrTime', '<h3 class="lr-h3">月の外れ幅</h3>' + c1 + '<h3 class="lr-h3">見通しの幅に収まった割合</h3>' + c2, table),
     lrMore('外れ幅 = Σ|予測の中心 − 実績| ÷ Σ|実績|（WAPE。月ごとの外れの平均ではないので、実績が 0 に近い月 1 つで飛ばない。金額の大きいメーカーほど重く数える）。確かさの幅 = 収まった割合の Wilson の 80% 区間。締まった後に予測し直した月は除きます') + lrPersistChip(ps));
@@ -4503,7 +4661,7 @@ function lrCalCard(cal, health){
   bias.forEach(function(p){ var s = src(p); pts.push({ x: lrMd(p.at) + ' ' + s.short, y: p.new, tip: lrDate(p.at) + ' ' + s.full + (p.quarter ? '（' + qrQuarter(p.quarter) + '）' : '') + '\n' + fx(p.old) + ' → ' + fx(p.new) + raw(p.new) }); });
   if (!pts.length && isNum(cur.factorNow)) pts.push({ x: 'いま', y: cur.factorNow, tip: '今 ' + fx(cur.factorNow) + raw(cur.factorNow) });
   var chart = chartStep(pts, { ref: 1, refLabel: '補正なし', yFmt: yPct, label: '補正の履歴', empty: 'この計画の補正は、まだ変わっていません' });
-  var table = path.length ? lrTable([['日付', '', 112], ['対象', 'wrap colmin'], ['前', 'num', 112], ['後', 'num', 112], ['きっかけ', '', 160]],
+  var table = path.length ? lrTable([['日付', '', LR_C1], ['対象', 'lr-wr lr-kw', LR_C1], ['前', 'num', LR_C1], ['後', 'num', LR_C1], ['きっかけ', 'lr-wr', LR_C1]],
     path.map(function(p){ var s = src(p), t = p.factor || ''; return [lrDate(p.at), esc(t ? qrTarget(t, !lrNamed(S.lr.ai, cur.planId)) : lrWords(p.factorLabel || '')), { h: esc(qrValue(t, p.old)), tip: String(p.old == null ? '' : p.old), cls: 'num' }, { h: esc(qrValue(t, p.new)), tip: String(p.new == null ? '' : p.new), cls: 'num' }, { h: esc(s.full), tip: p.quarter ? qrQuarter(p.quarter) : '' }]; }))
     : '<p class="note">この計画の補正は、まだ変わっていません</p>';
   var sel = '<select class="inp md" id="lr_cal" aria-label="メーカー" onchange="S.lr.calPlan=this.value;render()">' + cal.map(function(c){ return '<option value="' + esc(c.planId) + '"' + (c === cur ? ' selected' : '') + '>' + esc(lrName(c, multi)) + '</option>'; }).join('') + '</select>';

@@ -776,7 +776,8 @@ function appInsightRevision_(r, sums) {
  *                   actionTypes = まとめた action_type（自動の update と人が選んだ「前提を更新」は 1 行）。actionType はその最初のもの）
  *   openActions: [lessons と同じ形]（未着手・対応中。古い月から）
  *   repeats:     [{ clientName, month: 'MM', fys: [...], n }]（同じメーカーで、違う年度の同じ月にまた外れた）
- *   summary:     { months, misses, withNotes, duplicatesRemoved, scoredMonths, waitingMonths }（scoredMonths = 今の決まりで B-2 が測った月の数（計画 × 月。
+ *   summary:     { months, misses, withNotes, missesWithNotes, duplicatesRemoved, scoredMonths, waitingMonths }（missesWithNotes = 大きく外れた月のうち、
+ *                   人の記入がある月の数（学びの「次の予測で見直すこと」が、記入の無い外れ月の多さを問いかけに使う）。scoredMonths = 今の決まりで B-2 が測った月の数（計画 × 月。
  *                   当たりと同じ計画で、締まった月の今の版の neutral の EVAL_LOG の行がある月）。B-2 の後で B-4 がまだなら、
  *                   months（出した振り返りの月）が 0 でも 0 ではない。waitingMonths = そのうち、締めていない年度の計画で、出せる振り返りの行が
  *                   まだ無い月の数（「外れの原因を整理」（B-4）待ち。締めた年度の計画は B-4 を動かせないので数えない））
@@ -935,8 +936,8 @@ function appInsightLessons_(plans, insights, hideNames, months, since, frozen) {
       .sort((a, b) => a.ym.localeCompare(b.ym) || String(a.clientName).localeCompare(String(b.clientName), 'ja')).slice(0, APP_INSIGHT_OPEN_MAX),
     repeats: Object.keys(rep).map(k => rep[k]).filter(o => o.fys.length >= 2).map(o => Object.assign(o, { fys: o.fys.sort() }))
       .sort((a, b) => b.n - a.n || a.month.localeCompare(b.month)),
-    summary: { months: all.length, misses: misses.length, withNotes: all.filter(x => x.human).length, duplicatesRemoved: dup, scoredMonths: scoredMonths,
-      waitingMonths: waitingMonths }
+    summary: { months: all.length, misses: misses.length, withNotes: all.filter(x => x.human).length, missesWithNotes: misses.filter(x => x.human).length,
+      duplicatesRemoved: dup, scoredMonths: scoredMonths, waitingMonths: waitingMonths }
   };
 }
 
@@ -1069,6 +1070,8 @@ function appInsightUplift_(ids) {
  *                   confidence, rationale, decision }] }]（一番新しい四半期レビューで、まだ適用していないもの（C-3 で適用できるものだけ）。decision = 保存した判断。
  *                   summary では信頼度の target は種類まで、その rationale は空）
  *   health:      [{ planId, clientName, fy, key, label, value }]（気になる点。key = shadow_worse / factor_clamp / coverage_low / coverage_high）
+ *   unsourced:   { events, unsourced, makers: [clientName] }（いちばん新しい AI 調査の出来事の行の数と、そのうち出典が見つからず予測に効かせなかった行の数。
+ *                  makers = 出典の無い行があったメーカー。数とメーカーの名前だけで、人の名前は無い（見せ方によらず同じ）。appInsightUnsourced_）
  */
 function appAiLearning_(ctx) {
   const plans = appInsightPlans_();
@@ -1125,8 +1128,36 @@ function appAiLearning_(ctx) {
     persistence: appInsightPersistence_(accs),
     calibration: appInsightPerPlan_(plans, view.named, (ps, hide) => appInsightCalibration_(ps, tab('CALIBRATION_HISTORY'), factorNow, hide)),
     pending: appInsightPerPlan_(plans, view.named, (ps, hide) => appInsightPending_(ps, tab('QUARTERLY_REVIEW_LOG'), hide)),
-    health: appInsightHealth_(plans, accs, shadow, factorNow)
+    health: appInsightHealth_(plans, accs, shadow, factorNow),
+    unsourced: appInsightUnsourced_(plans, tab)
   };
+}
+
+/** A-4 が出典の無い出来事の行の根拠の文の頭に書く断り（LegacyEngine.js の unsourcedAiEvidence_） */
+const APP_INSIGHT_UNSOURCED_HEAD = '出典が見つからなかったため';
+
+/**
+ * 出典の無い AI 調査の話題の数（学びの「次の予測で見直すこと」: 多ければ、社内の情報で補うよう問いかける。読むだけ）。
+ * 計画ごとに AI_RESEARCH_STRUCTURED のいちばん新しい調査の日の出来事（event）の行を数え、根拠の文が A-4 の断りで始まる行
+ * （出典が 0 件か Web 検索が失敗したので、予測に効かせなかった行。2026-10-13 の守り）を出典の無い行とする。表が読めなければ 0 件
+ */
+function appInsightUnsourced_(plans, tab) {
+  const out = { events: 0, unsourced: 0, makers: [] };
+  let rows = {};
+  try { rows = tab('AI_RESEARCH_STRUCTURED') || {}; } catch (e) { Logger.log('AI 調査の表を読めません: ' + (e && e.message ? e.message : e)); return out; }
+  plans.forEach(p => {
+    const ev = (rows[p.planId] || []).filter(r => String(r.row_type || '').trim() === 'event');
+    if (!ev.length) return;
+    const key = r => appInsightIso_(r.as_of_date).slice(0, 10);
+    const last = ev.map(key).sort().pop();
+    let n = 0;
+    ev.filter(r => key(r) === last).forEach(r => {
+      out.events++;
+      if (String(r.evidence || '').trim().indexOf(APP_INSIGHT_UNSOURCED_HEAD) === 0) { out.unsourced++; n++; }
+    });
+    if (n && out.makers.indexOf(p.clientName) < 0) out.makers.push(p.clientName);
+  });
+  return out;
 }
 
 /**

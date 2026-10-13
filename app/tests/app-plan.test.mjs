@@ -407,9 +407,10 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.match(vm.runInContext(`S.an.data = null; S.ld.an = { error: 'x', at: 1 }; var __a = viewAnalysis(); S.an.data = __an; __a`, ui), /読み込めませんでした[\s\S]*anLoad\(\)/);
   // 学び（人の学び: apiPeopleLearning・AI の学び: apiAiLearning）
   ui.__lp = env.call('apiPeopleLearning()'); ui.__la = env.call('apiAiLearning()');
-  const lrHtml = vm.runInContext(`S.view = 'learning'; S.lr.people = __lp; S.lr.ai = __la; lrTab('people'); viewLearning()`, ui);
-  assert.match(lrHtml, /<h1>学び<\/h1>[\s\S]*人の学び[\s\S]*AI の学び/);
-  assert.match(vm.runInContext(`lrTab('ai'); viewLearning()`, ui), /<button class="tab on"[^>]*>AI の学び</);
+  // タブにせず 1 カラム: 前提と情報の見直し（人に返す学び）→ 補正と重みの調整（AI が直す学び）。タブは無い
+  const lrHtml = vm.runInContext(`S.view = 'learning'; S.lr.people = __lp; S.lr.ai = __la; viewLearning()`, ui);
+  assert.match(lrHtml, /<h1>学び<\/h1><div class="lr-sec" id="lr-human"><h2>前提と情報の見直し[\s\S]*<div class="lr-sec" id="lr-tune"><h2>補正と重みの調整/);
+  assert.doesNotMatch(lrHtml, /role="tablist">[^]*?人の学び|lrTab\(/, 'タブ（人の学び・AI の学び）は無い');
   for (const v of ['analysis', 'learning']) assert.ok(!/undefined|NaN/.test(vm.runInContext(`S.view = '${v}'; ${v === 'analysis' ? 'viewAnalysis()' : 'viewLearning()'}`, ui)), v);
   vm.runInContext(`S.view = 'forecast'`, ui);
   // 確かめる画面はアプリの中（ブラウザ標準の confirm を使わない）。はい で実行、やめる で何もしない
