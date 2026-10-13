@@ -3680,40 +3680,66 @@ function anRevCard(plans){
 
 // ---- 物差し（apiCrossMaker の backtest。表の版 10 の 3-7）----
 // 過去の区切りに戻って予測し直した点を、方法ごとにまとめる。数字はサーバーの値のまま。割合と点の数だけ（金額は出さない）。
-// 95% の幅をいつも添える。点が 30 より少ない・1 社だけのときは比べない（「まだ判断できません」。良くなったとは言わない）
-var AN_BT = { STAT_ONLY: ['統計だけ', '過去の売上だけから、人の入力・AI・補正を入れずに予測し直したもの'], LIVE: ['本番', 'その月が始まる前の、最後の本番の予測'],
-  LAST_YEAR: ['前年同月', '前の年の同じ月の売上'], TWO_YEAR: ['2 年平均', '前の 2 年の同じ月の売上の平均'], SEASONAL: ['季節加重', '前の 4 年の同じ月を、新しい年ほど重く平均したもの'] };
-var AN_BT_SAY = { smaller: '単純な方法より外れが小さい', larger: '単純な方法より外れが大きい', unclear: 'はっきりした差はありません', wait: 'まだ判断できません' };
-/** 値と 95% の幅（幅は小さく添える。幅を出せなければ値だけ） */
-function anBtCell(v, lo, hi, f, tipText){
+// 95% の幅をいつも添える（メーカーごとに平均してから、メーカーの数で出す。1 社だけなら出さない）。点が 30 より少ない・1 社だけのときは比べない
+// （「まだ判断できません」「1 社だけなので差を言えません」。良くなったとは言わない）。
+// 比べる時点は 2 つ（2026-10-13）: 年度の初め（4/1）に 1〜12 か月先を予測したもの（統計だけと 4/1 の単純な方法）と、各月が始まる前の予測
+// （本番と、同じ時点の単純な方法）。時点の違う予測どうしは比べない
+var AN_BT = { STAT_ONLY: ['統計だけ', '過去の売上だけから、人の入力・AI・補正を入れずに、年度の初め（4/1）に予測し直したもの（4/1 に締まっていた 2 月までの売上で）'],
+  LIVE: ['本番', 'その月が始まる前の、最後の本番の予測（その年度に学んだ補正と、更新した入力が入る）'],
+  LAST_YEAR: ['前年同月', '前の年の同じ月の売上（4/1 に締まっていた月だけ）'], TWO_YEAR: ['2 年平均', '前の 2 年の同じ月の売上の平均（4/1 に締まっていた月だけ）'],
+  SEASONAL: ['季節加重', '前の 4 年の同じ月を、新しい年ほど重く平均したもの（4/1 に締まっていた 2 月までの売上で）'],
+  LAST_YEAR_PACE: ['前年同月 × 伸び', '本番と同じ時点で、前年同月の売上に、そのときまでに締まった年度の月の実績 ÷ 前年の同じ月々の売上 を掛けたもの'] };
+var AN_BT_ORDER = ['STAT_ONLY', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL', 'LIVE', 'LAST_YEAR_PACE'];   // 比べる組ごと（4/1 の予測 → 各月の前の予測）
+var AN_BT_WHEN = { STAT_ONLY: 'どちらも 4/1 の予測', LIVE: 'どちらも各月の前の予測' };
+var AN_BT_SAY = { smaller: '単純な方法より外れが小さい', larger: '単純な方法より外れが大きい', unclear: 'はっきりした差はありません', wait: 'まだ判断できません',
+  oneMaker: '1 社だけなので差を言えません' };
+/** 値と 95% の幅（幅は小さく添える。幅を出せなければ値だけ。makers = メーカーの数） */
+function anBtCell(v, lo, hi, f, tipText, makers){
   if (!isNum(v)) return '<td class="num">-</td>';
   var r = isNum(lo) && isNum(hi) ? f(lo) + '〜' + f(hi) : '';
-  return '<td class="num" data-tip="' + esc(tipText + ' ' + f(v) + (r ? '\n95% の幅 ' + r : '\n点が少なく、幅を出せません')) + '">' + esc(f(v)) + (r ? ' <span class="note">' + esc(r) + '</span>' : '') + '</td>';
+  var why = (makers || 0) < 2 ? '1 社だけなので、幅を出せません（幅はメーカーごとの平均のばらつきから出します）' : '幅を出せません';
+  return '<td class="num" data-tip="' + esc(tipText + ' ' + f(v) + (r ? '\n95% の幅 ' + r : '\n' + why)) + '">' + esc(f(v)) + (r ? ' <span class="note">' + esc(r) + '</span>' : '') + '</td>';
+}
+/** 何か月先か（最小〜最大。1 つなら その数） */
+function anBtAhead(m){
+  if (!isNum(m.horizonMin) || !isNum(m.horizonMax)) return '<td class="num">-</td>';
+  var t = m.horizonMin === m.horizonMax ? String(m.horizonMin) : m.horizonMin + '〜' + m.horizonMax;
+  var tipText = (m.method === 'LIVE' || m.method === 'LAST_YEAR_PACE' ? '各月が始まる前の最後の本番の予測の時点から' : '年度の初め（4/1）から')
+    + ' ' + t + ' か月先' + (isNum(m.horizon) ? '（平均 ' + m.horizon.toFixed(1) + ' か月）' : '');
+  return '<td class="num" data-tip="' + esc(tipText) + '">' + esc(t) + '</td>';
 }
 function anBacktestCard(d){
   var b = d.backtest;
   if (!b || !b.methods) return '';
-  var ms = b.methods.filter(function(m){ return AN_BT[m.method]; });
+  var tip = '年度の初め（4/1）に戻って予測し直し、締まった月の実績で採点しました。4/1 には 3 月の実績がまだ締まっていないので、2 月までの売上で予測しています。'
+    + '統計だけ（人の入力・AI・補正なし。4/1 に 1〜12 か月先）は同じ 4/1 の単純な方法と、本番（各月が始まる前の予測。多くは 1 か月先）は同じ時点の単純な方法（前年同月 × 伸び）と比べます。'
+    + '時点の違う予測どうしは、情報の差だけで外れに差が出るので比べません。';
+  // 前の数え方の回だけ（3 月の売上を 4/1 に使った・時点の違う方法と比べた回）: 動かし直すよう言う
+  if (!b.plans) return anCard('物差し', tip, '<p class="note">数え方を直す前の回だけです（' + (b.oldCalcRuns || 0) + ' 回）。所有者が物差しを動かし直すと、ここに出ます。</p>');
+  var ms = AN_BT_ORDER.map(function(k){ return b.methods.filter(function(m){ return m.method === k; })[0]; }).filter(Boolean);
   var rows = ms.map(function(m){
     var nm = AN_BT[m.method], band = m.method === 'STAT_ONLY' || m.method === 'LIVE';
     return '<tr><td data-tip="' + esc(nm[0] + '：' + nm[1]) + '">' + esc(nm[0]) + '</td>'
-      + anBtCell(m.mape, m.mapeLo, m.mapeHi, anPct1, '外れ幅（' + (m.pctN || 0) + ' 点。実績が 0 円以下の点は除く）')
-      + anBtCell(m.bias, m.biasLo, m.biasHi, pct1, '偏り（プラスは予測が実績より高め）')
-      + (band ? anBtCell(m.cover, m.coverLo, m.coverHi, anPct, '帯に入った割合（' + (m.coverN || 0) + ' 点。目標 80%）') : '<td class="num" data-tip="単純な方法には幅がありません">-</td>')
-      + '<td class="num">' + (m.n || 0) + ' 点</td></tr>';
+      + anBtCell(m.mape, m.mapeLo, m.mapeHi, anPct1, '外れ幅（' + (m.pctN || 0) + ' 点。実績が 0 円以下の点は除く）', m.makers)
+      + anBtCell(m.bias, m.biasLo, m.biasHi, pct1, '偏り（プラスは予測が実績より高め）', m.makers)
+      + (band ? anBtCell(m.cover, m.coverLo, m.coverHi, anPct, '帯に入った割合（' + (m.coverN || 0) + ' 点。目標 80%）', m.makers) : '<td class="num" data-tip="単純な方法には幅がありません">-</td>')
+      + anBtAhead(m)
+      + '<td class="num" data-tip="' + esc((m.makers || 0) + ' 社') + '">' + (m.n || 0) + ' 点</td></tr>';
   }).join('');
   // 列は 152・112 の格子。95% の幅は値の下の行に（.anbt。説明はカーソルで）
-  var tbl = anTable(['', 152, 152, 152, 112], '<th>方法</th><th class="num" data-tip="予測の中心と実績の差の割合の平均。小さいほどよく当たっています">外れ幅</th>'
+  var tbl = anTable(['', 152, 152, 152, 112, 112], '<th>方法</th><th class="num" data-tip="予測の中心と実績の差の割合の平均（メーカーごとに平均してから）。小さいほどよく当たっています">外れ幅</th>'
     + '<th class="num" data-tip="プラスは予測が実績より高め、マイナスは低め">偏り</th><th class="num" data-tip="' + esc('実績が見通しの幅（' + qName('p10') + '〜' + qName('p90') + '）に入った割合（統計だけと本番だけ）') + '">帯に入る</th>'
-    + '<th class="num" data-tip="数えた点（前の 48 か月の売上がそろい、実績が締まった月）">点</th>', rows, 'anbt');
+    + '<th class="num" data-tip="予測した時点から、その月まで何か月先か。統計だけと 4/1 の単純な方法は 1〜12 か月先、本番と前年同月 × 伸びは各月の前の予測なので多くは 1 か月先">何か月先</th>'
+    + '<th class="num" data-tip="数えた点（前の 48 か月の売上がそろい、実績が締まった月）。95% の幅は、同じ計画の月どうしはつながっているので、メーカーごとに平均してから出します">点</th>', rows, 'anbt');
   var cmp = (b.compare || []).filter(function(c){ return AN_BT[c.method]; });
   var vsName = function(c){ return AN_BT[c.vs] ? AN_BT[c.vs][0] : '単純な方法'; };
+  var noBand = function(c){ return c.verdict === 'wait' || c.verdict === 'oneMaker'; };
   var sayTip = !b.ready ? '点が ' + (b.minPoints || 30) + ' 以上・' + (b.minMakers || 2) + ' 社以上になると比べます（今は ' + (b.points || 0) + ' 点・' + (b.makers || 0) + ' 社）'
-    : cmp.map(function(c){ return AN_BT[c.method][0] + '：' + AN_BT_SAY[c.verdict] + (c.verdict === 'wait' ? '（' + (c.n || 0) + ' 点・' + (c.makers || 0) + ' 社）'
-      : '\n外れ幅の差（' + AN_BT[c.method][0] + ' − ' + vsName(c) + '） ' + pct1(c.diff) + '（95% の幅 ' + pct1(c.lo) + '〜' + pct1(c.hi) + '・' + c.n + ' 点・' + c.makers + ' 社）'); }).join('\n');
-  var say = !b.ready ? AN_BT_SAY.wait : cmp.map(function(c){ return AN_BT[c.method][0] + '：' + (AN_BT_SAY[c.verdict] || AN_BT_SAY.wait); }).join('・');
-  return anCard('物差し', '過去の区切り（年度の初め）に戻って予測し直し、締まった月の実績で採点しました。統計だけ（人の入力・AI・補正なし）と本番の予測を、単純な方法と比べます。'
-    + 'FY' + (b.fy || d.fy) + ' の計画ごとに一番新しい回（' + (b.plans || 0) + ' 計画）。幅は 95% の目安です',
+    : cmp.map(function(c){ return AN_BT[c.method][0] + '：' + (AN_BT_SAY[c.verdict] || AN_BT_SAY.wait) + (noBand(c) ? '（' + (c.n || 0) + ' 点・' + (c.makers || 0) + ' 社）'
+      : '\n外れ幅の差（' + AN_BT[c.method][0] + ' − ' + vsName(c) + '。' + (AN_BT_WHEN[c.method] || '') + '） ' + pct1(c.diff) + '（95% の幅 ' + pct1(c.lo) + '〜' + pct1(c.hi) + '・' + c.n + ' 点・' + c.makers + ' 社）'); }).join('\n');
+  var say = !b.ready ? ((b.makers || 0) === 1 ? AN_BT_SAY.oneMaker : AN_BT_SAY.wait) : cmp.map(function(c){ return AN_BT[c.method][0] + '：' + (AN_BT_SAY[c.verdict] || AN_BT_SAY.wait); }).join('・');
+  return anCard('物差し', tip + 'FY' + (b.fy || d.fy) + ' の計画ごとに一番新しい回（' + (b.plans || 0) + ' 計画）。幅は、メーカーごとの平均のばらつきから出した 95% の目安です（1 社だけなら出しません）'
+    + (b.oldCalcRuns ? '。数え方を直す前の回（' + b.oldCalcRuns + ' 回）は入れていません' : ''),
     '<div class="tblwrap">' + tbl + '</div><p class="note" data-tip="' + esc(sayTip) + '">' + esc(say) + '</p>');
 }
 
