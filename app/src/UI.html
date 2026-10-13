@@ -682,13 +682,14 @@ function call(fn, args, ok, fail){
  * 読むだけの入口を呼び、S.ld[key] に 読み込み中 { loading, start }・失敗 { error, at }・読めた { at, ms } を残す。onOk(r) で状態に入れる（描き直しは call がする）。
  * fn: 入口の名前（READS にあるもの）か、function(ok, fail){ call(入口の名前, [...], ok, fail); }（名前は引用符で書く）。
  *     関数の形だと入口の名前が call の第 1 引数としてそのまま残り、app-contract が「画面から呼ぶ入口」として確かめられる（この画面のコードは関数の形で書く）。
- * 同じ key を読み直したら、前の応答は捨てる。失敗は通知を出さず、slot(key…) がその場所に理由と「もう一度読み込む」を出す
+ * 同じ key を読み直したら、前の応答は捨てる。失敗は通知を出さず、slot(key…) がその場所に理由と「もう一度読み込む」を出す。
+ * tag: 何を読んでいるか（計画の ID など。S.ld[key].tag に残る）。読み込み中に「古い」の印（crossStale）が付いたら、届いた中身も古いとみなす
  */
-function load(key, fn, args, onOk){
+function load(key, fn, args, onOk, tag){
   if (typeof fn === 'string' && !READS[fn]) throw new Error('load() は読むだけの入口に使います: ' + fn);
-  var t = { loading: true, start: Date.now() };
+  var t = { loading: true, start: Date.now(), tag: tag };
   S.ld[key] = t;
-  var ok = function(r){ if (S.ld[key] !== t) return; S.ld[key] = { at: Date.now(), ms: Date.now() - t.start }; if (onOk) onOk(r); };
+  var ok = function(r){ if (S.ld[key] !== t) return; S.ld[key] = { at: t.stale ? 0 : Date.now(), ms: Date.now() - t.start, tag: tag }; if (onOk) onOk(r); };
   var fail = function(e){ if (S.ld[key] !== t) return false; S.ld[key] = { error: errText((e && e.message) || String(e)), at: Date.now() }; render(); return false; };
   if (typeof fn === 'function') fn(ok, fail); else call(fn, args || [], ok, fail);
 }
@@ -703,6 +704,10 @@ function slot(key, label, retryJs){
 function ldBusy(key){ return !!(S.ld[key] && S.ld[key].loading); }
 /** ms ミリ秒以内に読めたか（読み直すかどうかの目安） */
 function ldFresh(key, ms){ var x = S.ld[key]; return !!(x && !x.loading && !x.error && Date.now() - x.at < ms); }
+/** 読んだ中身の控え（どの画面も同じ決まり）: 10 分以内に読み、「古い」の印（crossStale）が無ければ、画面やタブを開き直しても読み直さない */
+var LD_KEEP = 600000;
+/** 画面・タブを開いたときに読むか: 中身が無い（has が偽）・10 分より古い・古いの印・失敗のとき。読み込み中は重ねて読まない（「もう一度読み込む」は読む関数を直接呼ぶ） */
+function ldNeed(key, has){ return !ldBusy(key) && !(has && ldFresh(key, LD_KEEP)); }
 
 // ---- 時間のかかる処理（裏で動かし、数秒ごとに状態を尋ねる。通信が長く続いて切れるのを避ける） ----
 var JOB_LABEL = {
@@ -726,8 +731,12 @@ function jobLabel(j){
  * 開いている計画なら読み直す（saved: 保存した操作。保存しなかったほかの欄の入力中の値は消さない）。ほかの画面の控えは古いとみなす（次に開いたとき読み直す）
  */
 function jobReload(planId, saved){ crossStale(); if (planId && S.fc.planId === planId) loadForecast(planId, true, saved || {}); }
-/** 自分の保存・実行の後は、分析・学び（10 分は読み直さない控え）を古いとみなす。開いている間はそのまま出し、次に開いたとき読み直す */
-function crossStale(){ ['an', 'lrPeople', 'lrAi'].forEach(function(k){ var x = S.ld[k]; if (x && !x.loading && !x.error) x.at = 0; }); }
+/**
+ * 保存・処理の終わり・公式版を出す / 承認の後は、読んだ中身の控え（LD_KEEP）を古いとみなす（ホーム・メーカー・計画の一覧・根拠・振り返り・公式版・分析・学び）。
+ * 開いている間はそのまま出し、次に開いたとき読み直す。読み込み中のものは、届いた中身を古いとみなす（load の t.stale）
+ */
+var LD_STALE = ['home', 'mk', 'fcPlans', 'fcBasis', 'fcLearn', 'fcVer', 'an', 'lrPeople', 'lrAi'];
+function crossStale(){ LD_STALE.forEach(function(k){ var x = S.ld[k]; if (!x || x.error) return; if (x.loading) x.stale = true; else x.at = 0; }); }
 var JOB_DONE = {
   // 旧来の計算が入力の確認を求めたとき（極端な入力値など）は、内容を見せて、続けるときだけもう一度動かす（計算の処理が返す）
   'FORECAST.RUN_CALC': function(r, payload){ JOB_DONE['FORECAST.RUN'](r, payload); },
@@ -752,8 +761,8 @@ var JOB_DONE = {
 /** 処理が止まった・失敗した・見失った・始められなかったとき（kind ごと。知らせの前に呼ぶ）: function(状態 { status, error }, payload) */
 var JOB_FAIL = {};
 function jobFail(kind, st, payload){ try { (JOB_FAIL[kind] || function(){})(st || {}, payload || {}); } catch (e) { if (window.console) console.error('job fail', e); } }
-/** 計画が増えた・年度を締めたとき: 一覧の控えを捨て、今の画面を読み直す（開いている計画の入力中の欄は消さない） */
-function listsChanged(){ S.pf = null; S.fc.plans = null; if (S.an) { S.an.data = null; S.an.plans = null; } if (S.lr) { S.lr.people = null; S.lr.ai = null; } go(S.view); }
+/** 計画が増えた・年度を締めたとき: 一覧の控えを捨て（ホームなどの控えは古いとみなし）、今の画面を読み直す（開いている計画の入力中の欄は消さない） */
+function listsChanged(){ S.pf = null; S.fc.plans = null; if (S.an) { S.an.data = null; S.an.plans = null; } if (S.lr) { S.lr.people = null; S.lr.ai = null; } crossStale(); go(S.view); }
 function startJob(kind, payload){
   // すでに動いている・始めている途中・画面からの保存の途中なら何もしない（保存の途中に始めると、通信が受け付けられず「始めている途中」のまま残るため）
   if (S.job || S.starting || S.writing) { jobFail(kind, { status: 'BUSY' }, payload); return; }
@@ -777,7 +786,8 @@ function jobBoxIntoView(){
 function pollJob(){
   var j = S.job;
   if (!j) return;
-  var done = function(){ S.job = null; busy(0); refreshJobBox(); };
+  // 処理が終わった・止まった: 中身が変わったかもしれないので、読んだ中身の控えを古いとみなす（次に開いたとき読み直す）
+  var done = function(){ S.job = null; busy(0); crossStale(); refreshJobBox(); };
   google.script.run.withSuccessHandler(function(st){
     if (!S.job || S.job.id !== j.id) return;
     if (st.jobId && st.jobId !== j.id) { j.id = st.jobId; j.kind = st.kind || j.kind; }   // 終わった続きの処理は、サーバーがたどって返す
@@ -1598,8 +1608,9 @@ function chartArrows(rows, opts){
 // ==== REGION: HOME ====
 // ホーム: 全体の合計だけ（個社の数字・名前は出さない。名前は空模様のツールチップだけ。2026-10-06 村井さん）。
 // 並び: よみ（気になる順の数）→ 数字（年間予算・着地の推定・暫定実績・外れ幅）→ 見通しの空模様（8 つ）→ 学びの進み → データからわかること
-function homeEnter(){ if (B.setUp && B.allowed) homeLoad(); }
-/** ホームの中身を読む（開いた直後は初期データの B.home を使い、ホームに戻るたびに新しくする）。読めたら学びの進み（apiAiLearning。学びの画面と同じ読み込み）を読む */
+/** ホームを開く: 中身が無い・10 分より古い・古いの印があるときだけ読む（戻るたびには読まない。LD_KEEP） */
+function homeEnter(){ if (B.setUp && B.allowed && ldNeed('home', !!B.home)) homeLoad(); }
+/** ホームの中身を読む（開いた直後は初期データの B.home を使う）。読めたら学びの進み（apiAiLearning。学びの画面と同じ読み込み）を読む */
 function homeLoad(){ load('home', function(ok, fail){ call('apiHome', [], ok, fail); }, null, function(r){ B.home = r; if (S.view === 'home') lrNeed('ai'); }); }
 /** 学びの進みは、ホームを描いた後に読む（まだ一度も読んでいないときだけ。失敗したら、このカードの「もう一度読み込む」で読み直す） */
 function homeLearnKick(){
@@ -1916,8 +1927,9 @@ function yomiSays(h){
 
 // ==== REGION: MAKERS ====
 // メーカー: 年度の計画があるメーカーを並べ、空模様・予算策定の状態・年度の数字を見せる（計画を作るのは所有者がエディタから。2026-10-06 村井さん）
-/** メーカーの画面を開く: ホームの初期データ（同じ項目）ですぐ描き、計画の一覧を読んで差し替える */
-function mkEnter(){ if (!ldBusy('mk')) load('mk', function(ok, fail){ call('apiPortfolio', [], ok, fail); }, null, function(r){ S.pf = r.plans; }); }
+/** メーカーの画面を開く: ホームの初期データ（同じ項目）ですぐ描き、計画の一覧を読んで差し替える（読んだ一覧は 10 分・古いの印まで控える。LD_KEEP） */
+function mkEnter(){ if (ldNeed('mk', !!S.pf)) mkLoad(); }
+function mkLoad(){ load('mk', function(ok, fail){ call('apiPortfolio', [], ok, fail); }, null, function(r){ S.pf = r.plans; }); }
 function mkPlans(){ return S.pf || (B.home && B.home.plans) || null; }
 var MK_STATES = { none: ['未着手', 'off'], draft: ['策定中', ''], pending: ['承認待ち', 'warn'], official: ['承認済み', 'ok'] };
 function mkState(p){ return p.pendingNo ? 'pending' : p.officialNo ? 'official' : !p.runs && (p.p50 === null || p.p50 === undefined) ? 'none' : 'draft'; }
@@ -1930,7 +1942,7 @@ function mkFy(){
 }
 function viewMakers(){
   var plans = mkPlans();
-  if (!plans) return '<h1>メーカー</h1>' + (slot('mk', 'メーカーを読み込んでいます', 'mkEnter()') || loading('メーカーを読み込んでいます'));
+  if (!plans) return '<h1>メーカー</h1>' + (slot('mk', 'メーカーを読み込んでいます', 'mkLoad()') || loading('メーカーを読み込んでいます'));
   var fys = mkFys(), fy = mkFy();
   // 測る専用の計画は後ろに分けて並べる（状態の数・合計には入れない）
   var rows = plans.filter(function(p){ return String(p.fy) === fy; }).sort(function(a, b){ return (planMeasure(a) ? 1 : 0) - (planMeasure(b) ? 1 : 0) || String(a.clientName).localeCompare(String(b.clientName), 'ja'); });
@@ -2001,9 +2013,9 @@ function mkTable(rows){
 S.fc = { plans: null, planId: '', data: null, view: null, tab: 'forecast', inputKind: 'product', draft: {}, draftPlan: '', inputDirty: {}, budget: {}, ins: {}, dec: {}, rvChain: null };
 var FC_TABS = [['forecast','予測と予算'],['basis','根拠'],['input','入力'],['review','振り返り'],['version','公式版'],['steps','進み']];
 var INPUT_KINDS = [['product','製品'],['client','メーカー全体'],['opinions','見解'],['devspot','スポット案件']];
-/** 予測を開く: 計画の一覧と、選んである計画の中身を同時に読む（一覧を待たない） */
+/** 予測を開く: 計画の一覧と、選んである計画の中身を同時に読む（一覧を待たない）。一覧は 10 分・古いの印まで読み直さない（LD_KEEP） */
 function fcEnter(){
-  fcLoadPlans();
+  if (ldNeed('fcPlans', !!S.fc.plans)) fcLoadPlans();
   var f = S.fc;
   if (!f.planId) return;
   var loaded = f.view && f.data && f.view.plan && f.view.plan.planId === f.planId;
@@ -2031,7 +2043,7 @@ function loadForecast(planId, force, saved){
     else if (w === 'budget') { f.budget = {}; f.budBasis = null; }
     else if (w === 'ins') f.ins = {};
   }
-  fcTabData(f.tab);
+  fcTabData(f.tab, force);
   load('fcLatest', function(ok, fail){ call('apiForecastLatest', [{ planId: planId }], ok, fail); }, null, function(r){ if (S.fc.planId === planId) S.fc.data = r; });
   load('fcView', function(ok, fail){ call('apiPlanView', [{ planId: planId }], ok, fail); }, null, function(r){ if (S.fc.planId === planId) S.fc.view = r; });
   setTimeout(fcWaitTick, 1000);
@@ -2068,8 +2080,19 @@ function fcSwitch(planId){
   ask(FC_DIRTY_MSG + '保存せずに、ほかのメーカーを開きますか？（入力は消えます）', '開く', function(){ fcDropDrafts(); loadForecast(planId); }, true);
   render();   // 選ぶ欄を今のメーカーに戻しておく（「やめる」のとき）
 }
-/** タブに要る中身を読む（根拠・振り返り・公式版は、開くたびに新しくする） */
-function fcTabData(t){ if (t === 'version') fcLoadVersions(); if (t === 'basis') fcLoadBasis(); if (t === 'review') fcLoadLearning(); }
+/** タブに要る中身（根拠・振り返り・公式版）: [読み込みの key, S.fc の置き場所] */
+var FC_TAB_LD = { basis: ['fcBasis', 'basis'], review: ['fcLearn', 'learn'], version: ['fcVer', 'ver'] };
+/**
+ * タブに要る中身を読む。同じ計画のものを 10 分以内に読んでいて、古いの印（crossStale）が無ければ読み直さない。同じ計画を読み込み中なら重ねない。
+ * force: 保存・実行の後に計画を読み直すとき（いつも読む）
+ */
+function fcTabData(t, force){
+  var x = FC_TAB_LD[t];
+  if (!x) return;
+  var f = S.fc, have = f[x[1]], ld = S.ld[x[0]];
+  if (!force && (ld && ld.loading ? ld.tag === f.planId : !!have && have.planId === f.planId && ldFresh(x[0], LD_KEEP))) return;
+  if (t === 'basis') fcLoadBasis(); else if (t === 'review') fcLoadLearning(); else fcLoadVersions();
+}
 function viewForecast(){
   var f = S.fc, d = f.data, v = f.view;
   if (!f.planId) {
@@ -2577,7 +2600,7 @@ function fcBudDraftLine(closed, lv){
 }
 
 // ---- 根拠（何が予測を押したか。中の言葉は出さない: 話題・向き・種類・AI の見立て） ----
-function fcLoadBasis(){ var id = S.fc.planId; S.fc.basis = null; load('fcBasis', function(ok, fail){ call('apiForecastBasis', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.basis = r; }); }
+function fcLoadBasis(){ var id = S.fc.planId; S.fc.basis = null; load('fcBasis', function(ok, fail){ call('apiForecastBasis', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.basis = r; }, id); }
 var FC_TOPIC = { market: '市場', competitor: '競合', channel: '販路', dx: 'DX' };
 function fcTopic(t){ var s = String(t == null ? '' : t).trim(); return FC_TOPIC[s.toLowerCase()] || s; }
 var FC_DIR = { up: 1, positive: 1, increase: 1, '上昇': 1, '上向き': 1, down: -1, negative: -1, decrease: -1, '低下': -1, '下向き': -1, flat: 0, neutral: 0, stable: 0, '横ばい': 0 };
@@ -2949,7 +2972,7 @@ function fcInLogTip(e){
 }
 
 // ---- 振り返り（検証と四半期の見直しをまとめた: 精度の天気 → 精度の推移 → 人の記入 → AI の見直し案 → 更新。2026-10-06 村井さん） ----
-function fcLoadLearning(){ var id = S.fc.planId; S.fc.learn = null; load('fcLearn', function(ok, fail){ call('apiLearningView', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.learn = r; }); }
+function fcLoadLearning(){ var id = S.fc.planId; S.fc.learn = null; load('fcLearn', function(ok, fail){ call('apiLearningView', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.learn = r; }, id); }
 function fcReviewTab(d, v){
   var boot = v.boot || {}, e = boot.eval || {}, q = boot.quarterly || {}, lr = S.fc.learn, canPlan = fcCan('plan');
   var acc = lr && lr.planId === S.fc.planId ? lr.accuracy || { months: [] } : null;
@@ -3157,7 +3180,7 @@ function rvChainGet(planId){
 var VER_STATE = { SUBMITTED: ['承認待ち', 'warn'], APPROVED: ['承認済み', 'ok'], REJECTED: ['却下', 'ng'], SUPERSEDED: ['置き換え済み', 'off'], WITHDRAWN: ['取り下げ', 'off'] };
 /** 版の状態の札。表の状態の列（col: true）は、ほかの表の状態の列と同じ幅（.chip.st）にそろえる */
 function verChip(st, col){ var x = VER_STATE[st] || ['-', 'off']; return '<span class="chip ' + (col ? 'st ' : '') + x[1] + '">' + x[0] + '</span>'; }
-function fcLoadVersions(){ var id = S.fc.planId; S.fc.ver = null; load('fcVer', function(ok, fail){ call('apiVersionList', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.ver = r; }); }
+function fcLoadVersions(){ var id = S.fc.planId; S.fc.ver = null; load('fcVer', function(ok, fail){ call('apiVersionList', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.ver = r; }, id); }
 function verWho(email, at){ return email ? esc(fcWho(email)) + '<div class="note">' + esc(fcDate(at, true).slice(5)) + '</div>' : '-'; }
 function verDiff(a, b){ return !isNum(a) || !isNum(b) ? '-' : (a - b > 0 ? '+' : '') + yen(a - b); }
 /**
@@ -3350,7 +3373,7 @@ function fcStepsTab(d, v){
 S.an = { tab: 'overview', fy: '', data: null, view: 'chart' };
 var AN_TABS = [['overview', '俯瞰'], ['market', '市場']];
 /** 分析を開く: 中身が無い・10 分より古いときだけ読む（サーバーも日ごとに控える） */
-function anEnter(){ if (!S.an.data || !ldFresh('an', 600000)) anLoad(); }
+function anEnter(){ if (ldNeed('an', !!S.an.data)) anLoad(); }
 function anLoad(){
   var fy = S.an.fy;
   load('an', function(ok, fail){ call('apiCrossMaker', [{ fy: fy }], ok, fail); }, null, function(r){ if (String(S.an.fy || '') === String(fy || '')) { S.an.data = r; S.an.fy = String(r.fy); anLoadPlans(r); } });
@@ -3785,7 +3808,7 @@ var LR_TABS = [['people', '人の学び'], ['ai', 'AI の学び']];
 var LR_KEY = { people: 'lrPeople', ai: 'lrAi' };
 function lrEnter(){ lrNeed(S.lr.tab); }
 /** タブの中身が無い・10 分より古いときだけ読む */
-function lrNeed(t){ if ((!S.lr[t] || !ldFresh(LR_KEY[t], 600000)) && !ldBusy(LR_KEY[t])) lrLoad(t); }
+function lrNeed(t){ if (ldNeed(LR_KEY[t], !!S.lr[t])) lrLoad(t); }
 function lrLoad(t){
   if (t === 'ai') load('lrAi', function(ok, fail){ call('apiAiLearning', [], ok, fail); }, null, function(r){ S.lr.ai = r; });
   else load('lrPeople', function(ok, fail){ call('apiPeopleLearning', [], ok, fail); }, null, function(r){ S.lr.people = r; });
@@ -4333,6 +4356,7 @@ function lrLandingCard(x){
 // ---- 起動（区切りの外。最後に置く） ----
 render();
 if (B.setUp && B.allowed && !B.home) homeLoad();   // 初期データにホームの中身が無ければ読む（失敗したらホームに理由と「もう一度読み込む」）
+else if (B.home) S.ld.home = { at: Date.now(), ms: 0 };   // 初期データのホームは、今読んだものとして控える（ほかの画面から戻ってもすぐには読み直さない。LD_KEEP）
 if (B.activeJob) { if (/^(PLAN\.(EDIT|RUN)|FORECAST\.RUN)/.test(B.activeJob.kind)) { if (B.activeJob.payload && B.activeJob.payload.planId) S.fc.planId = B.activeJob.payload.planId; go('forecast'); } render(); watchJob(B.activeJob); }
 </script>
 </body>
