@@ -45,7 +45,7 @@ const visible = (html) => html.replace(/<[^>]*>/g, ' ');
     opinions: [base(rowsOf.opinions[0])], devspot: [base(rowsOf.devspot[0])] }, counts: {} };   // 自信が届いていれば、見る人にも自信の列が出る
   const view = (canPlan) => ({ plan: { planId: 'P1', clientName: 'テスト製薬', fy: 2026 }, inputHash: 'h', can: { plan: canPlan }, recent: [], actions: [],
     boot: { setup: { people: ['鷹野', '佐藤'] }, products: ['製品A', '製品B'], months: ['2026-04', '2026-05', '2026-06'], stepOptions: ['+5%', '-5%'], input: rowsOf }, inputLog: log });
-  const draw = (v, kind) => run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.draft = {}; S.fc.inputDirty = {}; S.fc.inputKind = '${kind}'; fcInputTab(null, __v)`, { __v: v });
+  const draw = (v, kind) => run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.draft = {}; S.fc.inputDirty = {}; S.fc.inputKind = '${kind}'; fcInputCard(__v, '${kind}')`, { __v: v });
   const CARD_1280 = 922;   // 1280px の画面の入力のカードの中の幅（点検の測り: 1280 − 左のメニュー 220 − 余白）
   const HIST_AT = { product: '理由', client: '理由', opinions: '補足', devspot: '案件名' };
   for (const canPlan of [true, false]) {
@@ -81,8 +81,8 @@ const visible = (html) => html.replace(/<[^>]*>/g, ' ');
   }
   // 跡の無い行（足した行）は (i) と同じ幅の空きで、欄の幅をそろえる
   draw(view(true), 'devspot');
-  run(`fcInputAdd()`);
-  const added = run(`fcInputTab(null, S.fc.view)`);
+  run(`fcInputAdd('devspot')`);
+  const added = run(`fcInputCard(S.fc.view, 'devspot')`);
   assert.match(added, /aria-label="案件名"><span class="tipsp"><\/span><\/span>/, '足した行は空き');
   // 跡がどの行にも無ければ、包みを付けない
   const noLog = Object.assign(view(true), { inputLog: null });
@@ -133,7 +133,7 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
     const d = env.call('apiForecastLatest(__in)', { __in: { planId: id } });
     const v = env.call('apiPlanView(__in)', { __in: { planId: id } });
     v.boot.output.sections[0].monthly = Array.from({ length: 12 }, (_, i) => ({ row: 29 + i, month: fy + '/' + String(i + 1).padStart(2, '0'), p10: 70, p50: 80, p90: 90, adopted: 80, uplift: '', final: 80 }));
-    run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.fc.tab = 'forecast'; S.cv.fcMonthly = '${table ? 'table' : 'chart'}'`, { __l: env.call('apiListPlans()').plans, __id: id, __v: v, __d: d });
+    run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.cv.fcMonthly = '${table ? 'table' : 'chart'}'`, { __l: env.call('apiListPlans()').plans, __id: id, __v: v, __d: d });
     return run('fcForecastTab(S.fc.data, S.fc.view)');
   };
   // 測る専用: 最終予算の数字・列・線を出さない。題は「月ごとの見通し」

@@ -290,7 +290,7 @@ let planId;
   const p0 = view(planId).boot.input.product.slice(0, 2).map((x) => Object.assign({}, x));
   p0[0].selfConf = '低い';
   assert.equal(save(planId, 'product', p0).status, 'DONE');
-  const render = (v, kind) => { ui.__v = v; return vm.runInContext(`S.fc.view = __v; S.fc.draft = {}; S.fc.inputDirty = {}; S.fc.inputKind = '${kind}'; fcInputTab(null, __v)`, ui); };
+  const render = (v, kind) => { ui.__v = v; return vm.runInContext(`S.fc.view = __v; S.fc.draft = {}; S.fc.inputDirty = {}; S.fc.inputKind = '${kind}'; fcInputCard(__v, '${kind}')`, ui); };
   const vo = view(planId);
   const html = render(vo, 'product');
   assert.match(html, /<th data-tip="この行の見立てにどれだけ自信があるか（任意）。記録にだけ残し、予測の計算には使いません">自信<\/th>/);

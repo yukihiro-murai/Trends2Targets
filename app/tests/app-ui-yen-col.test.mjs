@@ -72,7 +72,7 @@ const CARD_1280 = 922;   // 1280px の画面のカードの中の幅（1280 − 
   const planId = env.seedPlan(env.makeBook('A', { CONFIG: { values: [['項目', '値'], ['[必須] メーカー名（外部集計キー）', 'テスト製薬'], ['[必須] 予測年度FY（YYYY）', fy], ['[必須] 担当者（カンマ区切り）', '担当A']] }, OUTPUT: { values: output } }));
   const d = env.call('apiForecastLatest(__in)', { __in: { planId } });
   const v = env.call('apiPlanView(__in)', { __in: { planId } });
-  run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.fc.tab = 'forecast'; S.cv.fcMonthly = 'table'`, { __l: env.call('apiListPlans()').plans, __id: planId, __v: v, __d: d });
+  run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.cv.fcMonthly = 'table'`, { __l: env.call('apiListPlans()').plans, __id: planId, __v: v, __d: d });
   const html = run('fcForecastTab(S.fc.data, S.fc.view)');
   const t = cols(html, 'tbl scroll edit');
   assert.deepEqual(t.th, ['月', '下振れ', '中心', '上振れ', '採用予測', '上乗せ', '最終予算']);

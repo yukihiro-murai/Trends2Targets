@@ -12,7 +12,7 @@
 
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { J, MEMBER, OWNER, setUpEnv, uiHtml } from './gas-mock.mjs';
+import { J, MEMBER, OWNER, fcSection, setUpEnv, uiHtml } from './gas-mock.mjs';
 
 const D = (y, m, d = 1) => new Date(y, m - 1, d);
 function legacyBook(env) {
@@ -268,16 +268,15 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   vm.runInContext(js, ui);
   ui.__v = view; ui.__d = latest;
   vm.runInContext(`S.view = 'forecast'; S.fc.plans = [{ planId: __v.plan.planId, clientName: 'x', fy: '2026' }]; S.fc.planId = __v.plan.planId; S.fc.view = __v; S.fc.data = __d;`, ui);
-  for (const tab of ['forecast', 'input', 'review', 'steps']) {
-    const html = vm.runInContext(`S.fc.tab = '${tab}'; viewForecast()`, ui);
-    assert.ok(!/このタブを表示できませんでした/.test(html), tab + ' タブを描ける: ' + (html.match(/<p class="note" style="margin-top:6px">([^<]*)/) || [])[1]);
-  }
-  assert.match(vm.runInContext(`S.fc.tab = 'steps'; viewForecast()`, ui), /予算の保存[\s\S]*予算と予測/, '最近の操作に変わったもの（シートの名前ではなく、ふつうの名前）が出る');
+  const page = vm.runInContext(`viewForecast()`, ui);
+  assert.ok(!/ここを表示できませんでした/.test(page), '区切りをすべて描ける: ' + (page.match(/<p class="note">([^<]*)/) || [])[1]);
+  for (const tab of ['forecast', 'basis', 'input', 'review', 'version', 'steps']) assert.ok(fcSection(page, tab), tab + ' の区切りがある');
+  assert.match(fcSection(page, 'steps'), /予算の保存[\s\S]*予算と予測/, '最近の操作に変わったもの（シートの名前ではなく、ふつうの名前）が出る');
   // 旧来の計算が確認を求めたら、確認の窓（ブラウザが黙って「やめる」にすることがある）ではなく、画面の中のカードで聞く
-  vm.runInContext(`S.fc.tab = 'review'; toast = function(){}; JOB_DONE['FORECAST.RUN_CALC']({ needConfirm: { key: 'extreme', title: '極端な入力', message: '増減率 +80%' } }, { planId: S.fc.planId, confirms: [] })`, ui);
+  vm.runInContext(`S.fc.jump = 'review'; toast = function(){}; JOB_DONE['FORECAST.RUN_CALC']({ needConfirm: { key: 'extreme', title: '極端な入力', message: '増減率 +80%' } }, { planId: S.fc.planId, confirms: [] })`, ui);
   const cf = vm.runInContext(`viewForecast()`, ui);
-  assert.match(cf, /極端な入力[\s\S]*増減率 \+80%[\s\S]*このまま実行/, '確認のカードが予測と予算のタブに出る');
-  assert.equal(vm.runInContext(`S.fc.tab`, ui), 'forecast');
+  assert.match(fcSection(cf, 'forecast'), /極端な入力[\s\S]*増減率 \+80%[\s\S]*このまま実行/, '確認のカードが予測と予算の区切りに出る');
+  assert.equal(vm.runInContext(`S.fc.jump`, ui), 'forecast', '予測と予算の区切りへ送る（タブは無い）');
   // 旧来の計算の文（表の名前・Step・kTotal・OK/キャンセル）は、画面の言葉とボタンの名前で見せる
   const legacyMsgs = [
     'Stepが極端です（±100%以上）。\n\nシート: PRODUCT / 担当: 鷹野 / 月: 2026/05 / Step: 120%\n\nプロモーション終了などで意図した入力ならOKで続行できます。\n修正する場合はキャンセルしてください。',
@@ -295,7 +294,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.doesNotMatch(vm.runInContext(`viewForecast()`, ui), /value="[0-9]+\.[0-9]+"/, '採用予測の欄は小数を見せない');
   // 検証のタブの、精度の推移と学習の影
   ui.__learn = env.call('apiLearningView(__in)', { __in: { planId } });
-  const evalHtml = vm.runInContext(`S.fc.learn = __learn; S.fc.tab = 'review'; viewForecast()`, ui);
+  const evalHtml = vm.runInContext(`S.fc.learn = __learn; fcSection(viewForecast(), 'review')`, Object.assign(ui, { fcSection }));
   // 振り返り（検証と四半期をまとめた）: 記録が無い計画は案内 1 枚、記録があれば精度の天気と精度の推移（学習の影は『学び』へ。2026-10-06）
   assert.match(evalHtml, ui.__learn.accuracy.months.length ? /精度の天気[\s\S]*精度の推移[\s\S]*振り返りの更新/ : /(まだ振り返りの記録がありません|人の記入|AI の見直し案)[\s\S]*振り返りの更新/);
   const withMonths = JSON.parse(JSON.stringify(ui.__learn)); withMonths.accuracy.months = [{ month: '2026/04', p10: 1, p50: 2, p90: 3, actual: 2, ape: 0, inside: true }];
@@ -369,14 +368,14 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   vm.runInContext(`S.view = 'forecast'`, ui);
   // 根拠のタブ
   ui.__basis = env.call('apiForecastBasis(__in)', { __in: { planId } });
-  const basisHtml = vm.runInContext(`S.fc.basis = __basis; S.fc.tab = 'basis'; viewForecast()`, ui);
+  const basisHtml = vm.runInContext(`S.fc.basis = __basis; fcSection(viewForecast(), 'basis')`, ui);
   // 中身のある部分だけを出す（補正・市場の調査・前回からの変化は、記録があるときだけ。「まだありません」を重ねない。2026-10-06）
   assert.match(basisHtml, /過去の売上だけ[\s\S]*月ごとの内訳/);
   assert.ok((basisHtml.match(/まだ/g) || []).length <= 1, '根拠のタブに「まだ」を重ねない');
   assert.ok(!/undefined|NaN/.test(basisHtml), '根拠のタブに undefined や NaN を出さない');
   // 公式版のタブ（版がまだ無いとき・出したとき）
   ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } });
-  const verHtml = vm.runInContext(`S.fc.ver = __ver; S.fc.tab = 'version'; viewForecast()`, ui);
+  const verHtml = vm.runInContext(`S.fc.ver = __ver; fcSection(viewForecast(), 'version')`, ui);
   assert.match(verHtml, /公式版の最終予算[\s\S]*今の内容を公式版として出す[\s\S]*まだ版がありません/);
   env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'テスト' } });
   ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } });
@@ -393,9 +392,10 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.match(vm.runInContext(`var __kp = S.pf; S.pf = null; B.home = __home; var __m = viewMakers(); S.pf = __kp; __m`, ui), /<h1>メーカー一覧<\/h1>[\s\S]*テスト製薬[\s\S]*開く/);
   // 年度は題のすぐ横に出す
   assert.match(vm.runInContext(`viewTitle('<div class="page-head"><h1>メーカー</h1><select data-near="1"></select></div>')`, ui), /<h1[^>]*>メーカー<\/h1><span class="vnear"><select/);
-  // 予測は、まずメーカーを選ぶ（計画を勝手に開かない）
-  const pick = vm.runInContext(`var __keep = S.fc.planId; S.fc.planId = null; S.fc.plans = [{ planId: 'P1', clientName: 'テスト製薬', fy: '2026' }]; var __p = viewForecast(); S.fc.planId = __keep; __p`, ui);
-  assert.match(pick, /メーカーを選ぶ[\s\S]*テスト製薬[\s\S]*FY2026[\s\S]*開く/);
+  // 予測は「メーカーを選ぶ」だけの画面を出さない: 題の横に年度とメーカーの選ぶ欄（2026-10-13 村井さん）
+  const pick = vm.runInContext(`var __keep = [S.fc.planId, S.fc.plans]; S.fc.planId = null; S.fc.plans = [{ planId: 'P1', clientName: 'テスト製薬', fy: '2026' }]; var __p = viewForecast(); S.fc.planId = __keep[0]; S.fc.plans = __keep[1]; __p`, ui);
+  assert.doesNotMatch(pick, /メーカーを選ぶ/);
+  assert.match(pick, /<h1>予測<\/h1><span class="fc-sels" data-near="1"><select[^>]*id="fc_fy"[\s\S]*FY2026[\s\S]*<select[^>]*id="fc_mk"[^>]*>[\s\S]*>テスト製薬<\/option>/);
   // メニュー: ホーム・メーカー・予測・分析・学び（使える人は全員同じ。2026-10-06 村井さん）
   assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(NAV.map(function(n){ return n[1]; }))`, ui)), ['ホーム', 'メーカー一覧', '予測', '分析', '学び']);
   assert.equal(vm.runInContext(`go('settings'); S.view`, ui), 'home', '無い画面へは移らない');
@@ -461,7 +461,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.match(cot, /グラフ<\/button>[\s\S]*表で見る<\/button>[\s\S]*<svg><\/svg>[^|]*\|[\s\S]*class="tab on"[^>]*>表で見る<[\s\S]*<table><\/table>/, '「表で見る」を選ぶと表に替わり、選んだ方を覚える');
   // 予測の題に、横の選ぶ欄と同じ名前を重ねない
   const two = vm.runInContext(`var __k2 = [S.fc.plans, S.fc.planId]; S.fc.plans = [{ planId: S.fc.planId, clientName: 'テスト製薬', fy: '2026' }, { planId: 'PX', clientName: '別の製薬', fy: '2026' }]; var __t = viewForecast(); S.fc.plans = __k2[0]; S.fc.planId = __k2[1]; __t`, ui);
-  assert.match(two, /<h1>予測(<| )[\s\S]*?<select[^>]*data-near/);
+  assert.match(two, /<h1>予測(<| )[\s\S]*?<span class="fc-sels" data-near="1"><select/);
   assert.doesNotMatch(two, /<h1>予測：/);
 }
 

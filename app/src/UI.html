@@ -403,8 +403,20 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .fc-stats .u{font-size:var(--fs-s);color:var(--muted);margin-left:var(--s2)}
 .fc-say{font-size:var(--fs-h3);line-height:1.6;color:var(--navy)}
 .fc-ai .pre{margin-top:var(--s1)}
-.fc-link{margin:0 0 var(--s6);font-size:var(--fs-m)}
-.fc-link a{color:var(--primary-dark)}
+/* 1 カラム（2026-10-13 村井さん）: 区切り（予測と予算・根拠・入力・振り返り・公式版・進み）はどれも見出しのあるカード。
+   中のカード（月ごとの見通し・補正・製品の入力 など）は、区切りの中の段にする（枠を付けず、上に細い線。見出しは 1 段小さく） */
+.fc-sels{display:flex;align-items:center;gap:var(--s3)}   /* 題の横: 年度・メーカー（どちらも 1 マス） */
+.fcsec{scroll-margin-top:calc(var(--top-h) + var(--s4))}
+.fcsec > .card-head{padding-bottom:var(--s3);margin-bottom:var(--s5);border-bottom:1px solid var(--line)}   /* 区切りの見出しの下に線（中の段の見出しと見分ける） */
+.fcsec .card:not(.caution):not(.alert):not(.soft){background:none;border:0;border-top:1px solid var(--line-soft);border-radius:0;box-shadow:none;padding:var(--s5) 0 0;margin:var(--s5) 0 0}
+.fcsec > .card-head + .card:not(.caution):not(.alert):not(.soft){border-top:0;padding-top:0;margin-top:0}
+.fcsec .card.caution,.fcsec .card.alert,.fcsec .card.soft{margin:var(--s5) 0 0}
+.fcsec > .card-head + .card.caution,.fcsec > .card-head + .card.alert,.fcsec > .card-head + .card.soft{margin-top:0}
+.fcsec .card h2{font-size:var(--fs-b)}
+.fcsec .card h2::before{height:14px;background:var(--primary-line)}
+.fcsec .card:not(.caution):not(.alert):not(.soft) > .card-foot{margin:var(--s5) 0 0;padding:var(--s4) 0 0;border-radius:0}
+.fcsec .kpis{margin:0}
+.fcsec .kpi{box-shadow:none}
 .tbl.fc-notes,.tbl.fc-props{width:max(100%,880px)}
 /* 振り返りの表: 見るだけのときも、書くとき（.edit）と同じ左右 8px の余白（列の幅を同じ決まりで切る） */
 .tbl.fc-notes td,.tbl.fc-notes th,.tbl.fc-props td,.tbl.fc-props th{padding-left:var(--s2);padding-right:var(--s2)}
@@ -414,7 +426,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .fc-wxnm{min-width:0;flex:1 1 auto}
   .fc-stats{flex-basis:100%;grid-template-columns:repeat(2,minmax(0,1fr))}
   .fc-say{font-size:var(--fs-b)}
-  .tbl .fc-open{display:none}   /* メーカーを選ぶ: スマホは名前を押して開く（「開く」の列は出さない） */
+  .viewtitle .vnear .fc-sels{flex:1 1 100%}.viewtitle .vnear .fc-sels .inp{flex:1 1 0;min-width:0}   /* 年度とメーカーは次の行に半分ずつ */
   .tbl.fc-notes td.clamp,.tbl.fc-props td.clamp{min-width:var(--col)}   /* 振り返りの文の列（見立て・理由）: 欄の列に押されて 1 行 3 文字にならないように */
 }
 
@@ -914,7 +926,10 @@ function go(v){
   if (enter) enter();
   render();
 }
-/** 計画を開く（タブも選ぶ）。ホーム・メーカー・分析・学びから使う */
+/**
+ * 計画を開く。ホーム・メーカー・分析・学びから使う。tab: 予測の画面の中の区切り（basis・review など。タブは無くしたので、その区切りへ画面の中で送る）。
+ * 無ければ画面の先頭から（メーカー一覧の「開く」・名前）
+ */
 function openPlan(planId, tab){
   // 開いている計画に保存していない入力があれば、別の計画を開く前に確かめる
   if (planId !== S.fc.planId && S.fc.planId && typeof fcDirty === 'function' && fcDirty()) {
@@ -923,8 +938,11 @@ function openPlan(planId, tab){
   }
   // 別の計画を開くときは、前の計画の入力中の値・版の比べを捨てる（入力の表に前のメーカーの行を出さない・その行を別の計画へ保存しない）
   if (planId !== S.fc.planId) { S.fc.planId = planId; S.fc.view = null; S.fc.data = null; fcDraftsFor(planId); }
-  S.fc.tab = tab || 'forecast';
+  var from = S.view;
+  S.fc.jump = tab || '';
   go('forecast');
+  if (!tab && from !== 'forecast' && window.scrollTo) { try { window.scrollTo(0, 0); } catch (e) { /* 送れなくても開く */ } }
+  if (tab) fcJump();
 }
 function guide(pose, html){ return '<div class="card"><div class="guide"><div class="charbox">' + YOMI_POSE[pose] + '</div><div class="bubble">' + html + '</div></div></div>'; }
 /** 待ちの表示: よみが画面の中で「観測中…」と話す（右下には出さない。2026-10-06 村井さん） */
@@ -2090,21 +2108,70 @@ function mkTable(rows){
 }
 // ==== END REGION: MAKERS ====
 // ==== REGION: FORECAST ====
-// 予測（計画の画面: データ本体の上で見る・保存する・実行する）。まずメーカーを選ぶ（2026-10-06 村井さん）
-// タブ: 予測と予算・根拠・入力・振り返り（検証と四半期の見直しをまとめた）・公式版・進み。この区切りの道具は fc / ver / qr で始める
-S.fc = { plans: null, planId: '', data: null, view: null, tab: 'forecast', inputKind: 'product', draft: {}, draftPlan: '', inputDirty: {}, budget: {}, ins: {}, dec: {}, rvChain: null };
-var FC_TABS = [['forecast','予測と予算'],['basis','根拠'],['input','入力'],['review','振り返り'],['version','公式版'],['steps','進み']];
+// 予測（計画の画面: データ本体の上で見る・保存する・実行する）。題の横で年度とメーカーを選ぶ（2026-10-13 村井さん）
+// 中身はタブにせず 1 カラムで上から: 予測と予算・根拠・入力・振り返り（検証と四半期の見直しをまとめた）・公式版・進み。この区切りの道具は fc / ver / qr で始める
+S.fc = { plans: null, planId: '', fy: '', jump: '', data: null, view: null, inputKind: 'product', draft: {}, draftPlan: '', inputDirty: {}, budget: {}, ins: {}, dec: {}, rvChain: null };
+/** 画面の中の区切り（上から順に。どれも見出しのあるカード）: [key, 見出し, 説明（カーソルで）] */
+var FC_SECS = [['forecast','予測と予算','年度の見通しと、月ごとの予算です'],['basis','根拠','何が予測を押し上げ・押し下げたかです'],
+  ['input','入力','予測に足す見立て（製品・メーカー全体・見解・スポット案件）です。種類ごとに保存します'],
+  ['review','振り返り','予測と実績を比べた当たり具合と、外れの記入・見直し案です'],['version','公式版','確定した予測と予算の版と、その承認です'],['steps','進み','手順の進みと、予測の準備です']];
 var INPUT_KINDS = [['product','製品'],['client','メーカー全体'],['opinions','見解'],['devspot','スポット案件']];
-/** 予測を開く: 計画の一覧と、選んである計画の中身を同時に読む（一覧を待たない）。一覧は 10 分・古いの印まで読み直さない（LD_KEEP） */
+/**
+ * 予測を開く: 計画の一覧と、選んである計画の中身（根拠・振り返り・公式版も）を同時に読む（一覧を待たない）。一覧は 10 分・古いの印まで読み直さない（LD_KEEP）。
+ * メーカーが決まっていなければ、見ている年度の最初のメーカーを開く（一覧がまだ無ければ、読めてから）
+ */
 function fcEnter(){
   if (ldNeed('fcPlans', !!S.fc.plans)) fcLoadPlans();
   var f = S.fc;
-  if (!f.planId) return;
+  if (!f.planId) return fcAutoOpen();
   var loaded = f.view && f.data && f.view.plan && f.view.plan.planId === f.planId;
   // 読み込み中でも、それが別の計画のものなら読み直す（前の計画の応答は捨てる。開く → すぐ別のメーカーを開く、で止まらないように）
-  if (loaded) fcTabData(f.tab); else if (!(ldBusy('fcView') && f.loadingId === f.planId)) loadForecast(f.planId);
+  if (loaded) fcSecData(); else if (!(ldBusy('fcView') && f.loadingId === f.planId)) loadForecast(f.planId);
 }
-function fcLoadPlans(){ load('fcPlans', function(ok, fail){ call('apiListPlans', [], ok, fail); }, null, function(r){ S.fc.plans = r.plans; }); }
+function fcLoadPlans(){ load('fcPlans', function(ok, fail){ call('apiListPlans', [], ok, fail); }, null, function(r){ S.fc.plans = r.plans; if (S.view === 'forecast') fcAutoOpen(); }); }
+/** 計画の年度（一覧から。一覧を読む前は、読んだ計画の中身から） */
+function fcPlanFy(planId){
+  var p = (S.fc.plans || []).filter(function(x){ return x.planId === planId; })[0], d = S.fc.data;
+  return p && p.fy != null ? String(p.fy) : d && d.plan && d.plan.planId === planId && d.plan.fy != null ? String(d.plan.fy) : '';
+}
+/** 選べる年度（計画のある年度と、ホームの見る年度の選択肢。古い順。ホームの年度のプルダウンと同じ並び） */
+function fcFys(){
+  var all = (S.fc.plans || []).map(function(p){ return p.fy == null ? '' : String(p.fy); }).concat(((B.home && B.home.fyOptions) || []).map(String));
+  return all.filter(function(x, i, a){ return x && a.indexOf(x) === i; }).sort();
+}
+/** その年度のメーカー（メーカーの名前の順。今までの「メーカーを選ぶ」と同じ並べ方） */
+function fcFyPlans(fy){ return (S.fc.plans || []).filter(function(p){ return String(p.fy) === String(fy); }).sort(function(a, b){ return String(a.clientName).localeCompare(String(b.clientName), 'ja'); }); }
+/** 見ている年度: 開いている計画の年度。無ければ選んだ年度・ホームの年度（計画があれば）・計画のある一番新しい年度の順 */
+function fcFy(){
+  var f = S.fc, pf = f.planId ? fcPlanFy(f.planId) : '';
+  if (pf) return pf;
+  if (f.fy) return f.fy;
+  var hf = B.home && B.home.fy ? String(B.home.fy) : '', fys = (f.plans || []).filter(function(p){ return p.fy != null; }).map(function(p){ return String(p.fy); }).sort();
+  return hf && fys.indexOf(hf) >= 0 ? hf : fys[fys.length - 1] || hf;
+}
+/** メーカーが決まっていなければ、見ている年度の最初のメーカーを開く（その年度に計画が無ければ開かない: よみの案内） */
+function fcAutoOpen(){
+  var f = S.fc;
+  if (f.planId || !f.plans) return;
+  var first = fcFyPlans(fcFy())[0];
+  if (first) loadForecast(first.planId);
+}
+/**
+ * 年度を選ぶ: その年度のメーカーから選び直す（同じ名前のメーカーがあればそれ、無ければ最初のメーカー）。計画が無い年度は、よみの案内 1 枚。
+ * 保存していない入力があれば、先に確かめる（「やめる」なら今の年度のまま）
+ */
+function fcSetFy(fy){
+  var f = S.fc;
+  fy = String(fy || '');
+  if (fy === fcFy()) return;
+  var cur = (f.plans || []).filter(function(p){ return p.planId === f.planId; })[0], list = fcFyPlans(fy);
+  var next = (cur && list.filter(function(p){ return p.clientName === cur.clientName; })[0]) || list[0];
+  if (next) return fcSwitch(next.planId);
+  var empty = function(){ fcDropDrafts(); f.verCmp = null; f.fy = fy; f.planId = ''; f.view = null; f.data = null; f.draftPlan = ''; render(); };
+  if (!fcDirty()) return empty();
+  ask(FC_DIRTY_MSG + '保存せずに、ほかの年度を開きますか？（入力は消えます）', '開く', empty, true);
+  render();   // 選ぶ欄を今の年度に戻しておく（「やめる」のとき）
+}
 /** 保存・実行の後に読み直すとき、消す入力中の値（その操作が書き換えたもの）。見直し案の判断は、案が変わることがあるのでいつも消す */
 var FC_DRAFT_OF = { 'INPUT.SAVE': 'input', 'IMPORT.SALES': 'input', 'BUDGET.SAVE': 'budget', 'INSIGHT.SAVE': 'ins', 'EVAL.INSIGHTS': 'ins' };
 /**
@@ -2125,7 +2192,7 @@ function loadForecast(planId, force, saved){
     else if (w === 'budget') { f.budget = {}; f.budBasis = null; }
     else if (w === 'ins') f.ins = {};
   }
-  fcTabData(f.tab, force);
+  fcSecData(force);
   load('fcLatest', function(ok, fail){ call('apiForecastLatest', [{ planId: planId }], ok, fail); }, null, function(r){ if (S.fc.planId === planId) S.fc.data = r; });
   load('fcView', function(ok, fail){ call('apiPlanView', [{ planId: planId }], ok, fail); }, null, function(r){ if (S.fc.planId === planId) S.fc.view = r; });
   setTimeout(fcWaitTick, 1000);
@@ -2162,55 +2229,70 @@ function fcSwitch(planId){
   ask(FC_DIRTY_MSG + '保存せずに、ほかのメーカーを開きますか？（入力は消えます）', '開く', function(){ fcDropDrafts(); loadForecast(planId); }, true);
   render();   // 選ぶ欄を今のメーカーに戻しておく（「やめる」のとき）
 }
-/** タブに要る中身（根拠・振り返り・公式版）: [読み込みの key, S.fc の置き場所] */
-var FC_TAB_LD = { basis: ['fcBasis', 'basis'], review: ['fcLearn', 'learn'], version: ['fcVer', 'ver'] };
+/** 区切りに要る中身（根拠・振り返り・公式版）: [読み込みの key, S.fc の置き場所] */
+var FC_SEC_LD = { basis: ['fcBasis', 'basis'], review: ['fcLearn', 'learn'], version: ['fcVer', 'ver'] };
 /**
- * タブに要る中身を読む。同じ計画のものを 10 分以内に読んでいて、古いの印（crossStale）が無ければ読み直さない。同じ計画を読み込み中なら重ねない。
- * force: 保存・実行の後に計画を読み直すとき（いつも読む）
+ * 区切りに要る中身（根拠・振り返り・公式版）を、開いている計画の分だけ並べて読む。同じ計画のものを 10 分以内に読んでいて、古いの印（crossStale）が無ければ読み直さない。
+ * 同じ計画を読み込み中なら重ねない。force: 保存・実行の後に計画を読み直すとき（いつも読む）
  */
-function fcTabData(t, force){
-  var x = FC_TAB_LD[t];
-  if (!x) return;
-  var f = S.fc, have = f[x[1]], ld = S.ld[x[0]];
-  if (!force && (ld && ld.loading ? ld.tag === f.planId : !!have && have.planId === f.planId && ldFresh(x[0], LD_KEEP))) return;
-  if (t === 'basis') fcLoadBasis(); else if (t === 'review') fcLoadLearning(); else fcLoadVersions();
+function fcSecData(force){
+  var f = S.fc;
+  if (!f.planId) return;
+  Object.keys(FC_SEC_LD).forEach(function(t){
+    var x = FC_SEC_LD[t], have = f[x[1]], ld = S.ld[x[0]];
+    if (!force && (ld && ld.loading ? ld.tag === f.planId : !!have && have.planId === f.planId && ldFresh(x[0], LD_KEEP))) return;
+    if (t === 'basis') fcLoadBasis(); else if (t === 'review') fcLoadLearning(); else fcLoadVersions();
+  });
+}
+/** 題の横の選ぶ欄: 年度（1 マス）とメーカー（1 マス・名前だけ）。ホーム・メーカー一覧と同じ位置・同じ字の大きさ（.viewtitle .vnear select.inp） */
+function fcHeadSel(fy){
+  var f = S.fc, fys = fcFys(), list = fcFyPlans(fy);
+  if (fy && fys.indexOf(fy) < 0) fys = fys.concat([fy]).sort();
+  var fySel = !fys.length ? '' : '<select class="inp sm" id="fc_fy" aria-label="年度" onchange="fcSetFy(this.value)">'
+    + fys.map(function(x){ return '<option value="' + esc(x) + '"' + (x === fy ? ' selected' : '') + '>FY' + esc(x) + '</option>'; }).join('') + '</select>';
+  var mkSel = list.length ? '<select class="inp sm" id="fc_mk" aria-label="メーカー" onchange="fcSwitch(this.value)">'
+    + list.map(function(p){ return '<option value="' + esc(p.planId) + '"' + (p.planId === f.planId ? ' selected' : '') + '>' + esc(p.clientName) + '</option>'; }).join('') + '</select>' : '';
+  return '<span class="fc-sels" data-near="1">' + fySel + mkSel + '</span>';
 }
 function viewForecast(){
   var f = S.fc, d = f.data, v = f.view;
+  if (!f.plans && !f.planId) return '<h1>予測</h1>' + (slot('fcPlans', '計画の一覧を読み込んでいます', 'fcLoadPlans()') || loading('計画の一覧を読み込んでいます'));
+  var fy = fcFy(), sel = f.plans && f.plans.length ? fcHeadSel(fy) : '';
   if (!f.planId) {
-    if (!f.plans) return '<h1>予測</h1>' + (slot('fcPlans', '計画の一覧を読み込んでいます', 'fcLoadPlans()') || loading('計画の一覧を読み込んでいます'));
-    if (!f.plans.length) return '<h1>予測</h1>' + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここで見られます。');
-    return '<h1>予測</h1>' + fcPickCard(f.plans);
+    var head0 = '<div class="page-head"><h1>予測</h1>' + sel + '</div>';
+    if (!f.plans.length) return head0 + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここで見られます。');
+    if (!fcFyPlans(fy).length) return head0 + guide('guide', 'FY' + esc(fy) + ' の計画はまだありません。所有者が計画を作ると、ここで見られます。');
+    return head0 + loading('計画を読み込んでいます');
   }
-  var plans = f.plans || [];
-  var sel = plans.length > 1 ? '<select class="inp md" data-near="1" onchange="fcSwitch(this.value)" aria-label="メーカー">' + plans.map(function(p){ return '<option value="' + esc(p.planId) + '"' + (p.planId === f.planId ? ' selected' : '') + '>' + esc(p.clientName) + ' FY' + esc(p.fy) + (p.frozen ? '（締め済み）' : '') + (planMeasure(p) ? '（測る専用）' : '') + '</option>'; }).join('') + '</select>' : '';
-  // 計画が 2 つ以上なら、題の横の選ぶ欄に名前が出る（題に同じ名前を重ねない）
-  var html = '<div class="page-head"><h1>予測' + (d && !sel ? '：' + esc(d.plan.clientName) + ' FY' + esc(d.plan.fy) : '')
+  // 締め済み・測る専用の札は題のすぐ後ろに（選ぶ欄の前）
+  var html = '<div class="page-head"><h1>予測'
     + (d && (d.plan.frozen || (v && v.plan && v.plan.frozen)) ? ' <span class="chip warn" data-tip="この年度は締め済みです。元の行は残したまま、読み取り専用です">締め済み</span>' : '')
     + (fcMeasure() ? ' ' + measureChip() : '') + '</h1>' + sel + '</div>';
   if (v && v.pendingWrite) return html + fcPendingBox(v);
-  html += subTabs(FC_TABS, f.tab, 'fcTab');
   if (!d || !v) return html + fcWaitBox();
-  var body = { forecast: fcForecastTab, basis: fcBasisTab, input: fcInputTab, review: fcReviewTab, version: fcVersionTab, steps: fcStepsTab }[f.tab] || fcForecastTab;
-  // タブの表示で失敗しても、前の画面のまま止まらずに理由を出す（2026-10-02「進み」が表示されなかった）
-  try { return html + body(d, v); } catch (e) {
-    if (window.console) console.error('forecast tab', e);
-    return html + '<div class="card alert"><h2 class="err-text">このタブを表示できませんでした</h2><p class="note">' + esc((e && e.message) || e) + '</p><p class="note mt4">この文を管理者に伝えてください。ほかのタブは使えます。</p></div>';
-  }
+  var body = { forecast: fcForecastTab, basis: fcBasisTab, input: fcInputTab, review: fcReviewTab, version: fcVersionTab, steps: fcStepsTab };
+  html += FC_SECS.map(function(s){
+    var inner;
+    // 1 つの区切りの表示で失敗しても、ほかの区切りは出し、そこに理由を出す（2026-10-02「進み」が表示されなかった）
+    try { inner = body[s[0]](d, v); } catch (e) {
+      if (window.console) console.error('forecast section', e);
+      inner = '<div class="card alert"><p class="err-text">ここを表示できませんでした</p><p class="note">' + esc((e && e.message) || e) + '</p><p class="note mt4">この文を管理者に伝えてください。ほかの所は使えます。</p></div>';
+    }
+    return fcSec(s, inner);
+  }).join('');
+  if (f.jump) setTimeout(fcJump, 0);
+  return html;
 }
-/** 予測を開いたら、まずメーカーを選ぶ（新しい年度から。空模様はホームの初期データにあれば出す。2026-10-06 村井さん） */
-function fcPickCard(plans){
-  var rows = plans.slice().sort(function(a, b){ return String(b.fy).localeCompare(String(a.fy)) || String(a.clientName).localeCompare(String(b.clientName), 'ja'); });
-  var home = {};
-  ((B.home && B.home.plans) || []).forEach(function(p){ home[p.planId] = p; });
-  var sky = rows.some(function(p){ return home[p.planId]; });
-  // 年度はメーカーの名前の横に（同じメーカーの年度違いが、別のメーカーに見えないように）。スマホは「開く」の列を出さず、名前を押して開く
-  return '<div class="card"><div class="card-head"><h2>メーカーを選ぶ' + tip('メーカーの名前か「開く」で、その計画の予測を開きます') + '</h2></div><div class="tblwrap"><table class="tbl fc-pick"><colgroup><col>' + (sky ? '<col style="width:200px">' : '') + '<col class="fc-open" style="width:152px"></colgroup>'
-    + '<thead><tr><th class="colmin"' + colMinStyle(rows.map(function(p){ return p.clientName; })) + '>メーカー</th>' + (sky ? '<th data-tip="締まった月の実績と予測から推定した着地を、予算と比べた空模様">空模様</th>' : '') + '<th class="fc-open"><span class="sr">開く</span></th></tr></thead><tbody>'
-    + rows.map(function(p){ var h = home[p.planId];
-      return '<tr><td class="wrap">' + planLink(p, '', '', p.clientName + ' FY' + p.fy + ' を開く') + ' <span class="note">FY' + esc(p.fy) + '</span>' + (p.frozen ? ' <span class="chip warn">締め済み</span>' : '') + (planMeasure(p) ? ' ' + measureChip() : '') + '</td>' + (sky ? '<td>' + (h && !planMeasure(p) ? skyCell(h) : '-') + '</td>' : '')
-        + '<td class="fc-open"><button class="btn btn-ghost btn-sm" aria-label="' + esc(p.clientName + ' FY' + p.fy + ' を開く') + '" onclick="loadForecast(\'' + esc(p.planId) + '\')">開く</button></td></tr>'; }).join('')
-    + '</tbody></table></div></div>';
+/** 区切りのカード（見出し + 中身）。中のカードは、区切りの中の段として出す（CSS の .fcsec） */
+function fcSec(s, inner){
+  return '<section class="card fcsec" id="fcs-' + s[0] + '" aria-labelledby="fcs-h-' + s[0] + '"><div class="card-head"><h2 id="fcs-h-' + s[0] + '">' + esc(s[1]) + tip(s[2]) + '</h2></div>' + inner + '</section>';
+}
+/** 画面の中の区切りへ送る（ほかの画面から開いた・処理の後など）。区切りが描けていなければ、描けたときに送る */
+function fcJump(){
+  var t = S.fc.jump, el = t && S.view === 'forecast' ? $('fcs-' + t) : null;
+  if (!el || typeof el.scrollIntoView !== 'function') return;
+  S.fc.jump = '';
+  try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* 送れなくても画面はそのまま */ }
 }
 
 /** 保存が途中で止まっているとき（表どうしが食い違っているので、続きを書くまで中身は出さない） */
@@ -2248,7 +2330,6 @@ function fcWaitTick(){
   if (S.view === 'forecast' && $('fcWait')) $('fcWait').outerHTML = fcWaitBox();
   if (busyNow) fcWaitT = setTimeout(fcWaitTick, 1000);
 }
-function fcTab(t){ S.fc.tab = t; fcTabData(t); render(); }
 function fcCan(kind){ var v = S.fc.view; return !!(v && v.can && (kind === 'approve' ? v.can.approve : kind === 'admin' ? v.can.admin : v.can.plan)); }
 /** 開いている計画が測る専用か（計画の画面の plan.measure。読み込む前は計画の一覧から）。予算と公式版の操作を出さない */
 function fcMeasure(){
@@ -2373,7 +2454,7 @@ function fcForecastTab(d, v){
   var cfHtml = cf ? '<div class="card caution" role="alert"><div class="card-head"><h2 class="warn-text">' + esc(cf.title) + '</h2></div>'
     + '<div class="pre">' + esc(confirmText(cf.message)) + '</div>'
     + '<div class="card-foot"><button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="fcConfirmRun()">このまま実行</button>'
-    + actBtn('<button class="btn btn-ghost" onclick="S.fc.confirm=null;render()">やめる</button>', '入力を直す場合は「やめる」を押し、「入力」タブで直してから実行します') + '</div></div>' : '';
+    + actBtn('<button class="btn btn-ghost" onclick="S.fc.confirm=null;render()">やめる</button>', '入力を直す場合は「やめる」を押し、下の「入力」で直してから実行します') + '</div></div>' : '';
   var sh = d.shadow && d.shadow.planId === S.fc.planId ? d.shadow : null, al = sh && sh.aligned;   // 試しの数（年度の見込み・予算に届く見込み。保存している数字は変えない）
   // 本番の計画（判断 10・24。所有者が承認した補正で予測し直した計画。サーバーの shadow.live）: 年度の下振れ・中心・上振れは画面に出す年度の値（shadow.annual。
   // 作り方は basis: 月の合計・着地の推定・実績の合計）で、旧来の計算の年度合計は説明に出す（記録はそのまま）。本番でなければ今までどおり（中心の下に試しの中心）
@@ -2889,8 +2970,11 @@ function fcLayerTable(L){
 }
 
 // ---- 入力 ----
-function fcInputTab(d, v){
-  var boot = v.boot, kind = S.fc.inputKind, canPlan = fcCan('plan');
+/** 入力: 4 種類（製品・メーカー全体・見解・スポット案件）のカードを縦に並べる（未保存の印と保存は種類ごと） */
+function fcInputTab(d, v){ return INPUT_KINDS.map(function(k){ return fcInputCard(v, k[0]); }).join(''); }
+/** 入力の 1 種類のカード（表・行を追加・入力を保存・未保存の印） */
+function fcInputCard(v, kind){
+  var boot = v.boot, canPlan = fcCan('plan'), q = '\'' + kind + '\'';
   var rows = fcDraft(kind);
   // 自信（製品とメーカー全体の行だけ）: 動かせる人と、記録の自信が送られてきた人に出す。跡の列は、記録が送られてきた行があるときだけ
   var logs = (v.inputLog && v.inputLog.rows && v.inputLog.rows[kind]) || [];
@@ -2918,8 +3002,8 @@ function fcInputTab(d, v){
   };
   var cellHtml = function(c, r, i){ return histHtml(c, r, cellIn(c, r, i), !canPlan); };
   var cellIn = function(c, r, i){
-    var val = r[c[0]] === null || r[c[0]] === undefined ? '' : r[c[0]], on = 'onchange="fcInput(' + i + ',\'' + c[0] + '\',this.value)" aria-label="' + esc(c[1]) + '"';
-    var typed = 'oninput="fcInputType(' + i + ',\'' + c[0] + '\',this.value)" aria-label="' + esc(c[1]) + '"';   // 文字・数の欄は打つたびに控える
+    var val = r[c[0]] === null || r[c[0]] === undefined ? '' : r[c[0]], on = 'onchange="fcInput(' + i + ',\'' + c[0] + '\',this.value,' + q + ')" aria-label="' + esc(c[1]) + '"';
+    var typed = 'oninput="fcInputType(' + i + ',\'' + c[0] + '\',this.value,' + q + ')" aria-label="' + esc(c[1]) + '"';   // 文字・数の欄は打つたびに控える
     if (!canPlan) return esc(c[2] === 'month' ? String(val).replace('-', '/') : val);
     if (c[2] === 'people') return '<select class="inp cell" ' + on + '>' + opts(withCur(boot.setup.people, val), val) + '</select>';
     if (c[2] === 'products') return '<select class="inp cell" ' + on + '>' + opts(withCur(boot.products, val), val) + '</select>';
@@ -2929,15 +3013,14 @@ function fcInputTab(d, v){
     var num = c[2] === 'conf' || c[2] === 'money';
     return '<input class="inp cell' + (num ? ' num' : '') + '" type="' + (num ? 'number' : 'text') + '"' + (c[2] === 'conf' ? ' min="0" max="1" step="0.1"' : c[2] === 'money' ? ' step="10000"' : '') + ' value="' + esc(val) + '" ' + typed + '>';
   };
-  var html = '<div class="tabs sub">' + INPUT_KINDS.map(function(k){ return '<button class="tab' + (kind === k[0] ? ' on' : '') + '" onclick="S.fc.inputKind=\'' + k[0] + '\';render()">' + k[1] + (S.fc.inputDirty[k[0]] ? ' ●' : '') + '</button>'; }).join('') + '</div>';
-  html += '<div class="card"><h2>' + esc((INPUT_KINDS.filter(function(k){ return k[0] === kind; })[0] || ['', ''])[1]) + 'の入力' + (canPlan ? '' : tip('入力は予算策定担当ができます。')) + '</h2><div class="tblwrap"><table class="tbl scroll fc-in' + (canPlan ? ' edit' : '') + '" style="--inw:' + inw + 'px"><colgroup>' + cols.map(function(c){ return '<col' + (c[3] ? ' style="width:' + c[3] + 'px"' : '') + '>'; }).join('') + (canPlan ? '<col style="width:152px">' : '') + '</colgroup>'
+  var html = '<div class="card fc-inkind" id="fc-in-' + kind + '"><h2>' + esc((INPUT_KINDS.filter(function(k){ return k[0] === kind; })[0] || ['', ''])[1]) + 'の入力' + (canPlan ? '' : tip('入力は予算策定担当ができます。')) + '</h2><div class="tblwrap"><table class="tbl scroll fc-in' + (canPlan ? ' edit' : '') + '" style="--inw:' + inw + 'px"><colgroup>' + cols.map(function(c){ return '<col' + (c[3] ? ' style="width:' + c[3] + 'px"' : '') + '>'; }).join('') + (canPlan ? '<col style="width:152px">' : '') + '</colgroup>'
     + '<thead><tr>' + cols.map(function(c){ return '<th' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + (c[2] === 'selfconf' ? ' data-tip="' + esc(FC_CONF_TIP) + '"' : '') + '>' + c[1] + '</th>'; }).join('') + (canPlan ? '<th></th>' : '') + '</tr></thead><tbody>'
     + (rows.length ? rows.map(function(r, i){ return '<tr>' + cols.map(function(c){ return '<td' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + '>' + cellHtml(c, r, i) + '</td>'; }).join('')
-      + (canPlan ? '<td><button class="btn btn-ghost btn-sm" onclick="fcInputDel(' + i + ')" data-tip="この行を入力から外します（保存するまで反映されません）">外す</button></td>' : '') + '</tr>'; }).join('')
+      + (canPlan ? '<td><button class="btn btn-ghost btn-sm" onclick="fcInputDel(' + i + ',' + q + ')" data-tip="この行を入力から外します（保存するまで反映されません）">外す</button></td>' : '') + '</tr>'; }).join('')
       : '<tr><td colspan="' + (cols.length + (canPlan ? 1 : 0)) + '" class="empty">まだ入力がありません。' + (canPlan ? '「行を追加」で登録できます。' : '') + '</td></tr>')
     + '</tbody></table></div>'
-    + (canPlan ? '<div class="card-foot">' + actBtn(fcSaveBtn('入力を保存', 'fcSaveInput()', S.fc.inputDirty[kind]), '保存すると、この種類の入力をすべて書き換えます。必須の項目が空の行は予測では使いません')
-      + actBtn('<button class="btn btn-ghost" onclick="fcInputAdd()">行を追加</button>', '表の下に空の行を足します（保存するまで反映されません）')
+    + (canPlan ? '<div class="card-foot">' + actBtn(fcSaveBtn('入力を保存', 'fcSaveInput(' + q + ')', S.fc.inputDirty[kind]), '保存すると、この種類の入力をすべて書き換えます。必須の項目が空の行は予測では使いません')
+      + actBtn('<button class="btn btn-ghost" onclick="fcInputAdd(' + q + ')">行を追加</button>', '表の下に空の行を足します（保存するまで反映されません）')
       + (S.fc.inputDirty[kind] ? '<span class="chip warn">未保存</span>' : '') + '</div>' : '')
     + '</div>';
   return html;
@@ -2973,22 +3056,21 @@ function fcDraftOk(kind, rows){
   var f = S.fc, v = f.view, pid = v && v.plan && v.plan.planId;
   return !!pid && rows.planId === pid && (!f.planId || f.planId === pid) && rows.src === fcInputSrc(kind);
 }
-function fcInput(i, k, val){ fcDraft(S.fc.inputKind)[i][k] = val; if (!S.fc.inputDirty[S.fc.inputKind]) { S.fc.inputDirty[S.fc.inputKind] = true; render(); } }
+/** 入力の欄（選ぶ欄）を変えた。kind: 入力の種類（無ければ S.fc.inputKind） */
+function fcInput(i, k, val, kind){ kind = kind || S.fc.inputKind; fcDraft(kind)[i][k] = val; if (!S.fc.inputDirty[kind]) { S.fc.inputDirty[kind] = true; render(); } }
 /**
  * 文字・数の欄（理由・補足・案件名・確度・金額）は、打つたびに入力中の値へ控える（読み込みや処理の終わりで描き直しても、打ちかけの文字を消さない）。
- * 描き直すと打っている欄から外れるので、描き直さずに、保存のボタン・未保存の印・種類のタブの ● だけを付ける（人の記入の欄と同じ）
+ * 描き直すと打っている欄から外れるので、描き直さずに、その種類のカードの保存のボタンと未保存の印だけを付ける（人の記入の欄と同じ）
  */
-function fcInputType(i, k, val){
-  var kind = S.fc.inputKind;
+function fcInputType(i, k, val, kind){
+  kind = kind || S.fc.inputKind;
   fcDraft(kind)[i][k] = val;
   if (S.fc.inputDirty[kind]) return;
   S.fc.inputDirty[kind] = true;
-  fcMarkDirty('fcSaveInput()');
-  var t = document.querySelector('#main .tabs.sub .tab.on');
-  if (t && !/●$/.test(t.textContent || '')) t.textContent = (t.textContent || '') + ' ●';
+  fcMarkDirty("fcSaveInput('" + kind + "')");
 }
-function fcInputAdd(){ fcDraft(S.fc.inputKind).push({}); S.fc.inputDirty[S.fc.inputKind] = true; render(); }
-function fcInputDel(i){ fcDraft(S.fc.inputKind).splice(i, 1); S.fc.inputDirty[S.fc.inputKind] = true; render(); }
+function fcInputAdd(kind){ kind = kind || S.fc.inputKind; fcDraft(kind).push({}); S.fc.inputDirty[kind] = true; render(); }
+function fcInputDel(i, kind){ kind = kind || S.fc.inputKind; fcDraft(kind).splice(i, 1); S.fc.inputDirty[kind] = true; render(); }
 /**
  * 保存で送る行: 画面だけの印（_lk・_conf0。_ で始まる）は送らない。開いたときの行から来た行には、その行が読んだ行の何番目だったか（fromRow: 0 から。
  * 計画の画面の boot.input のその種類の順）を付ける。足した行と、値をすべて空にした行（旧来の保存が書かない行）には付けない。
@@ -3007,8 +3089,10 @@ function fcInputOut(r){
   return o;
 }
 var FC_STALE_MSG = '入力を開いた後に、メーカーかこの入力が変わりました。保存はしていません。今の入力を出し直してから、入力し直してください。';
-function fcSaveInput(){
-  var f = S.fc, kind = f.inputKind, cur = f.draft[kind];
+/** 入力を保存（種類ごと）。kind: 入力の種類（無ければ S.fc.inputKind） */
+function fcSaveInput(kind){
+  var f = S.fc, cur;
+  kind = kind || f.inputKind; cur = f.draft[kind];
   // 別のメーカーの行・読み直す前の入力から作った行は送らない（計画の番号・入力のハッシュと行が食い違ったまま保存しない）
   if (cur && !fcDraftOk(kind, cur)) {
     ask(FC_STALE_MSG, '出し直す', function(){ if (S.fc.draft[kind] === cur) { delete S.fc.draft[kind]; delete S.fc.inputDirty[kind]; } render(); }, true);
@@ -3095,7 +3179,6 @@ function fcReviewTab(d, v){
   // 止めている操作（押せないボタン）は、順に実行する説明でもそう言う
   var stopped = items.filter(function(it){ return fcCan(it[2] || 'plan') && fcPaused(it[0]); }).map(function(it){ return '「' + actShort(it[0]) + '」'; });
   if (acts) html += '<div class="card"><div class="card-head"><h2>振り返りの更新' + tip('左から順に実行します' + (stopped.length ? '。' + stopped.join('と') + 'は、今は止めています' : '')) + '</h2></div>' + acts + '</div>';
-  html += '<p class="fc-link"><a href="#" onclick="go(\'learning\');return false">全体の学びは『学び』で見られます</a></p>';
   return html;
 }
 /**
@@ -3259,7 +3342,7 @@ function rvChainGet(planId){
     if (c) { toast('判断を保存しました。続けて反映します'); startJob('PLAN.RUN', { planId: planId, action: 'REVIEW.APPLY' }); }
     else if (act === 'REVIEW.DECIDE') {
       // 続きの控えが無い（別の画面・別のブラウザで読み直した）: 反映はまだなので、そう伝えて振り返りを開く
-      if (S.view === 'forecast' && S.fc.planId === planId) S.fc.tab = 'review';
+      if (S.view === 'forecast' && S.fc.planId === planId) { S.fc.jump = 'review'; fcJump(); }
       toast('判断を保存しました。反映はまだです。振り返りの「承認して反映」をもう一度押すと反映します');
     }
   };
@@ -3385,7 +3468,7 @@ function fcVersionTab(d, v){
       + '<div class="card-foot">' + actBtn('<button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="verSubmit()">公式版として出す</button>', '今の数字のまま残し、承認者の確認を待ちます' + (pend ? '。承認待ちの v' + pend.no + ' は取り下げになります' : '')) + '</div></div>';
   }
   // 版の一覧
-  html += '<div class="card"><h2>版の一覧</h2>' + (r.versions.length ? '<div class="tblwrap"><table class="tbl fc-vers"><colgroup><col style="width:56px"><col style="width:120px"><col style="width:128px"><col style="width:128px"><col style="width:112px"><col style="width:112px"><col><col style="width:152px"></colgroup>'
+  html += '<div class="card"><h2>版の一覧</h2>' + (r.versions.length ? '<div class="tblwrap"><table class="tbl fc-vers"><colgroup><col style="width:56px"><col style="width:136px"><col style="width:128px"><col style="width:128px"><col style="width:112px"><col style="width:112px"><col><col style="width:152px"></colgroup>'
     + '<thead><tr><th>版</th><th>状態</th><th class="num" data-tip="最終予算の年度合計。下の段は、出したときにこの最終予算に届く見込み（前の版には無い）">最終予算</th>' + qTh('p50') + '<th>出した人</th><th>判断した人</th><th class="colmin" style="--colmin:64px">メモ</th><th></th></tr></thead><tbody>'
     + r.versions.map(function(x){ return '<tr><td>v' + x.no + '</td><td>' + verChip(x.state, true) + '</td><td class="num">' + yen(x.budget.final) + verReachCell(x) + '</td><td class="num"' + (verMidTip(x) ? ' data-tip="' + esc(verMidTip(x)) + '"' : '') + '>' + yen(verMid(x)) + '</td><td>' + verWho(x.submittedBy, x.submittedAt) + '</td><td>' + verWho(x.decidedBy, x.decidedAt) + '</td>'
       + '<td data-tip="' + esc((x.note || '') + (x.decisionNote ? ' / ' + x.decisionNote : '')) + '">' + esc(x.note || '') + (x.decisionNote ? '<div class="note">' + esc(x.decisionNote) + '</div>' : '') + '</td>'

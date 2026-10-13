@@ -102,7 +102,7 @@ flush();
 timers.length = 0;
 
 /** 予算のカード（予測と予算のタブ）の HTML */
-const card = () => { const h = run(`S.fc.tab = 'forecast'; fcForecastTab(S.fc.data, S.fc.view)`); assert.doesNotMatch(h, /undefined|NaN/); return h; };
+const card = () => { const h = run(`fcForecastTab(S.fc.data, S.fc.view)`); assert.doesNotMatch(h, /undefined|NaN/); return h; };
 const selectOf = (h) => /<span class="act" data-tip="([^"]*)"><select class="inp sm" id="fcProb"([^>]*)>([\s\S]*?)<\/select><\/span>/.exec(h);
 const optionsOf = (sel) => [...sel[3].matchAll(/<option value="(\d*)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], !!m[2], m[3]]);
 const chosen = (h) => optionsOf(selectOf(h)).find((o) => o[1])[0];
@@ -405,8 +405,9 @@ reachOn();
     inputHash: 'h', versions, official: versions[1], pending: versions[0], pendingChanged: false, can: { submit: true, approve: true }, me: 'planner@bigm2y.com' };
   const tab = (x) => { run('S.fc.ver = __r; S.fc.verCmp = null', { __r: x }); const h = run(`fcVersionTab(S.fc.data, S.fc.view)`); assert.doesNotMatch(h, /undefined|NaN/); return h; };
   const h = tab(r);
-  // 版の一覧: 列は増やさない（1280px の枠に入る並びのまま）。届く見込みは最終予算の下の段
-  assert.match(h, /<table class="tbl fc-vers"><colgroup><col style="width:56px"><col style="width:120px"><col style="width:128px"><col style="width:128px"><col style="width:112px"><col style="width:112px"><col><col style="width:152px"><\/colgroup>/);
+  // 版の一覧: 列は増やさない（1280px の枠に入る並びのまま）。届く見込みは最終予算の下の段。
+  // 状態の列は札（.chip.st 112px）+ 左右の余白 24px = 136px（120px では札の右が切れていた。2026-10-13）
+  assert.match(h, /<table class="tbl fc-vers"><colgroup><col style="width:56px"><col style="width:136px"><col style="width:128px"><col style="width:128px"><col style="width:112px"><col style="width:112px"><col><col style="width:152px"><\/colgroup>/);
   assert.match(h, /<th class="num" data-tip="最終予算の年度合計。下の段は、出したときにこの最終予算に届く見込み（前の版には無い）">最終予算<\/th>/);
   const rows = [...h.matchAll(/<tr><td>v(\d+)<\/td><td>[\s\S]*?<\/td><td class="num">([\s\S]*?)<\/td>/g)].map((x) => [x[1], x[2]]);
   assert.deepEqual(rows.map((x) => x[0]), ['5', '4', '3', '2', '1']);

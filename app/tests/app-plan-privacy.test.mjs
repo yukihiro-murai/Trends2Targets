@@ -15,7 +15,7 @@
 
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { J, MEMBER, OTHER, OWNER, extractFunction, setUpEnv, sources, uiHtml } from './gas-mock.mjs';
+import { J, MEMBER, OTHER, OWNER, extractFunction, fcSection, setUpEnv, sources, uiHtml } from './gas-mock.mjs';
 
 const D = (y, m, d = 1) => new Date(y, m - 1, d);
 const PLANNER_ALL = 'planner@bigm2y.com';
@@ -326,13 +326,13 @@ const redactedBasis = (full) => {
     vm.runInContext(js, ui);
     Object.assign(ui, { __v: view, __d: data, __b: basis, __l: learn });
     vm.runInContext(`S.view = 'forecast'; S.fc.plans = [{ planId: __v.plan.planId, clientName: 'x', fy: '2026' }]; S.fc.planId = __v.plan.planId; S.fc.view = __v; S.fc.data = __d; S.fc.basis = __b; S.fc.learn = __l;`, ui);
-    return { review: vm.runInContext(`S.fc.tab = 'review'; viewForecast()`, ui), basisChart: vm.runInContext(`S.fc.tab = 'basis'; viewForecast()`, ui),
-      basis: vm.runInContext(`S.cv.fcPush = 'table'; S.cv.fcBasisM = 'table'; viewForecast()`, ui) };   // 表で見る（月ごとの内訳の札）
+    return { review: fcSection(vm.runInContext(`viewForecast()`, ui), 'review'), basisChart: fcSection(vm.runInContext(`viewForecast()`, ui), 'basis'),
+      basis: fcSection(vm.runInContext(`S.cv.fcPush = 'table'; S.cv.fcBasisM = 'table'; viewForecast()`, ui), 'basis') };   // 表で見る（月ごとの内訳の札）
   };
   const chips = (html) => [...html.matchAll(/<span class="fc-src"[^>]*>([^<]*)<\/span>/g)].map((m) => m[1].trim());
   const sum = render(MEMBER, 'viewer');
   for (const [tab, html] of Object.entries(sum)) {
-    assert.ok(!/このタブを表示できませんでした/.test(html), tab + ' タブを描ける');
+    assert.ok(!/ここを表示できませんでした/.test(html), tab + ' タブを描ける');
     assert.ok(!/undefined|NaN/.test(html), tab + ' タブに undefined や NaN を出さない');
   }
   assert.match(sum.review, /人の記入[\s\S]*受注の遅れ/, '検証の記入は出す（担当の列は無し）');
@@ -409,9 +409,10 @@ const redactedBasis = (full) => {
   Object.assign(ui, { __v: viewer.view, __d: viewer.latest, __b: viewer.basis, __r: viewer.ver });
   vm.runInContext(`S.view = 'forecast'; S.fc.plans = [{ planId: __v.plan.planId, clientName: 'x', fy: '2026' }]; S.fc.planId = __v.plan.planId; S.fc.view = __v; S.fc.data = __d; S.fc.basis = __b; S.fc.ver = __r;`, ui);
   const tabs = {};
-  for (const tab of ['forecast', 'basis', 'version', 'steps']) tabs[tab] = vm.runInContext(`S.fc.tab = '${tab}'; viewForecast()`, ui);
+  const page = vm.runInContext(`viewForecast()`, ui);
+  for (const tab of ['forecast', 'basis', 'version', 'steps']) { tabs[tab] = fcSection(page, tab); assert.ok(tabs[tab], tab + ' の区切りがある'); }
   for (const [tab, html] of Object.entries(tabs)) {
-    assert.ok(!/このタブを表示できませんでした/.test(html), tab + ' タブを描ける');
+    assert.ok(!/ここを表示できませんでした/.test(html), tab + ' タブを描ける');
     assert.ok(!/undefined|NaN/.test(html), tab + ' タブに undefined や NaN を出さない');
     assert.deepEqual(emails(html), [], tab + ' タブに人のメールを出さない');
   }
