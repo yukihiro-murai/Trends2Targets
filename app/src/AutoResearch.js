@@ -314,7 +314,7 @@ function appAutoResearchNext_(ctx, via) {
   if (!pick) return notReady.length ? finish('SKIPPED', 'NOT_READY') : finish('SKIPPED', 'DENIED', { planId: denied[0] });
   let started;
   try {
-    started = appStartJob_(ctx, { kind: 'PLAN.RUN', payload: { planId: pick.planId, action: 'AI.RESEARCH' } });
+    started = appStartJob_(ctx, { kind: 'PLAN.RUN', payload: { planId: pick.planId, action: 'AI.RESEARCH' } }, { auto: true });   // 手で始める回数には数えない
   } catch (e) {
     const msg = String(e && e.message ? e.message : e);
     appAutoResearchTryUpdate_(s => appAutoResearchNote_(s, pick.planId, 'START_FAILED', nowMs, msg), 'START_FAILED');
