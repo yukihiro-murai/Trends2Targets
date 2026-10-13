@@ -163,7 +163,8 @@ assert.ok(types(A).every((t) => t === 'd') && types(B).every((t) => t === 's'), 
   // 精度（締まった後の予測の月は除く）
   assert.equal(a.accuracy.n, 3);
   assert.equal(a.accuracy.leaks, 2, '2026/06 と、振り返りのために足した 2025/05（どちらも予測 = 実績）');
-  close(a.accuracy.mape, (0.2 + 100 / 900 + 50 / 1100) / 3, 1e-9, 'MAPE');
+  // 外れ幅は外れの合計 ÷ 実績の合計（2026-10-13。月ごとの外れの平均 (0.2 + 100 / 900 + 50 / 1100) / 3 ではない）
+  close(a.accuracy.mape, (250 + 100 + 50) / (1250 + 900 + 1100), 1e-9, '外れ幅');
   close(a.accuracy.coverage, 1 / 3, 1e-9, 'P10〜P90 に入った割合');
   assert.equal(b.accuracy.coverage, 0);
   // AI の話題: 一番新しい回だけ。向きはそろえる
@@ -293,10 +294,13 @@ const ai = env.call('apiAiLearning()');
   // 精度の推移（全計画の月ごと。締まった後の予測の月は除く）
   const T = ai.timeline;
   assert.deepEqual(T.map((t) => t.ym), ['2026/04', '2026/05', '2026/06', '2026/07', '2026/08', '2026/09']);
-  const apes = { '2026/04': [0.2, 20 / 500], '2026/05': [100 / 900, 40 / 600], '2026/06': [50 / 650], '2026/07': [50 / 1100, 20 / 700] };
-  close(T[0].mape, (0.2 + 0.04) / 2);
+  // 月の外れ幅は、全計画のその月の外れの合計 ÷ 実績の合計（2026-10-13。[|中心 − 実績|, 実績]）
+  const pts = { '2026/04': [[250, 1250], [20, 500]], '2026/05': [[100, 900], [40, 600]], '2026/06': [[50, 650]], '2026/07': [[50, 1100], [20, 700]] };
+  const wape = (xs) => xs.reduce((s, x) => s + x[0], 0) / xs.reduce((s, x) => s + x[1], 0);
+  close(T[0].mape, wape(pts['2026/04']));
+  close(T[0].mape, 270 / 1750, 1e-12, '月ごとの外れの平均 (0.2 + 0.04) / 2 ではない');
   assert.deepEqual([T[2].n, T[2].coverageN], [1, 1], '甲の 6 月は締まった後の予測');
-  close(T[2].rolling3, [].concat(apes['2026/04'], apes['2026/05'], apes['2026/06']).reduce((a, b) => a + b) / 5, 1e-12, '3 か月の平均');
+  close(T[2].rolling3, wape([].concat(pts['2026/04'], pts['2026/05'], pts['2026/06'])), 1e-12, '3 か月の外れ幅');
   assert.equal(T[2].rolling3N, 5);
   assert.deepEqual([T[3].coverage, T[3].coverageN, T[3].target], [0.5, 2, 0.8]);
   assert.ok(T[3].coverageCi80[0] < 0.5 && T[3].coverageCi80[1] > 0.5);

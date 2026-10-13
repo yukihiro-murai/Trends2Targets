@@ -148,10 +148,16 @@ function appInsightPlans_() {
     .sort((x, y) => y.fy.localeCompare(x.fy) || String(x.clientName).localeCompare(String(y.clientName), 'ja'));
 }
 
-/** 計画ごとの締まった月の境目（{ 計画の ID: 'yyyy/MM' か '' }。status = 計画ごとの PROCESS_STATUS の行。appLandingCutoff_） */
+/**
+ * 計画ごとの締まった月の境目（{ 計画の ID: 'yyyy/MM' か '' }。status = 計画ごとの PROCESS_STATUS の行。appLandingCutoff_）。
+ * 計画の一覧と同じく、B-1 の後に B-2 がまだの計画は、消さずに足す記録（appPortfolioStepHist_）から最後に成功した B-2 の前の B-1 の境目で数える
+ * （2026-10-13。記録はその計画の分だけ 1 回で読む）
+ */
 function appInsightCutoffs_(ids, status) {
+  const pending = ids.filter(id => appLandingPendingCutoff_(status[id] || []) !== '');
+  const hist = pending.length ? appPortfolioStepHist_(pending) : {};
   const out = {};
-  ids.forEach(id => { out[id] = appLandingCutoff_(status[id] || []); });
+  ids.forEach(id => { out[id] = appLandingCutoff_(status[id] || [], hist[id] || []); });
   return out;
 }
 
@@ -198,12 +204,18 @@ function appInsightAccuracies_(ids, tab) {
   const has = ids.filter(id => Object.prototype.hasOwnProperty.call(keys, id));
   const hits = appInsightCacheGet_(has.map(id => keys[id]));
   const found = id => !!(hits[keys[id]] && hits[keys[id]].found);
-  const few = appInsightFew_(has.filter(id => !found(id)), ids);
+  const missing = has.filter(id => !found(id));
+  const few = appInsightFew_(missing, ids);
+  // 締まった月の境目は計画の一覧と同じ（B-1 の後に B-2 がまだの間は、前の B-1 → B-2 の組の境目。appInsightCutoffs_）
+  let cut = {};
+  if (missing.length) { try { cut = appInsightCutoffs_(missing, tab('PROCESS_STATUS', few)); } catch (e) { Logger.log('締まった月の境目を読めません: ' + (e && e.message ? e.message : e)); } }
   const accs = {};
   has.forEach(id => {
     if (found(id)) { accs[id] = hits[keys[id]].value; return; }
     try {
-      const v = appAccuracyOf_(id, tab('EVAL_LOG', few)[id] || [], appLandingCutoff_(tab('PROCESS_STATUS', few)[id] || []));
+      // FORECAST_SNAPSHOT は、月ごとに掛かっていた補正を割り戻すため（全計画で縮めた偏りは補正を外した予測で測る。appEvalAppliedK_）
+      const v = appAccuracyOf_(id, tab('EVAL_LOG', few)[id] || [], typeof cut[id] === 'string' ? cut[id] : appLandingCutoff_(tab('PROCESS_STATUS', few)[id] || []),
+        tab('FORECAST_SNAPSHOT', few)[id] || []);
       try { appJobPutResult_(keys[id], v); } catch (e) { /* 控えられなくても返す */ }
       accs[id] = v;
     } catch (e) { Logger.log('精度を出せない計画: ' + id + ' ' + (e && e.message ? e.message : e)); }
@@ -920,7 +932,8 @@ function appInsightUplift_(ids) {
  *   curves:      [{ type, label, prior: { alpha0, beta0, mu, precision, from, mean, ci80 }, n, hit,
  *                   quarters: [{ quarter, n, hit, cumN, cumHit, alpha, beta, mean, ci80 }] }]（四半期ごとに積み上げた事後。画面がベータ分布の曲線を描く）
  *   noPreMonth:  その月が始まる前の予測が無いので当たりを数えなかった、締まった月の数（人の学びと同じ。D6）
- *   shrinkage:   { mu, tau, tau2, pooled, plans: [{ planId, clientName, fy, n, bias, se, shrunk, factorShadow, mapeNow, mapeShadow }] }
+ *   shrinkage:   { mu, tau, tau2, pooled, plans: [{ planId, clientName, fy, n, bias（補正を外した予測の偏り）, biasNow（今の予測の偏り）, corrected（補正を割り戻した月の数）,
+ *                  se, shrunk, factorShadow（補正を外した予測から学んだ倍率）, factorNow（今の補正）, mapeNow, mapeShadow }] }
  *   timeline:    [{ ym, n, mape, coverage, coverageN, coverageCi80: [下, 上], target, rolling3, rolling3N }]（全計画の締まった月ごと。締まった後の予測の月は除く）
  *   calibration: [{ planId, clientName, fy, factorNow, path: [{ at, factor, factorLabel, old, new, source, sourceLabel, quarter }] }]
  *                  （summary では信頼度の factor は種類まで: reliability:<種類>・「見解の信頼度」）
@@ -961,15 +974,19 @@ function appAiLearning_(ctx) {
   plans.forEach(p => { info[p.planId] = p; });
   const accs = appInsightAccuracies_(ids, tab);
   const shadow = appBiasShadow_(accs);
+  // 今の補正: CONFIG!B2 のメーカーの行（予測に効く行。最後の行ではない。appLandingCalRow_。2026-10-13）
+  const state = tab('CALIBRATION_STATE');
+  let clients = {};
+  try { clients = appPlanClients_(ids); } catch (e) { Logger.log('メーカーの名前を読めません: ' + (e && e.message ? e.message : e)); }
+  const factorNow = {};
+  ids.forEach(id => { const c = appLandingCalRow_(state[id] || [], clients[id] || ''); factorNow[id] = c ? appNum_(c.bias_correction_factor) : null; });
+  // 縮めた偏りは補正を外した予測で測る（bias。biasNow = 今の予測の偏り）。倍率は今の補正の代わりに掛ける値なので、今の補正（factorNow）と並べて見せる
   const shrinkage = { mu: shadow.mu, tau: Math.sqrt(shadow.tau2), tau2: shadow.tau2, pooled: shadow.pooled,
     plans: plans.filter(p => shadow.plans[p.planId]).map(p => {
       const s = shadow.plans[p.planId];
-      return { planId: p.planId, clientName: p.clientName, fy: p.fy, n: accs[p.planId].n, bias: s.bias, se: s.se, shrunk: s.shrunk,
-        factorShadow: s.factorShadow, mapeNow: s.mapeNow, mapeShadow: s.mapeShadow };
+      return { planId: p.planId, clientName: p.clientName, fy: p.fy, n: accs[p.planId].n, bias: s.bias, biasNow: s.biasNow, corrected: s.corrected, se: s.se, shrunk: s.shrunk,
+        factorShadow: s.factorShadow, factorNow: factorNow[p.planId] === undefined ? null : factorNow[p.planId], mapeNow: s.mapeNow, mapeShadow: s.mapeShadow };
     }) };
-  const state = tab('CALIBRATION_STATE');
-  const factorNow = {};
-  ids.forEach(id => { const c = (state[id] || []).slice(-1)[0]; factorNow[id] = c ? appNum_(c.bias_correction_factor) : null; });
   return {
     detail: detail, curves: curves, noPreMonth: appInsightCountMonths_(noPre), shrinkage: shrinkage, timeline: appInsightTimeline_(accs),
     calibration: appInsightCalibration_(plans, tab('CALIBRATION_HISTORY'), factorNow, hide),
@@ -979,22 +996,23 @@ function appAiLearning_(ctx) {
 }
 
 /**
- * 全計画の月ごとの誤差と、P10〜P90 に入った割合（Wilson の 80% の区間）。rolling3 = その月までの 3 か月の誤差の平均（全計画の月をまとめて）。
- * 月は accs（appAccuracyOf_）の月 = 締まった月だけ（D4）
+ * 全計画の月ごとの外れ幅と、P10〜P90 に入った割合（Wilson の 80% の区間）。rolling3 = その月までの 3 か月の外れ幅（全計画の月をまとめて）。
+ * 外れ幅は精度と同じ合計の比（|中心 − 実績| の合計 ÷ 実績の合計。appWape_。2026-10-13）。1 つの計画の実績が 0 に近い月でも値が飛ばない
+ * （金額の大きいメーカーほど重く数える）。月は accs（appAccuracyOf_）の月 = 締まった月だけ（D4）
  */
 function appInsightTimeline_(accs) {
   const by = {};
   Object.keys(accs).forEach(id => (accs[id].months || []).forEach(m => {
     if (m.leak || !/^\d{4}\/\d{2}$/.test(String(m.month))) return;
-    const o = by[m.month] = by[m.month] || { apes: [], inside: 0, rangeN: 0 };
-    if (typeof m.ape === 'number' && isFinite(m.ape)) o.apes.push(m.ape);
+    const o = by[m.month] = by[m.month] || { pts: [], inside: 0, rangeN: 0 };
+    if (typeof m.p50 === 'number' && isFinite(m.p50) && typeof m.actual === 'number' && isFinite(m.actual) && m.actual !== 0) o.pts.push({ p50: m.p50, actual: m.actual });
     if (m.inside === true || m.inside === false) { o.rangeN++; if (m.inside) o.inside++; }
   }));
   return Object.keys(by).sort().map(ym => {
     const o = by[ym];
-    const win = [].concat.apply([], [ym, appInsightPrevYm_(ym, 1), appInsightPrevYm_(ym, 2)].map(k => (by[k] ? by[k].apes : [])));
-    return { ym: ym, n: o.apes.length, mape: appInsightMean_(o.apes), coverage: o.rangeN ? o.inside / o.rangeN : null, coverageN: o.rangeN,
-      coverageCi80: appWilson_(o.inside, o.rangeN, APP_INSIGHT_Z80), target: APP_INSIGHT_COVERAGE_TARGET, rolling3: appInsightMean_(win), rolling3N: win.length };
+    const win = [].concat.apply([], [ym, appInsightPrevYm_(ym, 1), appInsightPrevYm_(ym, 2)].map(k => (by[k] ? by[k].pts : [])));
+    return { ym: ym, n: o.pts.length, mape: appWape_(o.pts).mape, coverage: o.rangeN ? o.inside / o.rangeN : null, coverageN: o.rangeN,
+      coverageCi80: appWilson_(o.inside, o.rangeN, APP_INSIGHT_Z80), target: APP_INSIGHT_COVERAGE_TARGET, rolling3: appWape_(win).mape, rolling3N: win.length };
   });
 }
 

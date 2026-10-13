@@ -120,8 +120,8 @@ function appForecastBasis_(ctx, planId) {
     };
   });
 
-  // 補正（今の状態と、最後の予測で使ったもの）
-  const cal = t.CALIBRATION_STATE[t.CALIBRATION_STATE.length - 1] || null;
+  // 補正（今の状態と、最後の予測で使ったもの）。今の状態は CONFIG!B2 のメーカーの行（予測に効く行。最後の行ではない。appPlanCalRow_）
+  const cal = appPlanCalRow_(plan.plan_id, t.CALIBRATION_STATE);
   let applied = null;
   try { applied = snap.length ? JSON.parse(String(snap[0].calibration_applied_json || 'null')) : null; } catch (e) { applied = null; }
   // AI 調査の根拠（一番新しい日付の行）

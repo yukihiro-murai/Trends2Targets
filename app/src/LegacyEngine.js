@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.4.0-dev、SHA-256 7442d8c47f3d3304e00d713ef172d8d3aa7be4738b284b2f37c674935ecf90ae）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.4.0-dev、SHA-256 774a2654654b3d5a19e24689b6f58c8f3ff48d61a668c76582e8b66a47f61be1）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -8566,6 +8566,10 @@ function applyCalibrationToTuning_(tuning, calibration) {
 // 2026-10-07 から、誤差は補正を掛ける前の予測で測る（村井さん承認）。
 // その予測に掛かっていた補正は attachAppliedCalibration_ が
 // FORECAST_SNAPSHOT の calibration_applied_json から読む。
+// 2026-10-13 から、偏りは月ごとの誤差の平均ではなく、重みつきの合計の比
+// （Σw(予測 − 実績) ÷ Σw|実績|。WAPE と同じ形）で測る（村井さん承認）。
+// 実績が 0 に近い月が 1 つあるだけで、偏りが何千 % にもなり、係数が下限へ
+// 1 回 0.05 ずつ下がり続けていたため。
 // ============================================================
 
 function autoLearnComputeState_(pairs, opts) {
@@ -8585,11 +8589,15 @@ function autoLearnComputeState_(pairs, opts) {
   // そこで、その予測に掛かっていた係数 factorUsed と暦月バイアス monthBiasUsed で割り戻す:
   //   raw = pred / (factorUsed × (1 + monthBiasUsed))
   // 付いていない・読めない組は補正なし（係数 1・暦月バイアス 0）。このとき raw = pred で、結果は今までと同じ。
-  // 全体: e = (raw − actual) / |actual| を、今までと同じ式（半減期・縮小・上下限・1 回の幅）に入れる。
+  // 全体: 偏り = Σw(raw − actual) ÷ Σw|actual|（重みつきの合計の比。2026-10-13）を、今までと同じ縮め方（半減期の重み・
+  //   事前の精度 kG・上下限・1 回の幅）に入れる: postBias = 合計の比 × Σw ÷ (Σw + kG)。
+  //   実績がどの月も同じなら、月ごとの誤差 (raw − actual) / |actual| の重みつき平均と同じ（今までの値）。
+  //   月ごとの誤差の平均では、実績が 0 に近い月（予測 1 億・実績 1 万円なら誤差 9,999 倍）が 1 つあるだけで偏りが何千 % になり、
+  //   目標の係数が下限に張りついていた。合計の比なら、その月は金額のとおりに数える。
   // 暦月: A-9 は係数と暦月バイアスを掛け算で重ねるので、暦月バイアスは全体係数を掛けた後に残る誤差を直す分。
   //   raw × 係数 × (1 + mb) = actual から 1 + mb = actual / (raw × 係数)。1 次の近似（全体の 1 − postBias と同じ）で
-  //   mb ≈ −(raw × 係数 − actual) / actual。そこで eM = (raw × factorUsed − actual) / |actual|
-  //   （= 暦月バイアスだけを割り戻した予測の誤差）を、今までと同じ式で縮める。
+  //   mb ≈ −(raw × 係数 − actual) / actual。そこで暦月ごとに Σw(raw × factorUsed − actual) ÷ Σw|actual|
+  //   （= 暦月バイアスだけを割り戻した予測の、合計の比の誤差）を、今までと同じ式（事前の精度 kM）で縮める。
   //   係数は、次に掛ける係数ではなく、その予測に掛かっていた係数で測る。補正の無い組で今までと同じ値にするため。
   //   係数が落ち着けば 2 つは同じになり、全体と暦月で同じ偏りを 2 度直さない。暦月バイアスも自分の値を割り戻すので、自分を打ち消さない。
   // （Vertex アシストの倍率は学ぶ補正ではないので割り戻さない。今までと同じ）
@@ -8603,7 +8611,7 @@ function autoLearnComputeState_(pairs, opts) {
       const mb = isFinite(mbU) && mbU > -1 ? mbU : 0;
       if (f !== 1 || mb !== 0) corrected++;
       const raw = pr / (f * (1 + mb));
-      return { ym: String(p.ym || ''), e: (raw - a) / Math.abs(a), eM: (raw * f - a) / Math.abs(a) };
+      return { ym: String(p.ym || ''), d: raw - a, dM: raw * f - a, base: Math.abs(a) };
     })
     .filter(Boolean)
     .sort((a, b) => (a.ym < b.ym ? 1 : -1)); // 新しい月から順に
@@ -8611,10 +8619,11 @@ function autoLearnComputeState_(pairs, opts) {
     return { ready: false, reason: 'insufficient_eval_months', n: usable.length };
   }
   const wByIdx = usable.map((_, i) => Math.pow(0.5, i / halfLife));
-  let wSum = 0; let weSum = 0;
-  usable.forEach((p, i) => { wSum += wByIdx[i]; weSum += wByIdx[i] * p.e; });
-  // e>0 は過剰予測 → 補正係数は 1 - 事後平均（事前平均0・精度kGで縮小）
-  const postBias = weSum / Math.max(1e-9, wSum + kG);
+  let wSum = 0; let wdSum = 0; let waSum = 0;
+  usable.forEach((p, i) => { wSum += wByIdx[i]; wdSum += wByIdx[i] * p.d; waSum += wByIdx[i] * p.base; });
+  // 正は過剰予測 → 補正係数は 1 - 事後平均（事前平均0・精度kGで縮小）
+  const ratioBias = wdSum / Math.max(1e-9, waSum);
+  const postBias = ratioBias * wSum / Math.max(1e-9, wSum + kG);
   const targetFactor = clamp_(1 - postBias, fMin, fMax);
   const newFactor = clamp_(curFactor + clamp_(targetFactor - curFactor, -maxDelta, maxDelta), fMin, fMax);
 
@@ -8623,15 +8632,16 @@ function autoLearnComputeState_(pairs, opts) {
     const dt = parseYM_(p.ym);
     if (!dt) return;
     const key = String(dt.getMonth() + 1);
-    if (!byMonth[key]) byMonth[key] = { n: 0, w: 0, we: 0 };
+    if (!byMonth[key]) byMonth[key] = { n: 0, w: 0, wd: 0, wa: 0 };
     byMonth[key].n += 1;
     byMonth[key].w += wByIdx[i];
-    byMonth[key].we += wByIdx[i] * p.eM;
+    byMonth[key].wd += wByIdx[i] * p.dM;
+    byMonth[key].wa += wByIdx[i] * p.base;
   });
   const monthBias = {};
   Object.keys(byMonth).forEach(k => {
     const g = byMonth[k];
-    const b = clamp_(-(g.we / Math.max(1e-9, g.w + kM)), -monthCap, monthCap);
+    const b = clamp_(-((g.wd / Math.max(1e-9, g.wa)) * g.w / Math.max(1e-9, g.w + kM)), -monthCap, monthCap);
     if (Math.abs(b) >= 0.005) monthBias[k] = Number(b.toFixed(4));
   });
   return {
@@ -8643,7 +8653,8 @@ function autoLearnComputeState_(pairs, opts) {
     curFactor: curFactor,
     monthBias: monthBias,
     method: 'raw',          // 補正を割り戻した予測で学んだ
-    corrected: corrected    // 補正を割り戻した組の数（0 なら今までと同じ計算）
+    corrected: corrected,   // 補正を割り戻した組の数（0 なら補正の割り戻しはしていない）
+    measure: 'ratio'        // 偏りは重みつきの合計の比（2026-10-13）
   };
 }
 
@@ -10691,7 +10702,7 @@ function webAuditLogUrl_() {
     forecastSeasonalWeighted48_: typeof forecastSeasonalWeighted48_ === 'undefined' ? undefined : forecastSeasonalWeighted48_,
     readForecastClosedMonthMode_: typeof readForecastClosedMonthMode_ === 'undefined' ? undefined : readForecastClosedMonthMode_,
     runForecastFYCore_: typeof runForecastFYCore_ === 'undefined' ? undefined : runForecastFYCore_,
-    SOURCE_SHA256: '7442d8c47f3d3304e00d713ef172d8d3aa7be4738b284b2f37c674935ecf90ae',
+    SOURCE_SHA256: '774a2654654b3d5a19e24689b6f58c8f3ff48d61a668c76582e8b66a47f61be1',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }
