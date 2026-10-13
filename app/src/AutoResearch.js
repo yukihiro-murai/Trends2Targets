@@ -8,6 +8,10 @@
  *   測る専用の計画（PLANS.purpose = MEASURE。版 10 の 3-9）は、費用のため選ばない（手で動かす A-4 も断る。PlanPurpose.js）。
  *   ほかの処理が動いている・待っているときは何もしない（裏の処理は 1 つずつ。Jobs.js）。
  * - 自動で始めた A-4 が終わったら（成功でも失敗でも）、7 時より前なら次に古い計画を始める（Jobs.js の appRunJob_ から appAutoResearchAfterJob_）。
+ *   1 晩の歯止めは、始める計画の数（12）と使った時間の合計（60 分。自動の A-4 の段ごとの時間と、毎日の回・続きの回の時間。2026-10-13〜）。
+ *   使った時間は状態の控えの night に置き、ホームの仕組みの状態（appAutoResearchStatus_ の night）に出す。
+ * - 失敗した・準備ができていない・権限が足りなかった計画は 3 日あけて試す。ただし一時的な失敗で話題が欠けて保存しなかった A-4
+ *   （Ai.js の appAiCheckBeforeSave_。理由の印 TOPICS_MISSING）は、次の晩に試し直す（同じ晩には繰り返さない）。
  * - 始め方は画面から始めるのと同じ（appStartJob_）。頼んだ人の役割と年度の締めは appRunJob_ が段ごとに確かめ直し、段ごとに監査ログに残る。
  *   自動で始めた印は処理の中身（画面から渡せる項目だけ残る）ではなく、この状態の控え（始めた処理の ID）に置く（画面から偽れない）。
  * - トリガーは、毎日の手入れ（appDailyMaintenance_）と、所有者が画面を開いたとき（確かめるのは 1 日 1 回）に、無ければ作る。
@@ -25,6 +29,11 @@ const APP_AUTO_RESEARCH_MAINTENANCE_GRACE_MS = 5 * 60 * 1000;   // 毎日の手�
 const APP_AUTO_RESEARCH_STALE_DAYS = 7;         // 最後の A-4 からこれだけたったら集め直す
 const APP_AUTO_RESEARCH_RETRY_DAYS = 3;         // 自動で試して失敗した・準備ができていなかった・権限が足りなかった計画は、これだけあけてから試す
 const APP_AUTO_RESEARCH_MAX_PER_NIGHT = 12;     // 1 晩に始める計画の上限（Vertex AI の費用の歯止め）
+// 1 晩に使ってよい時間の合計（所有者の 1 日の枠 = Workspace 6 時間を、同じアカウントのほかの GAS と分け合うための歯止め。2026-10-13 村井さん承認）。
+// 自動で始めた A-4 の段ごとの時間（トリガーを待つ間は数えない）と、毎日の回・続きの回の時間を足す。超えたら、その晩は次の計画を始めない
+// （始めた計画の A-4 は最後まで動かすので、その 1 計画の分だけ超えることがある）
+const APP_AUTO_RESEARCH_NIGHT_BUDGET_MS = 60 * 60 * 1000;
+const APP_AUTO_RESEARCH_STAGE_MAX_MS = 6 * 60 * 1000;   // 終わりの記録の無い段（止まった段）は、1 回の実行の上限（6 分）まで数える
 const APP_AUTO_RESEARCH_READY_CHECKS = 20;      // 1 回に準備を確かめる計画の数（準備ができていない計画が続いても、この数までは次を探す）
 const APP_AUTO_RESEARCH_HISTORY = 30;           // 自動で始めた A-4 の結果を残す数（新しい順）
 const APP_AUTO_RESEARCH_FAILS = ['FAILED', 'STALLED', 'START_FAILED'];
@@ -46,6 +55,9 @@ const APP_AUTO_RESEARCH_LABELS = {
   DISABLED: '止めてある（AUTO_RESEARCH_ENABLED）', BUSY: 'ほかの処理が動いていた', NO_STALE_PLAN: '集め直す計画が無い',
   BEFORE_HOURS: APP_AUTO_RESEARCH_HOUR + ' 時より前（毎日の手入れの時間）', AFTER_HOURS: APP_AUTO_RESEARCH_END_HOUR + ' 時を過ぎた',
   NIGHT_LIMIT: '1 晩の上限（' + APP_AUTO_RESEARCH_MAX_PER_NIGHT + ' 計画）', MAINTENANCE_PENDING: '今日の毎日の手入れがまだ終わっていない',
+  NIGHT_TIME_LIMIT: '1 晩の時間の上限（' + Math.round(APP_AUTO_RESEARCH_NIGHT_BUDGET_MS / 60000) + ' 分）',
+  // 失敗した理由（一時的な失敗で話題が欠け、保存しなかった。3 日あけずに次の晩に試し直す）
+  TOPICS_MISSING: '調べられなかった話題があった（次の晩に試し直す）',
   // 準備ができていない理由
   NO_SETUP: '計画の設定（CONFIG）が無い', AI_DISABLED: 'AI 調査が無効（AI_RESEARCH_ENABLED）', VERTEX_CONFIG: 'Vertex AI の設定が足りない',
   NO_SALES_DATA: '売上の取り込み（A-2）が済んでいない',
@@ -154,6 +166,47 @@ function appAutoResearchNote_(st, planId, status, nowMs, reason, toHistory) {
   if (APP_AUTO_RESEARCH_FAILS.indexOf(status) >= 0) (st.fails = st.fails || []).push(nowMs);
 }
 
+/** 日本の日付（その晩の印。yyyy-MM-dd） */
+function appAutoResearchNightOf_(d) {
+  return Utilities.formatDate(d, APP_TZ, 'yyyy-MM-dd');
+}
+
+/**
+ * その晩（date）に使った時間を足す（st.night = { date, count, usedMs }）。新しい晩なら作り直す。前の晩の分（止まった処理を次の晩に片付けたとき）は足さない
+ */
+function appAutoResearchAddNightMs_(st, date, ms) {
+  const n = st.night;
+  if (n && n.date === date) { n.usedMs = Number(n.usedMs || 0) + Math.max(0, Number(ms) || 0); return; }
+  if (!n || !n.date || n.date < date) st.night = { date: date, count: 0, usedMs: Math.max(0, Number(ms) || 0) };
+}
+
+/**
+ * 自動で始めた A-4（最初の処理 rootId とその続きの段）が使った時間の合計。段ごとの始めから終わりまでを足す（トリガーを待つ間は数えない）。
+ * 終わりの記録の無い段（1 回の上限で打ち切られた段など）は、今までの時間を 6 分まで数える。処理の記録は 1 日残る（Jobs.js）。
+ * 段の時刻は処理の記録の本当の時刻なので、今も本当の時刻で比べる
+ */
+function appAutoResearchChainMs_(rootId) {
+  const nowMs = new Date().getTime();
+  const jobs = appJobList_();
+  const byId = {};
+  jobs.forEach(j => { byId[j.id] = j; });
+  const rootOf = j => { let cur = j; for (let hop = 0; hop < 100 && cur && cur.parentId; hop++) cur = byId[cur.parentId]; return cur ? cur.id : ''; };
+  let ms = 0;
+  jobs.forEach(j => {
+    if (!j.startedAt || rootOf(j) !== rootId) return;
+    const s = new Date(j.startedAt).getTime();
+    const f = j.finishedAt ? new Date(j.finishedAt).getTime() : NaN;
+    if (!isFinite(s)) return;
+    ms += isFinite(f) && f >= s ? f - s : Math.max(0, Math.min(nowMs - s, APP_AUTO_RESEARCH_STAGE_MAX_MS));
+  });
+  return ms;
+}
+
+/** 失敗の文が、一時的な失敗で話題が欠けて保存しなかったもの（Ai.js の appAiCheckBeforeSave_）か */
+function appAutoResearchTopicsMissing_(error) {
+  return String(error || '').indexOf(APP_AI_TOPICS_MISSING) >= 0;
+}
+
 // ---- 対象の計画 ----
 
 /**
@@ -249,7 +302,7 @@ function appAutoResearchNext_(ctx, via) {
   const now = appAutoResearchNow_();
   const nowMs = now.getTime();
   const nowIso = appAutoResearchIso_(now);
-  const night = Utilities.formatDate(now, APP_TZ, 'yyyy-MM-dd');
+  const night = appAutoResearchNightOf_(now);
   const hour = Number(Utilities.formatDate(now, APP_TZ, 'HH'));
   const extra = {};
   const finish = (status, reason, more, error) => {
@@ -257,6 +310,7 @@ function appAutoResearchNext_(ctx, via) {
     appAutoResearchTryUpdate_(st => {
       if (via === 'TICK') st.lastTickAt = nowIso;
       st.lastTick = { at: nowIso, via: via, status: status, reason: reason || '', planId: res.planId || '' };
+      appAutoResearchAddNightMs_(st, night, new Date().getTime() - t0);   // この回の時間も、その晩に使った時間に足す
     }, 'LAST_TICK');
     appRunLog_({ requestId: ctx.requestId, kind: 'AUTO.RESEARCH', status: status, durationMs: new Date().getTime() - t0, detail: res, error: error || '' });
     return res;
@@ -278,13 +332,26 @@ function appAutoResearchNext_(ctx, via) {
     const c = st.chain;
     const p = plans.filter(x => x.planId === c.planId)[0];
     const result = p && p.lastAt >= new Date(c.startedAt).getTime() ? 'DONE' : 'STALLED';
-    appAutoResearchTryUpdate_(s => { if (s.chain && s.chain.jobId === c.jobId) { s.chain = null; appAutoResearchNote_(s, c.planId, result, nowMs); } }, 'STALLED');
+    const used = appAutoResearchChainMs_(c.jobId);   // 止まった A-4 が使った時間も、始めた晩に足す
+    appAutoResearchTryUpdate_(s => {
+      if (!(s.chain && s.chain.jobId === c.jobId)) return;
+      s.chain = null;
+      appAutoResearchNote_(s, c.planId, result, nowMs);
+      appAutoResearchAddNightMs_(s, appAutoResearchNightOf_(new Date(c.startedAt)), used);
+    }, 'STALLED');
     if (result === 'STALLED') extra.stalled = c.planId;
   }
-  const tried = appAutoResearchState_().tried || {};
+  const cur = appAutoResearchState_();
+  // 1 晩に使ってよい時間（60 分）を過ぎたら、その晩は次の計画を始めない
+  const usedMs = cur.night && cur.night.date === night ? Number(cur.night.usedMs || 0) : 0;
+  if (usedMs >= APP_AUTO_RESEARCH_NIGHT_BUDGET_MS) return finish('SKIPPED', 'NIGHT_TIME_LIMIT', { usedMs: Math.round(usedMs) });
+  const tried = cur.tried || {};
   const due = appAutoResearchStale_(plans, nowMs).filter(p => {
     const t = tried[p.planId];
-    return !(t && nowMs - new Date(t.at).getTime() < APP_AUTO_RESEARCH_RETRY_DAYS * 864e5);
+    if (!t) return true;
+    // 一時的な失敗で話題が欠けて保存しなかった計画は、3 日あけずに次の晩に試し直す（同じ晩には繰り返さない）
+    if (t.status === 'FAILED' && t.reason === 'TOPICS_MISSING') return appAutoResearchNightOf_(new Date(t.at)) !== night;
+    return !(nowMs - new Date(t.at).getTime() < APP_AUTO_RESEARCH_RETRY_DAYS * 864e5);
   });
   if (!due.length) return finish('SKIPPED', 'NO_STALE_PLAN');
   // 古い順に、始められる計画を探す。準備ができていない・権限が足りない計画は控えて（3 日あける）次へ（準備を確かめるのは 20 計画まで）
@@ -311,7 +378,7 @@ function appAutoResearchNext_(ctx, via) {
   if (!pick) return notReady.length ? finish('SKIPPED', 'NOT_READY') : finish('SKIPPED', 'DENIED', { planId: denied[0] });
   let started;
   try {
-    started = appStartJob_(ctx, { kind: 'PLAN.RUN', payload: { planId: pick.planId, action: 'AI.RESEARCH' } });
+    started = appStartJob_(ctx, { kind: 'PLAN.RUN', payload: { planId: pick.planId, action: 'AI.RESEARCH' } }, { auto: true });   // 手で始める回数には数えない
   } catch (e) {
     const msg = String(e && e.message ? e.message : e);
     appAutoResearchTryUpdate_(s => appAutoResearchNote_(s, pick.planId, 'START_FAILED', nowMs, msg), 'START_FAILED');
@@ -320,7 +387,8 @@ function appAutoResearchNext_(ctx, via) {
   appAutoResearchTryUpdate_(s => {
     s.chain = { jobId: started.jobId, planId: pick.planId, requestedBy: ctx.actor, startedAt: nowIso };
     s.lastStartedPlan = { planId: pick.planId, clientName: pick.clientName, fy: pick.fy, jobId: started.jobId, at: nowIso, via: via };
-    s.night = { date: night, count: count + 1 };
+    appAutoResearchAddNightMs_(s, night, 0);   // その晩の控え（使った時間は残す）
+    if (s.night && s.night.date === night) s.night.count = count + 1;
     appAutoResearchNote_(s, pick.planId, 'STARTED', nowMs, '', false);
   }, 'STARTED');
   return finish('STARTED', '', { planId: pick.planId, fy: pick.fy, jobId: started.jobId,
@@ -349,10 +417,14 @@ function appAutoResearchAfterJob_(job, status) {
   const now = appAutoResearchNow_();
   const result = status === 'DONE' ? 'DONE' : 'FAILED';
   const error = result === 'FAILED' ? String(job.error || '') : '';
+  // 一時的な失敗で話題が欠けて保存しなかった（Ai.js）: 理由の印を TOPICS_MISSING にして、次の晩に試し直す（失敗の要点は lastResult と実行ログに残る）
+  const reason = result === 'FAILED' && appAutoResearchTopicsMissing_(error) ? 'TOPICS_MISSING' : error;
+  const used = appAutoResearchChainMs_(chain.jobId);   // この A-4 が使った時間（段ごとの合計）
   const mine = appAutoResearchTryUpdate_(st => {
     if (!st.chain || st.chain.jobId !== chain.jobId) return false;   // ほかの実行が先に控えた
     st.chain = null;
-    appAutoResearchNote_(st, chain.planId, result, now.getTime(), error);
+    appAutoResearchNote_(st, chain.planId, result, now.getTime(), reason);
+    appAutoResearchAddNightMs_(st, appAutoResearchNightOf_(new Date(chain.startedAt)), used);
     const sp = st.lastStartedPlan && st.lastStartedPlan.planId === chain.planId ? st.lastStartedPlan : {};
     st.lastResult = { at: appAutoResearchIso_(now), planId: chain.planId, clientName: sp.clientName || '', fy: sp.fy || '', status: result,
       jobId: chain.jobId, error: appAutoResearchGist_(error, APP_AUTO_RESEARCH_ERROR_CHARS) };
@@ -434,7 +506,8 @@ function appAutoResearchOnOpen_(ctx) {
 // ---- 状態（ホームの仕組みの状態） ----
 
 /**
- * 自動の AI 調査の状態: { enabled, schedule, trigger, lastTickAt, lastTick, lastStartedPlan, lastResult, running, failures7d, stalePlans }
+ * 自動の AI 調査の状態: { enabled, schedule, trigger, lastTickAt, lastTick, lastStartedPlan, lastResult, running, night, failures7d, stalePlans }
+ * night = 最後の晩に使った時間と始めた計画の数（{ date, count, usedMs, limitMs, maxPlans, today, label }。まだ無ければ null）。
  * stalePlans = 最後の A-4 から 7 日を過ぎた対象の計画（古い順）と、自動で最後に試した結果（準備ができていない理由など）。
  * 状態と理由の印には、画面の名前（statusLabel・reasonLabel・viaLabel）を添える
  */
@@ -452,6 +525,13 @@ function appAutoResearchStatus_() {
   const lastTick = st.lastTick ? Object.assign({}, st.lastTick, { statusLabel: L(st.lastTick.status), reasonLabel: L(st.lastTick.reason), viaLabel: L(st.lastTick.via) }) : null;
   const lastResult = st.lastResult ? Object.assign({}, st.lastResult, { statusLabel: L(st.lastResult.status) }) : null;
   const lastStartedPlan = st.lastStartedPlan ? Object.assign({}, st.lastStartedPlan, { viaLabel: L(st.lastStartedPlan.via) }) : null;
+  // 最後の晩（その晩の日付）に使った時間と始めた計画の数。上限は 60 分・12 計画
+  const n = st.night && st.night.date ? st.night : null;
+  const usedMin = n ? Math.round(Number(n.usedMs || 0) / 60000) : 0;
+  const limitMin = Math.round(APP_AUTO_RESEARCH_NIGHT_BUDGET_MS / 60000);
+  const night = n ? { date: n.date, count: Number(n.count || 0), usedMs: Math.round(Number(n.usedMs || 0)), limitMs: APP_AUTO_RESEARCH_NIGHT_BUDGET_MS,
+    maxPlans: APP_AUTO_RESEARCH_MAX_PER_NIGHT, today: n.date === appAutoResearchNightOf_(now),
+    label: n.date + ' の晩: 使った時間 ' + usedMin + ' 分（上限 ' + limitMin + ' 分）・始めた計画 ' + Number(n.count || 0) + '（上限 ' + APP_AUTO_RESEARCH_MAX_PER_NIGHT + '）' } : null;
   return {
     enabled: appAutoResearchEnabled_(),
     schedule: { hour: APP_AUTO_RESEARCH_HOUR, minute: APP_AUTO_RESEARCH_MINUTE, endHour: APP_AUTO_RESEARCH_END_HOUR,
@@ -463,6 +543,7 @@ function appAutoResearchStatus_() {
     lastStartedPlan: lastStartedPlan,
     lastResult: lastResult,
     running: chain ? { planId: chain.planId, jobId: chain.jobId, startedAt: chain.startedAt } : null,
+    night: night,
     failures7d: (st.fails || []).filter(t => nowMs - Number(t) <= 7 * 864e5).length,
     stalePlans: plans === null ? null : appAutoResearchStale_(plans, nowMs).map(p => ({ planId: p.planId, clientName: p.clientName, fy: p.fy,
       lastAt: p.lastAt ? appAutoResearchIso_(new Date(p.lastAt)) : '',

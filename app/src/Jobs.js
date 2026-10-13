@@ -256,7 +256,8 @@ function appJobClientPayload_(payload) {
   return out;
 }
 
-function appStartJob_(ctx, input) {
+/** 処理を待ち行列に入れる。opts.auto = 自動の調べ（AutoResearch.js）が始めた（手で始める回数の上限に数えない） */
+function appStartJob_(ctx, input, opts) {
   const kind = String(input && input.kind || '');
   const spec = appJobSpec_(kind);
   if (!appIsSetUp_()) throw new Error('初期設定がまだです。');
@@ -285,7 +286,9 @@ function appStartJob_(ctx, input) {
     // 表の版 10 の移行がバックアップを待っている間は、列を足す前の表に書く処理（予測の実行・計画を作る・担当者の保存）を始めない（V10.js）
     const waiting = appV10WaitRefusal_(kind, payload);
     if (waiting) throw new Error(waiting);
+    const count = appAiManualCheck_(kind, payload, opts);   // 手で始める A-4 は計画ごとに 1 日 3 回まで（超えていれば断る。Ai.js）
     const job = appEnqueueJob_(kind, appJobStashArgs_(appJobClientPayload_(input && input.payload)), ctx.actor, '');
+    if (count) { try { count(); } catch (e) { Logger.log('手で始めた回数を控えられません: ' + (e && e.message ? e.message : e)); } }
     return { jobId: job.id, status: job.status };
   });
 }

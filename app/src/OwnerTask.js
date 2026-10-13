@@ -13,6 +13,7 @@
  * 時間のかかる処理（計画の作成・担当者の保存・年度の締め・事前分布の書き込み・補正の値の書き込み）は、画面と同じく裏の処理として始め、
  * 記録はその処理が残す。結果は jobStatus で見る。年度の締めは、画面と同じく yearPreview の指紋（inputHash）が要る。
  * 補正の値（setCalibration）は、所有者が承認した値を計画の旧来の CALIBRATION_STATE に書く（2026-10-07 村井さん決定。Calibration.js）。
+ * AI 調査の問い合わせ先（setVertexConfig）は、全計画の CONFIG の Vertex の行をまとめて書き換える（2026-10-13 村井さん承認。Ai.js。計画ごとにロックと保存の控え）。
  */
 // 頼みと結果は Script Properties に置く（所有者がエディタで書いて読む。APP_ で始まらないキー）。アプリの状態は所有者の UserProperties（Store.js の appProps_）
 const APP_OWNER_TASK_PROP = 'OWNER_TASK';
@@ -94,6 +95,14 @@ const APP_OWNER_ACTIONS = {
     check: t => { appOwnerCheckPlanId_(t); appCalibrationCheck_(t); appOwnerCheckHash_(t); },
     payload: i => ({ planId: i.planId, action: 'CALIBRATION.SET', args: { set: i.set || {}, withdrawPendingReview: i.withdrawPendingReview === true, reason: i.reason },
       inputHash: i.inputHash }) },
+  // ---- AI 調査の問い合わせ先（Vertex のモデル名・リージョン・プロジェクト。Ai.js。2026-10-13 村井さん承認）: 全計画の今の値を見る・まとめて替える ----
+  // 替えるのは、データ本体の各計画の CONFIG の行（VERTEX_GEMINI_MODEL と、頼まれたら VERTEX_LOCATION・VERTEX_PROJECT_ID）。planIds を省くと年度を締めていない全計画。
+  // 締めた年度の計画を名指ししたら、何も書かずに断る。監査（VERTEX.SET）の終わりの行に、計画ごとの前と後の値が残る
+  vertexConfigPreview: { name: 'VERTEX.PREVIEW', opts: () => ({ minRole: 'ADMIN', audit: false }), run: () => appVertexConfigPreview_() },
+  setVertexConfig: { name: 'VERTEX.SET', args: ['model', 'location', 'project', 'planIds'], check: t => appVertexConfigCheck_(t),
+    opts: i => ({ minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'VERTEX_CONFIG', detail: i,
+      after: res => ({ want: res.want, changed: res.changed, unchanged: res.unchanged, skipped: res.skipped, remaining: res.remaining }) }),
+    run: (ctx, i) => appSetVertexConfig_(ctx, i) },
   // ---- 物差し（Backtest.js・裏の処理 MEASURE.BACKTEST。表の版 10 の 3-7）: 計画の年度の初め（cutoffFy を渡せばその年度。3 年前まで）に戻って予測し直す ----
   runBacktest: { job: 'MEASURE.BACKTEST', args: ['planId', 'cutoffFy'], check: t => { appOwnerCheckPlanId_(t); appOwnerCheckCutoffFy_(t); },
     payload: i => ({ planId: i.planId, fy: i.cutoffFy === undefined ? undefined : Number(i.cutoffFy) }) },

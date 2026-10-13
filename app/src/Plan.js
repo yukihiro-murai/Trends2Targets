@@ -55,8 +55,9 @@ const APP_PLAN_ACTIONS = {
   'IMPORT.ACTUALS': { kind: 'run', minRole: 'ADMIN', fn: 'webRunImportActuals', label: 'B-1 検証用の実績の取り込み',
     sheets: ['CONFIG', 'ACTUAL_EVAL_MONTHLY', 'PROCESS_STATUS', 'RUN_LOG'] },
   'SALES.AGGREGATE': { kind: 'run', minRole: 'PLANNER', fn: 'webRunAggregate', label: 'A-3 売上データの加工' },
-  // A-4 は Vertex AI に問い合わせる（Ai.js）。読む・書くシートだけを組み立てる（AI_RESEARCH_RAW・TASK_LOG はデータ本体に移さない表なので、その回限り）
-  'AI.RESEARCH': { kind: 'run', minRole: 'PLANNER', fn: 'webRunAiResearch', label: 'A-4 AI 調査', ai: true,
+  // A-4 は Vertex AI に問い合わせる（Ai.js）。読む・書くシートだけを組み立てる（AI_RESEARCH_RAW・TASK_LOG はデータ本体に移さない表なので、その回限り）。
+  // 手で始めるのは計画ごとに 1 日 3 回まで（manualPerDay。費用の歯止め。自動の調べは数えない。Ai.js の appAiManualCheck_）
+  'AI.RESEARCH': { kind: 'run', minRole: 'PLANNER', fn: 'webRunAiResearch', label: 'A-4 AI 調査', ai: true, manualPerDay: 3,
     sheets: ['CONFIG', 'PROCESS_STATUS', 'RUN_LOG', 'SALES_INPUT', 'SALES_MONTHLY', 'PRODUCT', 'CLIENT', 'OPINIONS', 'DEV_SPOT', 'EVAL_LOG',
       'AI_RESEARCH', 'AI_RESEARCH_STRUCTURED', 'AI_SCORE_HISTORY', 'VERTEX_FORECAST_LOG'] },
   // B-2 は検証の表の 25〜36 列に要約を書く。計算の前に、計算用ブックの表を 36 列まで広げる（widen。Engine.js の APP_ENGINE_MIN_COLUMNS）
@@ -537,12 +538,16 @@ function appPlanRunBuild_(ctx, p) {
     if (!p.build) appJournalRecover_(ctx);
     const inputHash = appPlanInputHash_(plan.plan_id);
     if (p.build && inputHash !== p.inputHash) throw new Error('組み立てている間にデータ本体が変わりました。もう一度実行してください。');
-    const actionId = p.actionId || appId_('ACT');
-    const asOfMs = p.asOfMs || jobStart;
+    // A-4 の最初の段: 同じ計画の A-4 が 6 時間以内に失敗・途中で止まっていれば、その回（番号と時刻）を引き継いで控えた答えを使う（Ai.js）
+    const run = act.ai && !p.actionId ? appAiRunStart_(plan.plan_id, jobStart) : null;
+    const actionId = p.actionId || (run ? run.actionId : appId_('ACT'));
+    const asOfMs = p.asOfMs || (run ? run.asOfMs : jobStart);
     const step = appScratchBuildStep_(appWorkScratch_(plan), plan.plan_id, act.sheets || null, p.build || null, appBuildDeadline_(jobStart));
     const payload = { planId: plan.plan_id, action: p.action, actionId: actionId, seed: actionId, asOfMs: asOfMs, inputHash: inputHash,
       startedAt: Utilities.formatDate(new Date(asOfMs), APP_TZ, "yyyy-MM-dd'T'HH:mm:ssZ"), build: step.state,
       buildMs: Number(p.buildMs || 0) + (new Date().getTime() - jobStart), aiAttempt: Number(p.aiAttempt || 0) };
+    const fresh = Number(p.aiFreshAfter || 0) || (run ? run.freshAfterMs : 0);
+    if (fresh) payload.aiFreshAfter = fresh;   // 引き継いだ回: これより前に控えた失敗の答えは使わない（appAiFetcher_）
     return { __next: { kind: step.complete ? 'PLAN.RUN_CALC' : 'PLAN.RUN', payload: payload }, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
   });
 }
@@ -555,7 +560,7 @@ function appPlanRunCalc_(ctx, p) {
   return appWithLock_(() => {
     if (!p.build || !appScratchOwnedBy_(p.build.token)) throw new Error('計算用ブックがほかの処理で使われました。もう一度実行してください。');
     if (appPlanInputHash_(plan.plan_id) !== p.inputHash) throw new Error('計算している間にデータ本体が変わりました。もう一度実行してください。');
-    const fetcher = act.ai ? appAiFetcher_(p.actionId, appAiDeadline_(t0)) : null;
+    const fetcher = act.ai ? appAiFetcher_(p.actionId, appAiDeadline_(t0), p.aiFreshAfter) : null;
     const scratch = appWorkScratch_(plan);
     // 旧来の計算が書く列まで、計算用ブックのシートを広げる（B-2 の検証の表。広げた大きさは保存でデータ本体に残る）
     if (act.widen) appEnsureMinColumns_(scratch, act.widen);
@@ -573,9 +578,12 @@ function appPlanRunCalc_(ctx, p) {
       // 時間の区切りで止めた: 計算用ブックは途中のまま。組み立て直して、受け取った答えを使ってもう一度動かす
       const attempt = Number(p.aiAttempt || 0) + 1;
       if (attempt >= APP_AI_MAX_ATTEMPTS) throw new Error('AI 調査が ' + attempt + ' 回に分けても終わりませんでした。時間をおいてもう一度実行してください。');
-      return { __next: { kind: 'PLAN.RUN', payload: { planId: plan.plan_id, action: p.action, actionId: p.actionId, asOfMs: p.asOfMs,
-        buildMs: p.buildMs, aiAttempt: attempt, aiCalls: fetcher.stats() } }, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
+      return { __next: { kind: 'PLAN.RUN', payload: Object.assign({ planId: plan.plan_id, action: p.action, actionId: p.actionId, asOfMs: p.asOfMs,
+        buildMs: p.buildMs, aiAttempt: attempt, aiCalls: fetcher.stats() }, p.aiFreshAfter ? { aiFreshAfter: p.aiFreshAfter } : {}) },
+        audit: { entityId: plan.plan_id, clientId: plan.client_id } };
     }
+    // A-4: 数式が残った・一時的な失敗で話題が欠けたときは、保存せずに止める（前の結果を残す。Ai.js）
+    if (fetcher) appAiCheckBeforeSave_(scratch, fetcher);
     const payload = Object.assign({}, p, { engine: { version: call.version, sourceSha256: call.sourceSha256, webSha256: call.webSha256 },
       result: appPlanResultSummary_(call.value), runMs: new Date().getTime() - t0 }, fetcher ? { aiCalls: fetcher.stats() } : {});
     return { __next: { kind: 'PLAN.RUN_SAVE', payload: payload }, audit: { entityId: plan.plan_id, clientId: plan.client_id } };

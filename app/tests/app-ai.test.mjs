@@ -78,6 +78,10 @@ assert.ok(waits.includes(6000), '通信の例外も一時的な失敗として�
 assert.equal(env.table('ENG_AI_RESEARCH_STRUCTURED').filter((r) => r.plan_id === planId).length, 4, 'し直して、4 つの話題を欠かさずに残す');
 const lastCalc = env.audit().filter((a) => a.action === 'PLAN.AI.RESEARCH.CALC' && a.phase === 'END').pop();
 assert.ok(JSON.parse(lastCalc.after_json).aiCalls.retries > 0, 'し直した回数を実行の記録に残す');
+// 手で始める A-4 は計画ごとに 1 日 3 回まで（ここまでで 3 回）。4 回目は始める前に断る（処理を入れない）
+assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.RUN', payload: { planId, action: 'AI.RESEARCH' } } }), /今日はもう 3 回始めました/);
+// 次の日（控えの日付が違う）なら、また始められる
+env.props.APP_AI_MANUAL = JSON.stringify({ date: '2000-01-01', counts: { [planId + '|AI.RESEARCH']: 3 } });
 // 待つと区切りを過ぎるときは、し直さない（今までどおり失敗の答えを返して先へ進む）
 env.run(`(() => { globalThis.__waits = []; globalThis.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 503, getContentText: () => 'unavailable' }) };
   appAiDeadline_ = (t0) => t0 + 1000; })()`);

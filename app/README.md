@@ -271,10 +271,11 @@ Trends2Targets_System/
   - 3 時台の毎日のバックアップと手入れ（`triggerDailyBackup`）とはロックを取り合うので、時間を分けています。始めてよいのは 4:00〜7:00 の間だけです。
   - 毎日のバックアップのトリガーがあるときは、その日の手入れが終わって 5 分たつまで始めません（手入れの印 `APP_HOUSEKEEPING` の終わった時刻で見ます）。その日の手入れが始めたまま 10 分を過ぎた（途中で止まった）ときは、もう動いていないので待ちません。その日の手入れがまだ始まっていない日は、その晩は見送ります。
   - 自動で始めた A-4 が終わったら（成功でも失敗でも）、7 時より前なら次に古い計画を続けて始めます（1 晩 12 計画まで）。ほかの処理が動いている・待っているときは何もしません。
-- CONFIG の `AI_RESEARCH_ENABLED` が 0・Vertex の設定が無い・A-2 売上の取り込みが済んでいない計画は飛ばして、同じ回で次の計画を探します（1 回に 20 計画まで）。自動で失敗した・飛ばした・権限が足りなかった計画は 3 日あけてから試します。
+  - 1 晩に使ってよい時間は合計 60 分までです（2026-10-13〜。自動の A-4 の段ごとの時間と、毎日の回・続きの回の時間を足します。トリガーを待つ間は数えません）。超えたら、その晩は次の計画を始めません（始めた計画の A-4 は最後まで動かすので、その 1 計画の分だけ超えることがあります）。所有者の 1 日の枠（Workspace 6 時間）は、同じアカウントのほかの GAS と分け合うためです。
+- CONFIG の `AI_RESEARCH_ENABLED` が 0・Vertex の設定が無い・A-2 売上の取り込みが済んでいない計画は飛ばして、同じ回で次の計画を探します（1 回に 20 計画まで）。自動で失敗した・飛ばした・権限が足りなかった計画は 3 日あけてから試します。ただし、問い合わせの一時的な失敗で話題が欠けて保存しなかった A-4（下の「A-4 の守り」。理由の印 `TOPICS_MISSING`）は、失敗として数え、次の晩に試し直します（同じ晩には繰り返しません）。
 - トリガーは毎日の手入れと、所有者が画面を開いたとき（確かめるのは 1 日 1 回）に、無ければ作ります（トリガーの上限 20 に余裕が無ければ作りません）。前の版で作った 1 時ごろのトリガーは、新しい版で最初に確かめたときに 1 回だけ消して 4 時半ごろで作り直します（確かめた控え `APP_AUTO_RESEARCH_CHECKED` の時刻の版で見ます）。
 - **止めるとき**: スクリプトのプロパティ `AUTO_RESEARCH_ENABLED` を `false` にします（トリガーは残っても何もしません。止めている間は新しく作りません）。プロパティを消すと元に戻ります（トリガーが無ければ、次の確かめで作ります）。
-- 毎回の結果は実行ログ（種類 `AUTO.RESEARCH`）に残り、管理者のホームの仕組みの状態（`system.autoResearch`）に、時間・最後の回・最後に始めた計画・結果・7 日の失敗の数・古いままの計画が、画面の名前（`statusLabel`・`reasonLabel`）つきで出ます。状態の控え（`APP_AUTO_RESEARCH`）は約 8000 バイトより小さく保ちます（失敗の理由は要点 40 字まで。失敗の文そのものは実行ログに残ります）。
+- 毎回の結果は実行ログ（種類 `AUTO.RESEARCH`）に残り、管理者のホームの仕組みの状態（`system.autoResearch`）に、時間・最後の回・最後に始めた計画・結果・最後の晩に使った時間と始めた計画の数（`night`）・7 日の失敗の数・古いままの計画が、画面の名前（`statusLabel`・`reasonLabel`・`night.label`）つきで出ます。状態の控え（`APP_AUTO_RESEARCH`）は約 8000 バイトより小さく保ちます（失敗の理由は要点 40 字まで。失敗の文そのものは実行ログに残ります）。
 
 見送った・飛ばした理由（`reason`）の意味:
 
@@ -285,10 +286,20 @@ Trends2Targets_System/
 | `MAINTENANCE_PENDING` | 今日の毎日の手入れがまだ終わっていない | 続くときは「状態」で手入れの結果を見る |
 | `BUSY` | ほかの処理が動いている・待っている | なし |
 | `NIGHT_LIMIT` | 1 晩に始める上限（12 計画）に達した | なし（次の晩に続く） |
+| `NIGHT_TIME_LIMIT` | 1 晩に使ってよい時間（60 分）を過ぎた | なし（次の晩に続く）。毎晩続くなら、計画の数と 1 回の時間を実行ログで見る |
 | `NO_STALE_PLAN` | 7 日を過ぎた計画が無い（試してから 3 日たっていないものは除く） | なし |
 | `NOT_READY` | 準備ができていない（`AI_DISABLED` AI 調査が無効・`VERTEX_CONFIG` Vertex の設定が足りない・`NO_SALES_DATA` A-2 が済んでいない・`NO_SETUP` CONFIG が無い） | 計画の設定を直すか、そのままにする（3 日ごとに確かめ直す） |
 | `DENIED` | 頼んだ人（所有者）に、その計画の A-4 を動かす権限が無い | 役割を確かめる |
 | `START_FAILED` / `FAILED` / `STALLED` | 始められなかった・A-4 が失敗した・途中で止まった | 実行ログとエラーログで理由を見る（7 日の失敗の数に入る） |
+| `TOPICS_MISSING`（`FAILED` の理由） | 問い合わせの一時的な失敗で話題が欠け、保存しなかった（前の結果を残した） | なし（次の晩に試し直す。続くなら実行ログの失敗の文を見る） |
+
+**A-4 の守り**（2026-10-13 の点検。村井さん承認。画面から始めても自動でも同じ）
+
+- **出典の無い主張は数字に効かせない**: Web の出典（根拠の URL）が 0 件か Web 検索が失敗した話題の出来事（event 行）は、向き 横ばい・強さ 0・確からしさ 0・点数 0 で残し、根拠の欄の頭に「出典が見つからなかったため、予測には効かせていません（AI の見立て: 上向き・強さ 80）。」と書きます。購入レポート（Vertex AI Search）の材料が無い（設定なし・失敗・文書も出典も 0 件）話題の比べ（benchmark 行）も、相対位置を空・確からしさ 0・点数 0 にします。旧来の記録（`step3a_status`）に `unsourced_topics=[…]` を足します。AI への頼み方も、出典が無ければ「中立・0」と書いてよい形にしました。
+- **AI の文を数式にしない**: AI や Web の文が `=` `+` `-` `@` で始まるときは、そのセルの書式を文字にしてから書きます（旧来の A-4 が書く全部の所）。新アプリは保存の前にも、計算用ブックの `AI_RESEARCH`・`AI_RESEARCH_STRUCTURED` に数式が 1 つでもあれば保存せずに止めます（前の結果を残す）。
+- **欠けた話題で上書きしない**: 時間の区切りで止まっていないのに問い合わせが失敗し、4 つの話題（市場・競合・販路・DX）のどれかが無いときは、保存せずに止めます（「（市場・DX）を調べられませんでした。前の結果を残しました。…」）。失敗の無い欠け（答えが読めない）は今までどおり、残った話題で書き直します。
+- **手で始めるのは計画ごとに 1 日 3 回まで**（日本の日付。自動の調べは数えません。控えは Script Properties の `APP_AI_MANUAL`）。
+- **やり直しは控えた答えを使う**: 同じ計画の A-4 を 6 時間以内に始めていて、その回が保存まで終わっていない（失敗・途中で止まった）ときは、その回の番号と時刻を引き継ぎ、控えた答えを使います（同じ問い合わせにもう一度費用をかけない）。前に控えた失敗の答え（403 など）は使わずに問い合わせ直します。保存まで終わった回の後は、新しい回で調べ直します。
 
 ## 所有者の操作（エディタから）
 
@@ -320,8 +331,8 @@ Trends2Targets_System/
 4. 左の「エディタ」で `Api.gs` を開き、上の関数の一覧から `apiOwnerTask` を選んで「実行」を押します。
 5. 下の「実行ログ」に結果が出ます。同じ結果（大きいときは要約）がスクリプト プロパティ `OWNER_TASK_RESULT` に入ります（「プロジェクトの設定」を開き直すと見えます）。`"ok": true` ならうまくいっています。`hint` に、すぐに終わったのか、裏の処理を始めたのか（まだ終わっていないのか）が書いてあります。
 6. うまくいった後の `OWNER_TASK` は、操作の種類で変わります。
-   - 読むだけの操作（`listDirectory`・`listSettings`・`listPlans`・`planCandidates`・`health`・`listAudit`・`yearPreview`・`poolPreview`・`calibrationPreview`・`jobStatus`）: そのまま残ります。もう一度実行すると読み直します。
-   - 書く操作（`saveMember`・`grantRole`・`revokeRole`・`saveClientName`・`saveClient`・`saveSetting`・`enableBackup`・`runBackup`・`runHousekeeping`・`verifyAudit`）: すぐに終わり、`OWNER_TASK` は消えます（同じ操作を 2 度動かさないため）。
+   - 読むだけの操作（`listDirectory`・`listSettings`・`listPlans`・`planCandidates`・`health`・`listAudit`・`yearPreview`・`poolPreview`・`calibrationPreview`・`vertexConfigPreview`・`jobStatus`）: そのまま残ります。もう一度実行すると読み直します。
+   - 書く操作（`saveMember`・`grantRole`・`revokeRole`・`saveClientName`・`saveClient`・`saveSetting`・`enableBackup`・`runBackup`・`runHousekeeping`・`verifyAudit`・`setVertexConfig`）: すぐに終わり、`OWNER_TASK` は消えます（同じ操作を 2 度動かさないため）。
    - 裏の処理を始める操作（`createPlan`・`setPeople`・`yearClose`・`poolApply`・`setCalibration`）: `OWNER_TASK` が `{"action":"jobStatus","jobId":"JOB-…"}` に置き換わります。1〜2 分おいて、プロパティは触らずに `apiOwnerTask` をもう一度実行すると、処理の結果（`status` が `DONE` か `FAILED`。`FAILED` なら `error` に理由）が分かります。短い処理は、始めたその場で終わることもあります（`hint` に「すぐに終わりました」と出ます）。
    - 実行している間に `OWNER_TASK` が書き換えられていたときは、消しも置き換えもしません。
 7. 失敗したときは `"ok": false` と理由（`error`）が入り、`OWNER_TASK` は残るので、直してもう一度実行します。
@@ -367,6 +378,8 @@ Trends2Targets_System/
 | `poolApply` | 事前分布を各計画に書く（裏の処理）。四半期の最後の月が締まった後に、その計画で今の検証の版の B-2 が初めて動いた後に数えた当たりだけを使う（`poolPreview` の `skippedEvidence` = 使わなかった行の数） | `{"action":"poolApply"}` |
 | `calibrationPreview` | 計画の今の補正の値（係数・暦月の補正・自動の学びの旗・AI の効き）と、取り下げられる見直し案（まだ反映していない一番新しい案）を見る（書かない）。`warnings` は今の値の注意 | `{"action":"calibrationPreview","planId":"PL-…"}` |
 | `setCalibration` | 承認した補正の値を計画に書く・まだ反映していない見直し案を取り下げる（裏の処理。下の「計画の補正の値」） | `{"action":"setCalibration","planId":"PL-…","set":{"bias_correction_factor":1},"reason":"（理由）"}` |
+| `vertexConfigPreview` | 計画ごとの AI 調査の問い合わせ先（`VERTEX_PROJECT_ID`・`VERTEX_LOCATION`・`VERTEX_GEMINI_MODEL`）の今の値と、締めていない年度の計画での値ごとの数（`summary`）を見る（書かない。下の「AI 調査の問い合わせ先」） | `{"action":"vertexConfigPreview"}` |
+| `setVertexConfig` | 問い合わせ先（モデル名。頼めばリージョン・プロジェクトも）を全計画まとめて替える（`planIds` を省くと締めていない年度の全計画） | `{"action":"setVertexConfig","model":"gemini-3.8-flash"}` |
 | `listPersonLinks` | 人のつなぎ（無効にした行も）・入力の担当者の名前・表示名が同じメンバーの案を見る（所有者だけ。書かない） | `{"action":"listPersonLinks"}` |
 | `linkPerson` | 入力の担当者の名前をメンバーのメールにつなぐ（所有者だけ。`clientId`・`validFrom`・`validTo` は省ける） | `{"action":"linkPerson","personName":"担当A","email":"name@bigm2y.com"}` |
 | `unlinkPerson` | つなぎを外す（行は残して無効にする） | `{"action":"unlinkPerson","linkId":"PLK-…","rowVersion":1}` |
@@ -396,6 +409,19 @@ Trends2Targets_System/
 `{"action":"setCalibration","planId":"PL-…","set":{"auto_update_enabled":0,"bias_correction_factor":1,"residual_month_bias_json":"{}","ai_weight_override":0},"withdrawPendingReview":true,"reason":"2026-10-07 決定 D2・D7・D8・D3: 締まっていない月で学んだ補正を外し、自動の学びと AI の効きを止め、締まっていない月から作られた見直し案を取り下げる"}`
 
 **見直し案を作る（C-1）は止めています**（2026-10-07 村井さん決定）。学びの仕組みを直すまで、画面の「見直し案を作る」は押せず、サーバーも始める前に断ります。画面に返す予測の注記からも C-1 への案内を除きます。すでにある見直し案の判断（承認・却下・保留）と反映の操作はそのままです。
+
+### AI 調査の問い合わせ先（2026-10-13 村井さん承認）
+
+A-4 が問い合わせる Vertex のモデル名・リージョン・プロジェクトは、計画を作るときに旧来の既定値（`gemini-3.8-flash`・`global`・`forecast-agent-498907`）が各計画の CONFIG に写されます。モデルが廃止されると全計画の A-4 が失敗するので、所有者が全計画まとめて替えられるようにしました（`Ai.js`）。
+
+- 先に `vertexConfigPreview` で、計画ごとの今の値（`plans[]` の `model`・`location`・`project`。年度を締めた計画は `frozen: true`、CONFIG に行が無ければ `missingRows`）と、締めていない年度の計画での値ごとの数（`summary`）を確かめます。
+- `setVertexConfig` の項目: `model`（必須。英小文字・数字・`.`・`-` の 3〜61 字）・`location`（省ける。例 `global`・`asia-northeast1`）・`project`（省ける。Google Cloud のプロジェクト ID）・`planIds`（省ける。`listPlans` の `planId` の配列）。形の違う値・ほかの項目は、何もせずに止まります。
+- `planIds` を省くと、年度を締めていない全計画に書きます。年度を締めた計画を名指ししたら、何も書かずに断ります。
+- 計画ごとにデータ本体の CONFIG の行を書き換えます（ロックと保存の控えの中で。ほかの保存と同じ書き方）。変わる値が無い計画は書きません（同じ頼みを 2 度動かしても書きません）。CONFIG に行が無い・元どおりに組み立てられない計画は書かずに `skipped` に理由を返します。4 分を過ぎたら残りの計画は書かずに `remaining` に返すので、同じ頼みをもう一度動かします。
+- 結果（`changed` に計画ごとの前と後の値・`unchanged`・`skipped`・`remaining`）は、操作の記録（`VERTEX.SET`）の終わりの行にも残ります。
+- 書いた計画は入力の指紋が変わるので、開いていた画面の保存は断られ（開き直す）、次の操作で計算用ブックを組み立て直します。CONFIG は予測の乱数の種が見る表なので、次の予測の数字は少し動きます。これから作る計画には旧来の既定値が写されるので、作った後にもう一度 `setVertexConfig` を動かします。
+
+`{"action":"setVertexConfig","model":"gemini-3.8-flash","location":"global"}`
 
 ### v0.28.0 を公開した後の手順（計画ごと）
 
