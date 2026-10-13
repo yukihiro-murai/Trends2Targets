@@ -182,7 +182,7 @@ let planId;
     sheets['*' + y + '_actual_value'] = { cols: 70, values: rows };
   }
   const zac = env.makeBook('売上の元', sheets);
-  env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+  env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
   let st = env.runJob('PLAN.CREATE', { clientName: CLIENT, fy: currentFy, peopleCsv: '鷹野' });
   assert.equal(st.status, 'DONE', st.error);
   planId = st.result.planId;
@@ -276,8 +276,8 @@ const histBefore = () => engRows(env, 'CALIBRATION_HISTORY', planId).map((r) => 
 
 // ==== 2. 所有者だけ: 管理者の役割があっても、ほかの人は断る ====
 {
-  env.call('apiSaveMember(__in)', { __in: { email: MEMBER, displayName: 'メンバー' } });
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'ADMIN', scopeType: 'ALL' } });
+  env.task('saveMember(__in)', { __in: { email: MEMBER, displayName: 'メンバー' } });
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'ADMIN', scopeType: 'ALL' } });
   const cal0 = JSON.stringify(engRows(env, 'CALIBRATION_STATE', planId));
   const jobs0 = jobProps(env);
   const runs0 = audits(env, 'PLAN.CALIBRATION.SET').length;
@@ -622,7 +622,7 @@ let readmeTask;
   }));
   const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: pastPlan } });
   env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
-  const yp = env.call('apiYearPreview(__in)', { __in: { fy: past } });
+  const yp = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(yp.canClose, true, JSON.stringify(yp));
   const closed = env.runJob('YEAR.CLOSE', { fy: past, inputHash: yp.inputHash });
   assert.equal(closed.status, 'DONE', closed.error);

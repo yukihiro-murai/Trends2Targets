@@ -26,7 +26,7 @@ const planB = env.seedPlan(env.makeBook('B', planBook('テスト薬品', current
 {
   const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
   env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
-  const pv = env.call('apiYearPreview(__in)', { __in: { fy: past } });
+  const pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(env.runJob('YEAR.CLOSE', { fy: past, inputHash: pv.inputHash }).status, 'DONE');
 }
 const CTX = `({ actor: '${OWNER}', requestId: 'TEST', roles: [] })`;

@@ -70,7 +70,7 @@ const c = env.call('apiLearningView(__in)', { __in: { planId: ids['丙製薬'] }
 assert.ok(c.accuracy.bias < 0 && c.accuracy.coverage === 1, '低めの予測・幅の中');
 
 // ==== 3. 情報源の信頼度の事前分布（ベータ二項の経験ベイズ） ====
-const pv = env.call('apiPoolPreview()');
+const pv = env.task('poolPreview()');
 const op = pv.types.filter((t) => t.type === 'opinion')[0];
 assert.equal(op.ok, true);
 assert.equal(op.plans, 3);
@@ -91,7 +91,7 @@ for (const id of Object.values(ids)) {
   assert.equal(o.param_key, 'reliability_r');
   assert.equal(o.pooled_value, '1.2');
 }
-const pv2 = env.call('apiPoolPreview()');
+const pv2 = env.task('poolPreview()');
 assert.equal(pv2.current[ids['乙製薬']]['reliability:opinion'].value, 1.2);
 assert.ok(env.audit().some((x) => x.action === 'LEARN.POOL' && x.phase === 'END' && x.result === 'OK'));
 // 計画を組み立て直しても同じ（データ本体と計算用ブックが合う）
@@ -212,7 +212,7 @@ env.run('appPlanReadMinRows_ = () => 3000');
     ['c', '2026/09', new Date('2026-10-04T14:59:00Z'), 10, 0],      // 日本の暦で 10/04 23:59: 9 月は途中（読み飛ばす）
     ['d', '2026/06', '', 5, 0],                                    // 数えた日時が読めない（読み飛ばす）
   ]);
-  const pv = e4.call('apiPoolPreview()');
+  const pv = e4.task('poolPreview()');
   const op = pv.types.find((t) => t.type === 'opinion');
   assert.deepEqual([op.ok, op.plans, op.n, op.hit], [true, 2, 30, 18], '締まった月で数えた行だけ（甲 6/10・乙 12/20）');
   assert.ok(Math.abs(op.pooledR - 1.2) < 1e-9, '2 × 18 / 30: ' + op.pooledR);
@@ -259,7 +259,7 @@ env.run('appPlanReadMinRows_ = () => 3000');
   const from = J(e5.run('appEvidencePolicyFrom_(__ids)', { __ids: [hei, tei, bo, ki] }));
   assert.deepEqual([from[hei], from[tei], from[bo], from[ki]], [Date.parse('2026-10-06T00:00:00Z'), null, Date.parse('2026-10-06T00:00:00Z'), Date.parse('2026-11-06T00:00:00Z')],
     '初めて動いた時刻（RUN_LOG の失敗した回・前の版の回は数えない）');
-  const pv = e5.call('apiPoolPreview()');
+  const pv = e5.task('poolPreview()');
   const op = pv.types.find((t) => t.type === 'opinion');
   assert.deepEqual([op.ok, op.plans, op.n, op.hit, pv.skippedEvidence], [true, 2, 20, 12, 3], '丙の b と戊だけ（丙の a・丁・己は読み飛ばす）');
   assert.deepEqual(op.perPlan.map((x) => x.client).sort(), ['丙製薬', '戊製薬']);

@@ -103,13 +103,13 @@ function planBook(client, fy) {
   st = JSON.parse(env.props.APP_BACKFILLS);
   assert.equal(Object.keys(st.done).length, 3);
   assert.deepEqual(st.failed, {}, 'やり直して済んだら失敗の控えを消す');
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   assert.deepEqual([h.backfills.pending, h.backfills.done.length, h.backfills.failed], [[], 3, []]);
   // 表の版がそろっていなければ動かさない（移行の後に動かす）
   env.props.APP_BACKFILLS = '';
   env.props.APP_TABLES_VERSION = '9';
   env.data().getSheetByName('PLANS').rows[0][0] = 'broken';   // 版をそろえられない
-  env.call('apiBootstrap()');
+  env.boot();
   assert.equal(env.props.APP_BACKFILLS, '', '版がそろう前は写さない');
 }
 
@@ -118,7 +118,7 @@ function planBook(client, fy) {
   const env = setUpEnv();
   const fy = env.run('appFy_(new Date())');
   const planId = env.seedPlan(env.makeBook('A', planBook('テスト製薬', fy)));
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   const cells = env.data().sheets.reduce((n, s) => n + s.getMaxRows() * s.getMaxColumns(), 0);
   assert.equal(h.size.cells, cells, '全部のシートの 行 × 列');
   assert.equal(h.size.limit, 10000000);
@@ -132,12 +132,12 @@ function planBook(client, fy) {
   assert.ok(y.bytes > 0 && y.bytes <= snap.bytes, `目安は実際の控えより少し小さい（${y.bytes} / ${snap.bytes}）`);
   assert.equal(y.ratio, Math.round(y.bytes / (8 * 1024 * 1024) * 1000) / 1000);
   // 所有者の要約: 数と、上限に近いときの要確認
-  const brief = env.call('appOwnerHealthBrief_(apiHealth())');
+  const brief = env.call('appOwnerHealthBrief_(appHealth_())');
   assert.equal(brief.size.cells, cells);
   assert.equal(brief.size.years.find((x) => x.fy === fy).plans, 1);
   assert.ok(!brief.warnings.some((w) => /セル|年度の控え/.test(w)));
   env.run('appCellLimit_ = function() { return 1000; };');
-  assert.ok(env.call('appOwnerHealthBrief_(apiHealth())').warnings.some((w) => /データ本体のセルが上限の \d+% です/.test(w)), '半分を超えたら要確認');
+  assert.ok(env.call('appOwnerHealthBrief_(appHealth_())').warnings.some((w) => /データ本体のセルが上限の \d+% です/.test(w)), '半分を超えたら要確認');
   const fake = env.call(`appOwnerHealthBrief_({ setUp: true, tables: [], audit: { ok: true }, backup: { enabled: true, ageHours: 1 },
     size: { cells: 1, ratio: 0.1, years: [{ fy: 2025, plans: [{}], bytes: 7000000, ratio: 0.835 }] }, backfills: { failed: [{ name: 'x' }] } })`);
   assert.ok(fake.warnings.some((w) => /FY2025 の年度の控えが上限（8MB）の約 84% です/.test(w)));
@@ -149,8 +149,8 @@ function planBook(client, fy) {
   const env = setUpEnv();
   env.seedPlan(env.makeBook('X', planBook('テスト製薬', env.run('appFy_(new Date())'))));
   const X = env.table('CLIENTS')[0].client_id;   // メーカー X（計画のあるメーカー）。Y はつなぎだけに出る別のメーカー
-  env.call('apiSaveMember(__in)', { __in: { email: MEMBER, displayName: 'M', department: '営業' } });
-  env.call('apiSaveMember(__in)', { __in: { email: OTHER, displayName: 'O', department: '営業' } });
+  env.task('saveMember(__in)', { __in: { email: MEMBER, displayName: 'M', department: '営業' } });
+  env.task('saveMember(__in)', { __in: { email: OTHER, displayName: 'O', department: '営業' } });
   const link = (id, name, email, clientId, extra) => Object.assign({ link_id: id, person_name: name, email, client_id: clientId || '', valid_from: '', valid_to: '',
     is_active: true, note: '', created_at: 'now', created_by: OWNER, updated_at: 'now', updated_by: OWNER, row_version: 1 }, extra || {});
   env.call('appWithLock_(() => appInsertRows_("PERSON_LINKS", __r))', { __r: [
@@ -169,7 +169,7 @@ function planBook(client, fy) {
   assert.deepEqual(brief(viewer(OWNER, X)), { full: true, email: OWNER, clientId: X, links: [] }, '管理者は全部（つなぎは使わない）');
   assert.deepEqual(brief(viewer(MEMBER, X)), { full: false, email: MEMBER, clientId: X, links: ['PLK-1', 'PLK-2', 'PLK-3', 'PLK-4', 'PLK-5', 'PLK-6'] },
     '閲覧の人は、行ごとに決めるためのつなぎ（外した行も含めて読み、効くかは行の日で決める）');
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId: X } });
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId: X } });
   assert.equal(viewer(MEMBER, X).full, true, 'そのメーカーの予算策定担当は全部');
   assert.equal(viewer(MEMBER, 'CL-Y').full, false, 'ほかのメーカーでは自分の行だけ');
   // 行ごとに、その行の日に効く有効なつなぎで本人か決める（行に残したメールは使わない）
@@ -195,19 +195,19 @@ function planBook(client, fy) {
   const planM = env.seedPlan(env.makeBook('M', planBook('テスト薬品', past)));
   const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
   env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
-  let pv = env.call('apiYearPreview(__in)', { __in: { fy: past } });
+  let pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(pv.canClose, false);
   assert.match(pv.reason, /公式版のない計画/);
   assert.equal(env.call('appPlanIsMeasure_({ purpose: "MEASURE" })'), true);
   assert.equal(env.call('appPlanIsMeasure_({ purpose: "" })'), false);
   assert.equal(env.call('APP_MEASURE_PLAN_MAX'), 5);
   env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planM}' }, { purpose: 'MEASURE' }, undefined, '${OWNER}'))`);
-  pv = env.call('apiYearPreview(__in)', { __in: { fy: past } });
+  pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(pv.canClose, true, '測る専用の計画は公式版が無くても締められる: ' + pv.reason);
   assert.equal(pv.planCount, 2, '年度の控えには入る');
   assert.equal(env.call('appYearHitsPending_(2025, [])'), '', '今は止めない（当たりの記録を作るときに中身を書く）');
   env.run('appYearHitsPending_ = function(fy, plans) { return "最後の四半期の当たりを数え終えてから締めてください。"; };');
-  pv = env.call('apiYearPreview(__in)', { __in: { fy: past } });
+  pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(pv.canClose, false);
   assert.match(pv.reason, /最後の四半期の当たり/, '締める前の見張りの入口がつながっている');
 }

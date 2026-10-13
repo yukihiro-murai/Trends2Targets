@@ -48,6 +48,8 @@ const seeded = () => {
   return { env, planId, planId2, clientId, clientId2 };
 };
 const deny = (env, code, extra, re) => assert.throws(() => env.call(code, extra), re || /権限がありません/, code);
+/** 所有者の操作（apiOwnerTask。管理の操作は 2026-10-13 からここだけ）を断る */
+const denyTask = (env, expr, extra) => assert.throws(() => env.task(expr, extra), /権限がありません/, expr);
 const jobProps = (env) => env.run(`appProps_().getKeys().filter(k => k.indexOf('APP_JOB_') === 0)`).length;
 
 // 仕様の静的な表（実装から推測しない。変更するときはこの表を先に合わせる）
@@ -69,18 +71,20 @@ const RUN_ACTIONS = ['IMPORT.SALES', 'IMPORT.ACTUALS', 'SALES.AGGREGATE', 'AI.RE
   // 管理者・所有者だけの入口
   deny(env, 'apiSetup()');
   deny(env, 'apiAuthorizeAi()');
-  deny(env, `apiSaveMember({ email: '${OTHER}', displayName: 'X' })`);
-  deny(env, `apiGrantRole({ email: '${OTHER}', role: 'PLANNER' })`);
-  deny(env, `apiRevokeRole({ roleId: '${'RL-1'}' })`);
-  deny(env, `apiSaveClientName({ clientId: '${clientId}', displayName: 'X' })`);
-  deny(env, `apiSaveClient({ clientName: '新しいクライアント' })`);
-  deny(env, `apiSaveSetting({ key: 'source.zac_spreadsheet', value: 'https://x' })`);
-  deny(env, 'apiVerifyAudit()');
-  deny(env, 'apiRunHousekeeping()');
-  deny(env, 'apiEnableBackup()');
-  deny(env, 'apiRunBackup()');
-  deny(env, 'apiPoolPreview()');
-  deny(env, `apiPlanCandidates({})`);
+  deny(env, 'apiOwnerTask()');
+  denyTask(env, `saveMember({ email: '${OTHER}', displayName: 'X' })`);
+  denyTask(env, `grantRole({ email: '${OTHER}', role: 'PLANNER' })`);
+  denyTask(env, `revokeRole({ roleId: '${'RL-1'}' })`);
+  denyTask(env, `saveClientName({ clientId: '${clientId}', displayName: 'X' })`);
+  denyTask(env, `saveClient({ clientName: '新しいクライアント' })`);
+  denyTask(env, `saveSetting({ key: 'source.zac_spreadsheet', value: 'https://x' })`);
+  denyTask(env, 'verifyAudit()');
+  denyTask(env, 'runHousekeeping()');
+  denyTask(env, 'enableBackup()');
+  denyTask(env, 'runBackup()');
+  denyTask(env, 'poolPreview()');
+  denyTask(env, `planCandidates({})`);
+  delete env.props.OWNER_TASK;
   // 公式版（選択が解ける実在の計画・版を渡す → 選んでから門で断る）
   deny(env, `apiVersionSubmit({ planId: '${planId}' })`);
   deny(env, `apiVersionDecide({ versionId: '${versionId}', decision: 'APPROVED' })`);
@@ -109,15 +113,16 @@ const RUN_ACTIONS = ['IMPORT.SALES', 'IMPORT.ACTUALS', 'SALES.AGGREGATE', 'AI.RE
   const { env, planId } = seeded();
   const reads = [`apiHome()`, `apiPlanView({ planId: '${planId}' })`, 'apiListPlans()', 'apiPortfolio()',
     `apiForecastLatest({ planId: '${planId}' })`, `apiForecastBasis({ planId: '${planId}' })`, `apiLearningView({ planId: '${planId}' })`,
-    `apiVersionList({ planId: '${planId}' })`, 'apiListAudit({})', 'apiListDirectory()', 'apiListSettings()', 'apiHealth()',
-    'apiPoolPreview()', `apiJobStatus({ jobId: 'JOB-x' })`, 'apiPlanCandidates({})'];
+    `apiVersionList({ planId: '${planId}' })`, `apiJobStatus({ jobId: 'JOB-x' })`];
+  const ownerReads = ['listAudit({})', 'listDirectory()', 'listSettings()', 'health()', 'poolPreview()', 'planCandidates({})'];
   for (const who of [OUTSIDER, '']) {
     env.as(who);
-    const b = env.call('apiBootstrap()');
+    const b = env.boot();
     assert.equal(b.allowed, false, who);
     assert.deepEqual(b.user.roles, []);
     assert.deepEqual(Object.keys(b).sort(), ['allowed', 'app', 'setUp', 'user'], '初期データに仕事の中身を出さない: ' + who);
     for (const code of reads) deny(env, code);
+    for (const expr of ownerReads) denyTask(env, expr);
   }
 }
 
@@ -125,8 +130,8 @@ const RUN_ACTIONS = ['IMPORT.SALES', 'IMPORT.ACTUALS', 'SALES.AGGREGATE', 'AI.RE
 {
   const { env, planId, planId2, clientId } = seeded();
   env.as(OWNER);
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
   env.as(MEMBER);
   const mine = env.call(`apiPlanView({ planId: '${planId}' })`);
   const other = env.call(`apiPlanView({ planId: '${planId2}' })`);
@@ -156,10 +161,10 @@ const RUN_ACTIONS = ['IMPORT.SALES', 'IMPORT.ACTUALS', 'SALES.AGGREGATE', 'AI.RE
 {
   const { env, planId, clientId } = seeded();
   env.as(OWNER);
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiSaveMember({ email: '${OTHER}', displayName: 'O' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
-  env.call('apiGrantRole(__in)', { __in: { email: OTHER, role: 'APPROVER', scopeType: 'ALL' } });
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`saveMember({ email: '${OTHER}', displayName: 'O' })`);
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  env.task('grantRole(__in)', { __in: { email: OTHER, role: 'APPROVER', scopeType: 'ALL' } });
   env.as(MEMBER);
   env.call('apiVersionSubmit(__in)', { __in: { planId, note: 'v1' } });
   const v1 = env.table('PLAN_VERSIONS').filter((v) => v.state === 'SUBMITTED')[0];
@@ -225,8 +230,8 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   assert.ok(Object.values(JSON.parse(shorts)).every((s) => s.length <= 8), 'ボタンの名前は 8 字まで');
   // 承認者（APPROVER は PLANNER を含む役割の階層）: 策定と承認の操作は出る。管理者だけの操作は出ない
   env.as(OWNER);
-  env.call(`apiSaveMember({ email: '${OTHER}', displayName: 'O' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: OTHER, role: 'APPROVER', scopeType: 'ALL' } });
+  env.task(`saveMember({ email: '${OTHER}', displayName: 'O' })`);
+  env.task('grantRole(__in)', { __in: { email: OTHER, role: 'APPROVER', scopeType: 'ALL' } });
   env.as(OTHER);
   const av = env.call('apiPlanView(__in)', { __in: { planId } });
   assert.deepEqual([av.can.plan, av.can.approve, av.can.admin], [true, true, false], '承認者は策定と承認を持つが管理者ではない');
@@ -254,10 +259,10 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
 {
   const { env, planId, planId2, clientId } = seeded();
   env.as(OWNER);
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiSaveMember({ email: '${OTHER}', displayName: 'O' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
-  env.call('apiGrantRole(__in)', { __in: { email: OTHER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`saveMember({ email: '${OTHER}', displayName: 'O' })`);
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  env.task('grantRole(__in)', { __in: { email: OTHER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
   env.as(MEMBER);
   const viewA = env.call('apiPlanView(__in)', { __in: { planId } });
   env.as(OTHER);
@@ -286,10 +291,10 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
 {
   const { env, planId, clientId } = seeded();
   env.as(OWNER);
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiSaveMember({ email: '${OTHER}', displayName: 'O' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
-  env.call('apiGrantRole(__in)', { __in: { email: OTHER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`saveMember({ email: '${OTHER}', displayName: 'O' })`);
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  env.task('grantRole(__in)', { __in: { email: OTHER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
   // 実行を短く止める（計算の代わり）
   env.run(`appLegacyEngine_ = function () { return { VERSION: 'stub', SOURCE_SHA256: 's', WEB_SOURCE_SHA256: 'w',
     webRunDashboard() { return {}; } }; }`);

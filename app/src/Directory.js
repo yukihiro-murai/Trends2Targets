@@ -1,6 +1,6 @@
 /**
  * Directory.js — メンバー（社員名簿とメールの対応）・役割の付与・クライアントのマスタ。
- * 役割は消さずに無効化する（is_active=FALSE・valid_to）。どの変更も監査に変更前後が残る（Api.js から呼ぶ）。
+ * 役割は消さずに無効化する（is_active=FALSE・valid_to）。どの変更も監査に変更前後が残る（所有者の操作 apiOwnerTask から呼ぶ。OwnerTask.js）。
  */
 function appNormalizeEmail_(v) {
   return String(v || '').trim().toLowerCase();

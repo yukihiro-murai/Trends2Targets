@@ -559,8 +559,22 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
   };
   /** テスト用の計画を、見本のブック（makeBook）の中身で作る（データ本体に直接。計画の ID を返す） */
   const seedPlan = (book) => run('appTestSeedPlan_(__book)', { __book: book });
+  /**
+   * 所有者の操作（apiOwnerTask。エディタからの実行と同じ経路）を、今の人のまま動かし、結果（result）を返す。
+   * expr は 'saveMember({ email: … })' の形（OwnerTask.js の操作の名前と項目。項目は vm の中で読むので、extra で値を差し込める）。
+   * 管理の入口（apiSaveMember など）は画面の入口から外した（2026-10-13）ので、テストの管理の操作はこの経路で動かす。失敗は投げる
+   */
+  const task = (expr, extra) => {
+    const m = /^\s*([A-Za-z]+)\(([\s\S]*)\)\s*$/.exec(expr);
+    if (!m) throw new Error('task: 形が読めない: ' + expr);
+    const input = m[2].trim() ? J(run('(' + m[2] + ')', extra)) : {};
+    props.OWNER_TASK = JSON.stringify(Object.assign({ action: m[1] }, input || {}));
+    return call('apiOwnerTask()').result;
+  };
+  /** 画面の初期データ（doGet と同じ判定・同じ中身。開いたときのトリガーの確かめはしない） */
+  const boot = () => call("api_('APP.BOOTSTRAP', { minRole: 'VIEWER', audit: false, allowAnonymousView: true }, ctx => appBootstrap_(ctx))");
   return {
-    ctx, state, props, cache, files, sheetsById, triggers, logs, run, call, as, data, log, makeBook, fireTriggers, runJob, seedPlan,
+    ctx, state, props, cache, files, sheetsById, triggers, logs, run, call, as, data, log, makeBook, fireTriggers, runJob, seedPlan, task, boot,
     table: (name) => objects(data().getSheetByName(name)),
     auditSheet: () => log().getSheetByName('AUDIT_' + MONTH),
     audit: () => objects(log() && log().getSheetByName('AUDIT_' + MONTH)),

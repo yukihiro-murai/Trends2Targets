@@ -8,8 +8,8 @@
  * 裏の処理を始めたら {"action":"jobStatus","jobId":"…"} に置き換える（プロパティを触らずに、もう一度実行すると結果を確かめられる）。
  * 実行中に書き換えられた頼みは触らない。失敗したら残す（直してもう一度実行する）。
  *
- * どの操作も、画面の入口（Api.js）と同じ中の関数・同じ役割の判定・同じ監査の項目で動かす。
- * 書く操作は、入口と同じ操作の名前（SETTING.SAVE など）で監査に開始と終了が残る（理由の欄に OWNER_TASK と残す）。
+ * どの操作も、前に画面の入口（Api.js）があったときと同じ中の関数・同じ役割の判定・同じ監査の項目で動かす（2026-10-13 に入口を外し、ここだけにした）。
+ * 書く操作は、前の入口と同じ操作の名前（SETTING.SAVE など）で監査に開始と終了が残る（理由の欄に OWNER_TASK と残す）。
  * 時間のかかる処理（計画の作成・担当者の保存・年度の締め・事前分布の書き込み・補正の値の書き込み）は、画面と同じく裏の処理として始め、
  * 記録はその処理が残す。結果は jobStatus で見る。年度の締めは、画面と同じく yearPreview の指紋（inputHash）が要る。
  * 補正の値（setCalibration）は、所有者が承認した値を計画の旧来の CALIBRATION_STATE に書く（2026-10-07 村井さん決定。Calibration.js）。
@@ -26,7 +26,7 @@ const APP_OWNER_AUDIT_LIMIT = 200;   // listAudit の既定の行数（limit が
 const APP_OWNER_BACKUP_STALE_HOURS = 26;   // 状態の要約: 最新のバックアップがこれより古ければ要確認（画面の「記録と状態」と同じ）
 
 /**
- * 操作の一覧。name・opts・run は Api.js の入口と同じ（操作の名前・権限と監査の項目・中の関数）。
+ * 操作の一覧。name・opts・run は操作の名前・権限と監査の項目・中の関数（前に Api.js に入口があった操作は、その入口と同じ）。
  * job は裏の処理の種類（apiStartJob と同じ判定で始める）。args は使える項目（ほかの項目は打ち間違いとして断る）。
  * check は動かす前の確かめ（足りない・形の違う項目なら、何もせずに止める）。
  * brief は OWNER_TASK_RESULT に置く短い形（always なら常に。そうでなければ大きいときだけ）。全部は実行ログに出す
@@ -352,7 +352,7 @@ function appOwnerShrink_(v, maxItems, maxChars, depth) {
 
 // ---- 操作ごとの中身・短い形 ----
 
-/** 業務の設定の一覧（Api.js の apiListSettings と同じ。スプレッドシートの設定は名前と URL も） */
+/** 業務の設定の一覧（スプレッドシートの設定は名前と URL も） */
 function appOwnerSettingsList_() {
   return appCachedRead_('SETTINGS', () => ({ settings: appSettingsCurrent_().map(x => {
     if (x.type !== 'sheet' || !x.value) return x;
@@ -439,7 +439,7 @@ function appOwnerHealthBrief_(h) {
   };
 }
 
-/** ログの一覧（apiListAudit と同じ中身）。エディタからは、limit が無ければ新しい 200 行まで（画面は 1000 行。最大 2000 行） */
+/** ログの一覧（appLogList_）。エディタからは、limit が無ければ新しい 200 行まで（最大 2000 行） */
 function appOwnerAuditList_(i) {
   const limit = Math.max(1, Math.min(2000, Math.floor(Number(i.limit)) || APP_OWNER_AUDIT_LIMIT));
   return Object.assign(appLogList_(Object.assign({}, i, { limit: limit })), { limit: limit });

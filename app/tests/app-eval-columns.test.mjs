@@ -43,7 +43,7 @@ const engRows = (planId, sheet) => env.table('ENG_' + sheet).filter((r) => r.pla
     sheets['*' + y + '_actual_value'] = { cols: 70, values: rows };
   }
   const zac = env.makeBook('売上の元', sheets);
-  env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+  env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
 }
 
 /** 予測を「今」= asOfMs で動かす（待ち行列に直接入れる。画面からは渡せない項目） */

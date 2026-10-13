@@ -78,10 +78,10 @@ const webSrc = await readFile(path.join(repoRoot, 'Forecast_WebApp.js'), 'utf8')
   // 売上・実績の取り込みの元は、設定の「ZAC の実績のスプレッドシート」（未設定なら旧来の既定に頼らず止める）
   assert.throws(() => env.run(`__svc.PropertiesService.getScriptProperties().getProperty('FORECAST_SOURCE_SPREADSHEET_ID')`), /ZAC の実績のスプレッドシート/);
   const zac = env.makeBook('Veeva 売上分析ツール', { '*2026_actual_value': { values: [['x']] } });
-  assert.throws(() => env.call(`apiSaveSetting({ key: 'source.zac_spreadsheet', value: 'not a url' })`), /URL で入力/);
-  env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit#gid=0' } });
+  assert.throws(() => env.task(`saveSetting({ key: 'source.zac_spreadsheet', value: 'not a url' })`), /URL で入力/);
+  env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit#gid=0' } });
   assert.equal(env.run(`__svc.PropertiesService.getScriptProperties().getProperty('FORECAST_SOURCE_SPREADSHEET_ID')`), zac.getId());
-  const listed = env.call('apiListSettings()').settings.find((x) => x.key === 'source.zac_spreadsheet');
+  const listed = env.task('listSettings()').settings.find((x) => x.key === 'source.zac_spreadsheet');
   assert.deepEqual([listed.value, listed.display], [zac.getId(), 'Veeva 売上分析ツール'], '設定の画面にはファイルの名前を出す');
   assert.equal(env.run(`__svc.PropertiesService.getScriptProperties().getProperty('APP_DATA_SPREADSHEET_ID')`), null, '新アプリの設定は見せない');
   assert.throws(() => env.run(`__svc.PropertiesService.getScriptProperties().setProperty('X', '1')`), /書きません/);

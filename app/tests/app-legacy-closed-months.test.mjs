@@ -97,7 +97,7 @@ const CONFIG = { values: [['項目', '値'], ['[必須] メーカー名（外部
   const rec = (month, amount) => { const r = ext.slice(); r[40] = CLIENT; r[45] = 'ベース'; r[49] = '製品A'; r[56] = month; r[65] = amount; return r; };
   const zac = env.makeBook('Veeva 売上分析ツール', { '*2026_actual_value': { cols: 70, values: [ext.map((_, i) => 'c' + (i + 1)),
     rec(new Date(2026, 7, 20), 1000), rec(new Date(2026, 8, 20), 1000), rec(new Date(2026, 9, 2), 300)] } });
-  env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+  env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
   const importAt = (at) => {
     const book = env.makeBook('クライアント別売上予測', {
       CONFIG,

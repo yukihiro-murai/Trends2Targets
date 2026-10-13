@@ -346,7 +346,7 @@ const ai = env.call('apiAiLearning()');
   env.call('apiAiLearning()'); env.call('apiCrossMaker(__in)', { __in: {} });
   assert.equal(STATS.reads, r0, '控えから返す');
   // 閲覧は社内全員（外の人は読めない）
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
   env.as(MEMBER);
   assert.equal(env.call('apiCrossMaker(__in)', { __in: {} }).plans.length, 2);
   const pv = env.call('apiPeopleLearning()');
@@ -632,7 +632,7 @@ const ai = env.call('apiAiLearning()');
   assert.equal(STATS.reads, r0, 'どちらも控えから');
   // クライアント単位の予算策定担当でも、人ごとの行を出す
   env.as(OWNER);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: '${env.table('PLANS').find((p) => p.plan_id === B).client_id}' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: '${env.table('PLANS').find((p) => p.plan_id === B).client_id}' })`);
   env.as(MEMBER);
   const planner = env.call('apiPeopleLearning()');
   assert.equal(planner.detail, 'full');

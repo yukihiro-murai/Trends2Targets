@@ -116,7 +116,7 @@ const task = (env, o) => { env.props.OWNER_TASK = JSON.stringify(o); try { retur
 const as = (env, email, fn) => { env.as(email); try { return fn(); } finally { env.as(OWNER); } };
 const hitsOf = (env, email) => as(env, email, () => env.call('apiPeopleLearning()').hits);
 const brief = (h) => h.people.map((p) => [p.name, p.own, p.n, p.quarters.map((q) => q.quarter + ' ' + q.clientName).sort()]);
-const members = (env, list) => list.forEach(([email, name]) => env.call('apiSaveMember(__in)', { __in: { email, displayName: name, department: '営業' } }));
+const members = (env, list) => list.forEach(([email, name]) => env.task('saveMember(__in)', { __in: { email, displayName: name, department: '営業' } }));
 const b2 = (env, planId) => { const st = env.runJob('PLAN.RUN', { planId, action: 'EVAL.REPORT' }); assert.equal(st.status, 'DONE', st.error); };
 const personHits = (env, planId, name) => env.table('HIT_RECORDS').filter((r) => r.plan_id === planId && r.source_kind === 'PERSON' && (!name || r.source_key === name));
 const noNames = (v, what) => assert.doesNotMatch(JSON.stringify(v), /鷹野|佐藤|@/, what + ': 名前とメールを送らない');
@@ -364,7 +364,7 @@ const NEW_TABLES = ['INPUT_LOG', 'AI_RESEARCH_LOG', 'LAYER_EFFECTS', 'HIT_RECORD
   const st = env.runJob('PLAN.EDIT', { planId, action: 'INPUT.SAVE', args: { kind: 'product', rows: v.boot.input.product.map((r) => Object.assign({}, r, { reason: 'b' })) }, inputHash: v.inputHash });
   assert.equal(st.status, 'DONE', st.error);
   // 状態の点検: 足す 7 つの表は、移行の後に次の操作で作る
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   assert.deepEqual(h.tables.filter((t) => t.pending).map((t) => t.name), ['PLANS', 'FORECAST_RUNS']);
   const missing = h.tables.filter((t) => t.missing);
   assert.deepEqual(missing.map((t) => t.name), NEW_TABLES);
@@ -375,7 +375,7 @@ const NEW_TABLES = ['INPUT_LOG', 'AI_RESEARCH_LOG', 'LAYER_EFFECTS', 'HIT_RECORD
   env.call('apiListPlans()');
   assert.equal(env.props.APP_TABLES_VERSION, String(env.run('APP_SCHEMA_VERSION')));
   assert.equal(env.call(`appV10WaitRefusal_('FORECAST.RUN', {})`), '');
-  assert.deepEqual(env.call('apiHealth()').tables.filter((t) => !t.ok).map((t) => t.name), []);
+  assert.deepEqual(env.task('health()').tables.filter((t) => !t.ok).map((t) => t.name), []);
 }
 
 // ==== S4-a. 入力の記録の写し: 書きかけの保存を先に書き終えてから読む・記録のある行には足さない・した人は仕組み ====
@@ -487,7 +487,7 @@ const NEW_TABLES = ['INPUT_LOG', 'AI_RESEARCH_LOG', 'LAYER_EFFECTS', 'HIT_RECORD
   const cols = E.call('APP_TABLES.LEARNING_LOG.columns');
   assert.equal(E.call('appColumnsHash_("LEARNING_LOG")'), createHash('sha256').update(cols.join('|'), 'utf8').digest('hex'), '列のハッシュは列の名前だけ（型は入らない）');
   assert.equal(E.table('_SCHEMA').find((r) => r.table === 'LEARNING_LOG').columns_hash, E.call('appColumnsHash_("LEARNING_LOG")'), '_SCHEMA と一致（移行は要らない）');
-  assert.ok(E.call('apiHealth()').tables.find((t) => t.name === 'LEARNING_LOG').ok);
+  assert.ok(E.task('health()').tables.find((t) => t.name === 'LEARNING_LOG').ok);
 }
 
 // ==== S6. 年度を締める条件: 実績が足りない月のある印では締めない ====
@@ -509,12 +509,12 @@ const NEW_TABLES = ['INPUT_LOG', 'AI_RESEARCH_LOG', 'LAYER_EFFECTS', 'HIT_RECORD
   const write = (r) => E.call(`appWithLock_(() => appJournalRun_(${CTX}, 'テスト', __p, appHitOps_(${CTX}, appPlanOf_(__p), [__r], 'HIT-V1+BACKFILL', 'SYSTEM:V10_BACKFILL')))`, { __p: P, __r: r });
   // 前の版の検証の行しか無いときの移行の印（n_months 0・3 か月とも実績が足りない）
   write(marker(0, ['actual', 'actual', 'actual']));
-  let pv = E.call('apiYearPreview(__in)', { __in: { fy } });
+  let pv = E.task('yearPreview(__in)', { __in: { fy } });
   assert.equal(pv.canClose, false, '実績が足りない月のある印では締めない');
   assert.match(pv.reason, /1〜3 月の当たりをまだ数えていない計画があります（甲製薬）/);
   // 今の版の B-2 で数えた: 1 月は採点、2・3 月は月が始まる前の予測の回が無い（採点するものが無い）
   write(marker(1, [null, 'forecast', 'forecast']));
-  pv = E.call('apiYearPreview(__in)', { __in: { fy } });
+  pv = E.task('yearPreview(__in)', { __in: { fy } });
   assert.equal(pv.canClose, true, pv.reason);
   // 道具
   const counted = (r) => E.call('appHitQuarterCounted_(__r)', { __r: r });

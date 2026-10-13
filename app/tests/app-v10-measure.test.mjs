@@ -72,8 +72,8 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   }
   assert.equal(env.call('appJobList_()').filter((j) => j.payload && j.payload.clientName === 'テスト化学').length, 0, '待ち行列に入れない');
   // 画面の入口（管理者）から測る専用を作ろうとしても、所有者でなければ断る（印の無い計画は今までどおり作れる）
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'ADMIN', scopeType: 'ALL' } });
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'ADMIN', scopeType: 'ALL' } });
   env.as(MEMBER);
   const j = env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.CREATE', payload: { clientName: 'テスト化学', fy, peopleCsv: '鷹野', purpose: 'MEASURE' } } });
   const sj = finish(env, j.jobId);
@@ -118,8 +118,8 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   assert.equal(plan(env, planA).purpose, '');
   // 所有者だけ（中の関数も確かめる。apiOwnerTask は所有者だけの入口）
   assert.throws(() => env.call(`appSetPlanPurpose_({ user: { email: '${MEMBER}', isOwner: false }, actor: '${MEMBER}', roles: [] }, { planId: '${planA}', purpose: 'MEASURE' })`), /所有者だけ/);
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'ADMIN', scopeType: 'ALL' } });
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'ADMIN', scopeType: 'ALL' } });
   env.as(MEMBER);
   env.props.OWNER_TASK = JSON.stringify({ action: 'setPlanPurpose', planId: planA, purpose: 'MEASURE' });
   assert.throws(() => env.call('apiOwnerTask()'), /権限がありません/, '管理者でも所有者でなければ断る');
@@ -257,9 +257,9 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   const planM = env.seedPlan(env.makeBook('M', planBook('テスト薬品', past)));
   const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
   env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
-  assert.match(env.call('apiYearPreview(__in)', { __in: { fy: past } }).reason, /公式版のない計画/, '印の前は締められない');
+  assert.match(env.task('yearPreview(__in)', { __in: { fy: past } }).reason, /公式版のない計画/, '印の前は締められない');
   task(env, { action: 'setPlanPurpose', planId: planM, purpose: 'MEASURE' });
-  const pv = env.call('apiYearPreview(__in)', { __in: { fy: past } });
+  const pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(pv.canClose, true, pv.reason);
   assert.equal(pv.planCount, 2, '控えには測る専用の計画も入る');
   const snap = JSON.parse(env.run(`appYearSnapshot_(${past}).text`));

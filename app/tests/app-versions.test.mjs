@@ -21,8 +21,8 @@ const clientId = env.table('PLANS')[0].client_id;
 // 予算策定担当（このクライアント）と承認者を登録する
 const PLANNER = 'planner@bigm2y.com', APPROVER = 'approver@bigm2y.com';
 for (const [email, role, scope] of [[PLANNER, 'PLANNER', 'CLIENT'], [APPROVER, 'APPROVER', 'ALL']]) {
-  env.call('apiSaveMember(__in)', { __in: { email, displayName: email.split('@')[0], department: '営業' } });
-  env.call('apiGrantRole(__in)', { __in: { email, role, scopeType: scope, clientId: scope === 'CLIENT' ? clientId : '' } });
+  env.task('saveMember(__in)', { __in: { email, displayName: email.split('@')[0], department: '営業' } });
+  env.task('grantRole(__in)', { __in: { email, role, scopeType: scope, clientId: scope === 'CLIENT' ? clientId : '' } });
 }
 
 // ==== 1. 今の数字（年度・月ごと・予算） ====

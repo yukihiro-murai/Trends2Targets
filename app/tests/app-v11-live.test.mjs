@@ -146,7 +146,7 @@ let planId;
     sheets['*' + y + '_actual_value'] = { cols: 70, values: rows };
   }
   const zac = env.makeBook('売上の元', sheets);
-  env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+  env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
   let st = env.runJob('PLAN.CREATE', { clientName: CLIENT, fy: currentFy, peopleCsv: '鷹野' });
   assert.equal(st.status, 'DONE', st.error);
   planId = st.result.planId;

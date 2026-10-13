@@ -82,7 +82,7 @@ const approve = (env, planId) => {
   const sub = env.call('apiVersionSubmit(__in)', { __in: { planId } });
   env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
 };
-const preview = (env) => env.call('apiYearPreview(__in)', { __in: { fy: FYP } });
+const preview = (env) => env.task('yearPreview(__in)', { __in: { fy: FYP } });
 const q4Markers = (env, planId) => env.table('HIT_RECORDS').filter((r) => r.plan_id === planId && r.source_kind === 'QUARTER' && r.quarter === 'FY' + FYP + '-Q4');
 const misses = (r) => JSON.parse(r.months_json).map((m) => m.miss || '-');
 const PENDING = /FY\d{4} の 1〜3 月の当たりをまだ数えていない計画があります（テスト製薬）/;
@@ -363,8 +363,8 @@ for (let seed0 = 1; seed0 <= 6; seed0++) {
   E.call('apiListPlans()');
   const clientId = E.table('PLANS').find((p) => p.plan_id === P).client_id;
   for (const [email, name] of [[MEMBER, 'エー'], [OTHER, 'ビー']]) {
-    E.call('apiSaveMember(__in)', { __in: { email, displayName: name, department: '営業' } });
-    E.call('apiGrantRole(__in)', { __in: { email, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+    E.task('saveMember(__in)', { __in: { email, displayName: name, department: '営業' } });
+    E.task('grantRole(__in)', { __in: { email, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
   }
   // A（MEMBER）が画面を開く。そのあと B（OTHER）が 1 行目の自信だけ 低い にする（入力のハッシュは変わらない）
   const a = view(E, P, MEMBER);

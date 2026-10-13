@@ -2,6 +2,8 @@
  * Api.js — 画面から呼ぶ入口。公開する関数はこのファイルの doGet・api*・trigger* だけ。
  * どれも api_ を通し、本人確認 → 役割の判定 → （書き込みなら）記録つきで実行 → エラーの記録 を必ず行う。
  * 新しい入口を足したら app/tests/app-contract.test.mjs の一覧にも足す（足さないとテストが止める）。
+ * 管理の操作（メンバー・役割・メーカー・設定・記録と状態・バックアップ・手入れ・事前分布・計画の候補・年度の確認）は、画面から呼ばないので
+ * 入口を置かない（2026-10-13。所有者でない管理者もブラウザから呼べたため）。所有者が apiOwnerTask で、同じ中の関数・同じ操作の名前で動かす（OwnerTask.js）。
  */
 function doGet(e) {
   const t = HtmlService.createTemplateFromFile('UI');
@@ -12,11 +14,6 @@ function doGet(e) {
   const out = t.evaluate().setTitle(APP_NAME).addMetaTag('viewport', 'width=device-width, initial-scale=1');
   try { out.setFaviconUrl(APP_FAVICON_URL); } catch (err) { Logger.log('favicon: ' + (err && err.message ? err.message : err)); }
   return out;
-}
-
-/** 画面の初期データ。役割に応じて出す情報を変える */
-function apiBootstrap() {
-  return api_('APP.BOOTSTRAP', { minRole: 'VIEWER', audit: false, allowAnonymousView: true }, ctx => appBootstrap_(ctx));
 }
 
 function apiSetup() {
@@ -34,82 +31,11 @@ function apiAuthorizeAi() {
 /**
  * 所有者が Apps Script のエディタから管理の操作をする（管理の画面は画面から外す。2026-10-06 村井さん決定）。
  * エディタからは引数を渡せないので、頼む中身はスクリプト プロパティ OWNER_TASK に JSON で置く。結果は OWNER_TASK_RESULT と実行ログ（OwnerTask.js）。
- * 操作ごとに、画面の入口と同じ役割の判定・同じ操作の名前で監査に残すので、この入口そのものは記録しない（断ったことは記録する）
+ * 操作ごとに、その操作の役割の判定・操作の名前（MEMBER.SAVE など。前に画面の入口があったものは同じ名前）で監査に残すので、
+ * この入口そのものは記録しない（断ったことは記録する）
  */
 function apiOwnerTask() {
   return api_('OWNER.TASK', { ownerOnly: true, audit: false }, ctx => appOwnerTask_(ctx));
-}
-
-function apiListDirectory() {
-  return api_('DIRECTORY.LIST', { minRole: 'ADMIN', audit: false }, ctx => appCachedRead_('DIRECTORY', () => appListDirectory_(ctx)));
-}
-
-function apiSaveMember(input) {
-  return api_('MEMBER.SAVE', { minRole: 'ADMIN', entityType: 'MEMBER', entityId: input && input.email, detail: input,
-    after: res => res.member }, ctx => appSaveMember_(ctx, input));
-}
-
-function apiGrantRole(input) {
-  return api_('ROLE.GRANT', { minRole: 'ADMIN', entityType: 'ROLE', detail: input, after: res => res.role },
-    ctx => appGrantRole_(ctx, input));
-}
-
-function apiRevokeRole(input) {
-  return api_('ROLE.REVOKE', { minRole: 'ADMIN', entityType: 'ROLE', entityId: input && input.roleId, detail: input,
-    after: res => res.role }, ctx => appRevokeRole_(ctx, input));
-}
-
-/** 画面に出すクライアントの名前を決める（管理者） */
-function apiSaveClientName(input) {
-  return api_('CLIENT.NAME', { minRole: 'ADMIN', entityType: 'CLIENT', entityId: input && input.clientId, detail: input,
-    after: res => ({ displayName: res.displayName, auto: res.auto }) }, ctx => appSaveClientName_(ctx, input));
-}
-
-function apiSaveClient(input) {
-  return api_('CLIENT.SAVE', { minRole: 'ADMIN', entityType: 'CLIENT', entityId: input && input.clientId, detail: input,
-    after: res => res.client }, ctx => appSaveClient_(ctx, input));
-}
-
-function apiListSettings() {
-  return api_('SETTINGS.LIST', { minRole: 'ADMIN', audit: false }, () => appCachedRead_('SETTINGS', () => ({ settings: appSettingsCurrent_().map(x => {
-    if (x.type !== 'sheet' || !x.value) return x;
-    let name = '';
-    try { name = DriveApp.getFileById(x.value).getName(); } catch (e) { name = '（開けません）'; }
-    return Object.assign({}, x, { display: name, url: 'https://docs.google.com/spreadsheets/d/' + x.value + '/edit' });
-  }) })));
-}
-
-function apiSaveSetting(input) {
-  return api_('SETTING.SAVE', { minRole: 'ADMIN', entityType: 'SETTING', entityId: input && input.key, detail: input,
-    after: res => res.saved }, ctx => appSaveSetting_(ctx, input));
-}
-
-/** ログ（操作の記録 AUDIT・実行 RUN・エラー ERROR）の、選んだ月の行。月の一覧つき */
-function apiListAudit(input) {
-  return api_('AUDIT.LIST', { minRole: 'ADMIN', audit: false }, () => appLogList_(input));
-}
-
-/** 監査の鎖を全部の月で確かめ、締まった月のハッシュを控える */
-function apiVerifyAudit() {
-  return api_('AUDIT.VERIFY', { minRole: 'ADMIN', entityType: 'SYSTEM', after: res => ({ ok: res.ok, months: res.months.length, rows: res.rows, anchored: res.anchored }) },
-    ctx => { const v = appVerifyAuditAll_(); v.anchored = v.ok ? appWithLock_(() => appAnchorClosedMonths_(ctx, v)) : []; return v; });
-}
-
-/** 毎日の手入れを、今すぐ動かす */
-function apiRunHousekeeping() {
-  return api_('HOUSEKEEPING.RUN', { minRole: 'ADMIN', entityType: 'SYSTEM', after: res => ({ ok: res.ok, problems: res.problems }) }, ctx => appHousekeeping_(ctx));
-}
-
-function apiHealth() {
-  return api_('HEALTH.CHECK', { minRole: 'ADMIN', audit: false }, () => appHealth_());
-}
-
-function apiEnableBackup() {
-  return api_('BACKUP.ENABLE', { minRole: 'ADMIN', entityType: 'SYSTEM', after: res => res }, () => appEnableBackup_());
-}
-
-function apiRunBackup() {
-  return api_('BACKUP.RUN', { minRole: 'ADMIN', entityType: 'SYSTEM', after: res => res }, ctx => appBackup_(ctx));
 }
 
 /** 計画の一覧（取り込み・計算の一致の確認の対象） */
@@ -133,11 +59,6 @@ function apiForecastBasis(input) {
 /** 精度の推移と学習の影（月の誤差・偏り・P10〜P90 に入った割合・全計画で縮めた偏りの補正）。閲覧は社内全員 */
 function apiLearningView(input) {
   return api_('LEARNING.VIEW', { minRole: 'VIEWER', audit: false }, () => appLearningView_(input && input.planId));
-}
-
-/** 全計画で作る、情報源の信頼度の事前分布（書かずに見比べる） */
-function apiPoolPreview() {
-  return api_('POOL.PREVIEW', { minRole: 'ADMIN', audit: false }, () => appPoolPreview_());
 }
 
 /** 分析: 年度のメーカーを横に並べる（予測と予算・予測の改訂・精度・AI の話題と市場のまとめ）。閲覧は社内全員。読むだけ。中身は「今日」でも変わる（既定の年度）ので、控えの鍵に日付も入れる */
@@ -197,11 +118,6 @@ function apiVersionDecide(input) {
     after: res => ({ versionNo: res.version.no, state: res.version.state, superseded: res.superseded, selfApproved: res.selfApproved }) }, ctx => appVersionDecide_(ctx, input));
 }
 
-/** 新しい計画のクライアントの候補（ZAC の実績から） */
-function apiPlanCandidates(input) {
-  return api_('PLAN.CANDIDATES', { minRole: 'ADMIN', audit: false }, ctx => appPlanCandidates_(ctx, input));
-}
-
 /** ホーム（最重要のことだけ。よみのセリフの材料）。閲覧は社内全員 */
 function apiHome() {
   return api_('HOME', { minRole: 'VIEWER', audit: false }, ctx => appHome_(ctx));
@@ -227,11 +143,6 @@ function apiPlanView(input) {
 /** 時間のかかる処理を始める（裏で動かす。種類ごとに権限が違う） */
 function apiStartJob(input) {
   return api_('JOB.START', appJobStartOpts_(input), ctx => appStartJobNow_(ctx, input));
-}
-
-/** 年度を締める前の確認（管理者。締められるなら控えの指紋だけ返す。まだ何も書かない・記録もしない） */
-function apiYearPreview(input) {
-  return api_('YEAR.PREVIEW', { minRole: 'ADMIN', audit: false }, ctx => appYearPreview_(ctx, input));
 }
 
 /** 処理の状態（終わっていれば結果）。頼んだ人と所有者だけ */

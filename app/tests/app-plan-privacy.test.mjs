@@ -107,11 +107,11 @@ function build() {
   const here = plans.find((p) => p.plan_id === planId).client_id;
   const elsewhere = plans.find((p) => p.plan_id !== planId).client_id;
   assert.ok(here && elsewhere && here !== elsewhere, 'クライアントは 2 つ');
-  for (const email of [MEMBER, PLANNER_ALL, APPROVER, PLANNER_ELSEWHERE, 'planner.here@bigm2y.com']) env.call(`apiSaveMember({ email: '${email}', displayName: 'T' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: 'planner.here@bigm2y.com', role: 'PLANNER', scopeType: 'CLIENT', clientId: here } });
-  env.call('apiGrantRole(__in)', { __in: { email: PLANNER_ELSEWHERE, role: 'PLANNER', scopeType: 'CLIENT', clientId: elsewhere } });
-  env.call('apiGrantRole(__in)', { __in: { email: PLANNER_ALL, role: 'PLANNER', scopeType: 'ALL' } });
-  env.call('apiGrantRole(__in)', { __in: { email: APPROVER, role: 'APPROVER', scopeType: 'ALL' } });
+  for (const email of [MEMBER, PLANNER_ALL, APPROVER, PLANNER_ELSEWHERE, 'planner.here@bigm2y.com']) env.task(`saveMember({ email: '${email}', displayName: 'T' })`);
+  env.task('grantRole(__in)', { __in: { email: 'planner.here@bigm2y.com', role: 'PLANNER', scopeType: 'CLIENT', clientId: here } });
+  env.task('grantRole(__in)', { __in: { email: PLANNER_ELSEWHERE, role: 'PLANNER', scopeType: 'CLIENT', clientId: elsewhere } });
+  env.task('grantRole(__in)', { __in: { email: PLANNER_ALL, role: 'PLANNER', scopeType: 'ALL' } });
+  env.task('grantRole(__in)', { __in: { email: APPROVER, role: 'APPROVER', scopeType: 'ALL' } });
   const as = (email, fn) => { env.as(email); try { return fn(); } finally { env.as(OWNER); } };
   return {
     env, planId,
@@ -280,7 +280,7 @@ const redactedBasis = (full) => {
   assert.deepEqual(r.none, [true, true], '見る人が分からなければ閲覧の人と同じ（出さない側）');
   assert.deepEqual(r.empty, [null, null, { boot: { quarterly: {}, eval: {} } }], '提案や記入が無くても止まらない');
   // 役割が変われば、同じ人でも形が変わる（役割を付けると控えが古くなる）
-  a.env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'ALL' } });
+  a.env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'ALL' } });
   assert.deepEqual([a.view(MEMBER).boot, a.basis(MEMBER)], [aFull[0].boot, aFull[1]], '予算策定担当になった後は全部の中身');
 }
 

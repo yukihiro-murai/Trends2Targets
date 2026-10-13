@@ -59,7 +59,7 @@ function v9Env({ closePast = false } = {}) {
   if (closePast) {
     const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
     env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
-    const pv = env.call('apiYearPreview(__in)', { __in: { fy: past } });
+    const pv = env.task('yearPreview(__in)', { __in: { fy: past } });
     assert.equal(pv.canClose, true, JSON.stringify(pv));
     const st = env.runJob('YEAR.CLOSE', { fy: past, inputHash: pv.inputHash });
     assert.equal(st.status, 'DONE', JSON.stringify(st));
@@ -110,7 +110,7 @@ function checkMigrated(env, before) {
     }
     if (b.name === '_SCHEMA') assert.equal(schemaCols.length, b.rows[0].length);
   }
-  const health = env.call('apiHealth()');
+  const health = env.task('health()');
   assert.deepEqual(health.tables.filter((t) => !t.ok).map((t) => t.name + ' ' + t.note), [], '状態の点検が通る');
   return health;
 }
@@ -184,7 +184,7 @@ function checkMigrated(env, before) {
   assert.deepEqual(migrateAudits(env).map((a) => [a.phase, a.result]), [['START', ''], ['END', 'FAILED']]);
   // 止まっている間も読める（PLANS は新しい列・FORECAST_RUNS は前の列のまま）。操作のたびに続きを試す（書けなければまた止まる）
   assert.equal(env.call('apiListPlans()').plans.length, 2);
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   assert.ok(h.tables.find((t) => t.name === 'FORECAST_RUNS').pending, '列を足す前の表は「移行がまだ」');
   assert.match(h.tables.find((t) => t.name === 'PLANS').note, /_SCHEMA と違う/, '見出しだけ新しい表は _SCHEMA が前のまま');
   env.data().getSheetByName('_SCHEMA').failWrites = false;
@@ -218,7 +218,7 @@ function checkMigrated(env, before) {
   assert.ok(env.errors().some((e) => e.where === 'SCHEMA.ENSURE' && /バックアップが取れない/.test(e.message)));
   assert.equal(migrateAudits(env).length, 0, '監査の開始も書かない');
   assert.equal(env.run('__bf'), 0, '移行の前は一度だけの写しも動かさない');
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   assert.deepEqual(h.tables.filter((t) => t.pending).map((t) => t.name), ['PLANS', 'FORECAST_RUNS']);
   assert.deepEqual(h.tables.filter((t) => t.missing).map((t) => t.name), NEW_TABLES);
   assert.throws(() => env.run(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { note: 'x' }, undefined, 'test'))`), /移行がまだ/, '列を足す前の表には書かない');

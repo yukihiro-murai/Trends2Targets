@@ -18,14 +18,21 @@ import {
 
 const manifest = JSON.parse(await readFile(path.join(srcDir, 'appsscript.json'), 'utf8'));
 
-/** 画面（ブラウザ）から呼べる関数。足すときはここにも足す */
-const PUBLIC = ['doGet', 'apiBootstrap', 'apiSetup', 'apiListDirectory', 'apiSaveMember', 'apiGrantRole', 'apiRevokeRole',
-  'apiSaveClient', 'apiListSettings', 'apiSaveSetting', 'apiListAudit', 'apiHealth', 'apiEnableBackup', 'apiRunBackup',
-  'apiStartJob', 'apiJobStatus', 'apiListPlans', 'apiAuthorizeAi', 'apiPortfolio', 'apiHome', 'apiPlanCandidates', 'apiVersionList', 'apiVersionSubmit', 'apiVersionDecide', 'apiSaveClientName', 'apiVerifyAudit', 'apiRunHousekeeping', 'apiForecastBasis', 'apiLearningView', 'apiPoolPreview', 'apiForecastLatest', 'apiPlanView', 'apiYearPreview', 'triggerDailyBackup', 'triggerRunJob',
+/**
+ * 画面（ブラウザ）から呼べる関数。足すときはここにも足す。
+ * 管理の操作（メンバー・役割・メーカー・設定・記録と状態・バックアップ・手入れ・事前分布・計画の候補・年度の確認）は、2026-10-13 に入口を外した
+ * （所有者が apiOwnerTask で動かす。所有者でない管理者もブラウザのコンソールから呼べたため）。所有者がエディタで動かす apiSetup・apiAuthorizeAi・apiOwnerTask は残す
+ */
+const PUBLIC = ['doGet', 'apiSetup', 'apiAuthorizeAi', 'apiOwnerTask',
+  'apiStartJob', 'apiJobStatus', 'apiListPlans', 'apiPortfolio', 'apiHome', 'apiVersionList', 'apiVersionSubmit', 'apiVersionDecide',
+  'apiForecastBasis', 'apiLearningView', 'apiForecastLatest', 'apiPlanView',
   'apiCrossMaker', 'apiPeopleLearning', 'apiAiLearning',
   'apiBudgetProposal',
-  'triggerAutoResearch',
-  'apiOwnerTask'];
+  'triggerDailyBackup', 'triggerRunJob', 'triggerAutoResearch'];
+/** 外した管理の入口（もう置かない。所有者の操作の名前で動かす） */
+const REMOVED = ['apiBootstrap', 'apiListDirectory', 'apiSaveMember', 'apiGrantRole', 'apiRevokeRole', 'apiSaveClientName', 'apiSaveClient',
+  'apiListSettings', 'apiSaveSetting', 'apiListAudit', 'apiVerifyAudit', 'apiRunHousekeeping', 'apiHealth', 'apiEnableBackup', 'apiRunBackup',
+  'apiPoolPreview', 'apiPlanCandidates', 'apiYearPreview'];
 /** 旧来の計算をそのまま包んだ自動生成のファイル（中の関数は外から呼べない。中身は app-engine.test.mjs が確かめる） */
 const WRAPPED = ['LegacyEngine.js'];
 
@@ -55,6 +62,16 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.ok(pub.every((d) => d.file === 'Api.js'), '公開する関数は Api.js にだけ置く');
   const names = declared.map((d) => d.name);
   assert.deepEqual(names.filter((n, i) => names.indexOf(n) !== i), [], '同じ名前の関数がない（GAS では黙って上書きされる）');
+  // 外した管理の入口は、どこにも無く・画面からも呼ばない。同じ操作は所有者の操作（apiOwnerTask）に、同じ操作の名前である
+  for (const n of REMOVED) {
+    assert.ok(!names.includes(n), `${n} は置かない`);
+    assert.ok(!new RegExp('\\b' + n + '\\b').test(uiHtml), `画面は ${n} を呼ばない`);
+  }
+  const ownerNames = probe.run('Object.keys(APP_OWNER_ACTIONS).map(k => APP_OWNER_ACTIONS[k].name).filter(Boolean)');
+  for (const a of ['DIRECTORY.LIST', 'MEMBER.SAVE', 'ROLE.GRANT', 'ROLE.REVOKE', 'CLIENT.NAME', 'CLIENT.SAVE', 'SETTINGS.LIST', 'SETTING.SAVE', 'AUDIT.LIST',
+    'AUDIT.VERIFY', 'HOUSEKEEPING.RUN', 'HEALTH.CHECK', 'BACKUP.ENABLE', 'BACKUP.RUN', 'POOL.PREVIEW', 'PLAN.CANDIDATES', 'YEAR.PREVIEW']) {
+    assert.ok(ownerNames.includes(a), `所有者の操作に ${a} がある`);
+  }
   for (const name of PUBLIC.filter((n) => n !== 'doGet')) {
     const body = extractFunction(sources['Api.js'], name);
     assert.ok(body.slice(body.indexOf('{') + 1).trim().startsWith('return api_('), `${name} は api_ だけを通す`);
@@ -126,9 +143,9 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
 // ==== 4. 初期設定（所有者だけ・何度実行しても同じ） ====
 {
   const env = makeEnv();
-  let boot = env.call('apiBootstrap()');
+  let boot = env.boot();
   assert.deepEqual([boot.setUp, boot.allowed, boot.user.isOwner, boot.user.isAdmin], [false, true, true, true]);
-  assert.throws(() => env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`), /初期設定がまだです/);
+  assert.throws(() => env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`), /初期設定がまだです/);
   env.as(MEMBER);
   assert.throws(() => env.call('apiSetup()'), /権限がありません/);
   assert.equal(Object.keys(env.files).length, 0, '所有者以外の初期設定では何も作らない');
@@ -167,7 +184,7 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   // 表が 1 つ消えていたら作り直す（ほかの表はそのまま）
   env.data().deleteSheet(env.data().getSheetByName('CLIENTS'));
   assert.deepEqual(env.call('apiSetup()').tables, ['CLIENTS']);
-  boot = env.call('apiBootstrap()');
+  boot = env.boot();
   assert.equal(boot.setUp, true);
   assert.equal(env.state.lockHeld, false);
 }
@@ -176,27 +193,28 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
 {
   const env = setUpEnv();
   env.as(MEMBER);
-  const boot = env.call('apiBootstrap()');
+  const boot = env.boot();
   assert.equal(boot.allowed, true);
   assert.equal(boot.user.isAdmin, false);
   assert.deepEqual(boot.user.roles.map((r) => r.role), ['VIEWER', 'CONTRIBUTOR'], '社内の人は閲覧と情報提供を自動で持つ');
   const n0 = env.audit().length;
-  assert.throws(() => env.call('apiListDirectory()'), /権限がありません/);
-  assert.throws(() => env.call(`apiSaveMember({ email: '${OTHER}', displayName: 'X' })`), /権限がありません/);
+  assert.throws(() => env.task('listDirectory()'), /権限がありません/);
+  assert.throws(() => env.task(`saveMember({ email: '${OTHER}', displayName: 'X' })`), /権限がありません/);
+  // 管理の操作は所有者の操作（apiOwnerTask）だけ。断ったことは、その入口の名前で記録する
   assert.deepEqual(env.audit().slice(n0).map((a) => [a.action, a.phase, a.result, a.actor_email, a.actor_roles]), [
-    ['DIRECTORY.LIST', 'DENIED', 'DENIED', MEMBER, 'VIEWER,CONTRIBUTOR'],
-    ['MEMBER.SAVE', 'DENIED', 'DENIED', MEMBER, 'VIEWER,CONTRIBUTOR'],
+    ['OWNER.TASK', 'DENIED', 'DENIED', MEMBER, 'VIEWER,CONTRIBUTOR'],
+    ['OWNER.TASK', 'DENIED', 'DENIED', MEMBER, 'VIEWER,CONTRIBUTOR'],
   ], '拒否も記録する');
   assert.equal(env.table('MEMBERS').length, 1, '拒否した操作は実行しない');
   for (const who of [OUTSIDER, '']) {
     env.as(who);
-    const b = env.call('apiBootstrap()');
+    const b = env.boot();
     assert.deepEqual([b.allowed, b.user.isAdmin, b.user.roles], [false, false, []], `社外・メールが取れない人には何も許さない: "${who}"`);
-    assert.throws(() => env.call('apiHealth()'), /権限がありません/);
+    assert.throws(() => env.task('health()'), /権限がありません/);
   }
   assert.equal(env.audit().slice(-1)[0].actor_email, '(unknown)');
   env.as('Owner@BIGM2Y.com');
-  assert.equal(env.call('apiBootstrap()').user.isAdmin, true, 'メールの大文字・小文字は区別しない');
+  assert.equal(env.boot().user.isAdmin, true, 'メールの大文字・小文字は区別しない');
   // 社外のメールに付与の行があっても効かない
   env.as(OWNER);
   env.run(`appInsertRows_('ROLES', [{ role_id: 'RL-X', email: '${OUTSIDER}', role: 'ADMIN', scope_type: 'ALL', client_id: '', valid_from: '', valid_to: '', is_active: true, row_version: 1 }])`);
@@ -217,23 +235,23 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
 // ==== 6. メンバー・役割の付与と取り消し ====
 {
   const env = setUpEnv();
-  assert.throws(() => env.call(`apiSaveMember({ email: '${OUTSIDER}', displayName: 'X' })`), /社内（@bigm2y\.com）のメールアドレスだけ/);
-  assert.throws(() => env.call(`apiSaveMember({ email: 'bad', displayName: 'X' })`), /形式が正しくありません/);
-  assert.throws(() => env.call(`apiSaveMember({ email: 'x@evil-bigm2y.com', displayName: 'X' })`), /社内/);
-  assert.throws(() => env.call(`apiSaveMember({ email: '${MEMBER}', displayName: '  ' })`), /名前を入力/);
-  assert.throws(() => env.call(`apiGrantRole({ email: '${MEMBER}', role: 'PLANNER' })`), /先にメンバーとして登録/);
-  const m = env.call(`apiSaveMember({ email: ' Member@BIGM2Y.com ', displayName: 'メンバー', department: '営業' })`);
+  assert.throws(() => env.task(`saveMember({ email: '${OUTSIDER}', displayName: 'X' })`), /社内（@bigm2y\.com）のメールアドレスだけ/);
+  assert.throws(() => env.task(`saveMember({ email: 'bad', displayName: 'X' })`), /形式が正しくありません/);
+  assert.throws(() => env.task(`saveMember({ email: 'x@evil-bigm2y.com', displayName: 'X' })`), /社内/);
+  assert.throws(() => env.task(`saveMember({ email: '${MEMBER}', displayName: '  ' })`), /名前を入力/);
+  assert.throws(() => env.task(`grantRole({ email: '${MEMBER}', role: 'PLANNER' })`), /先にメンバーとして登録/);
+  const m = env.task(`saveMember({ email: ' Member@BIGM2Y.com ', displayName: 'メンバー', department: '営業' })`);
   assert.deepEqual([m.member.email, m.created], [MEMBER, true]);
-  const cl = env.call(`apiSaveClient({ clientName: '株式会社テスト製薬', zacCode: 'Z001' })`).client;
+  const cl = env.task(`saveClient({ clientName: '株式会社テスト製薬', zacCode: 'Z001' })`).client;
   assert.match(cl.client_id, /^CL-\d{14}-[0-9A-F]{8}$/);
-  assert.throws(() => env.call(`apiGrantRole({ email: '${MEMBER}', role: 'VIEWER' })`), /付与できる役割は 予算策定担当・承認者・管理者/);
-  assert.throws(() => env.call(`apiGrantRole({ email: '${MEMBER}', role: 'APPROVER', scopeType: 'CLIENT', clientId: '${cl.client_id}' })`), /予算策定担当だけ/);
-  assert.throws(() => env.call(`apiGrantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: 'CL-none' })`), /メーカーを選んで/);
-  assert.throws(() => env.call(`apiGrantRole({ email: '${MEMBER}', role: 'PLANNER', validFrom: '2026/10/01' })`), /yyyy-MM-dd/);
-  assert.throws(() => env.call(`apiGrantRole({ email: '${MEMBER}', role: 'PLANNER', validFrom: '${TODAY}', validTo: '${YESTERDAY}' })`), /終わりの日が始まりの日より前/);
-  const g = env.call(`apiGrantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: '${cl.client_id}' })`).role;
+  assert.throws(() => env.task(`grantRole({ email: '${MEMBER}', role: 'VIEWER' })`), /付与できる役割は 予算策定担当・承認者・管理者/);
+  assert.throws(() => env.task(`grantRole({ email: '${MEMBER}', role: 'APPROVER', scopeType: 'CLIENT', clientId: '${cl.client_id}' })`), /予算策定担当だけ/);
+  assert.throws(() => env.task(`grantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: 'CL-none' })`), /メーカーを選んで/);
+  assert.throws(() => env.task(`grantRole({ email: '${MEMBER}', role: 'PLANNER', validFrom: '2026/10/01' })`), /yyyy-MM-dd/);
+  assert.throws(() => env.task(`grantRole({ email: '${MEMBER}', role: 'PLANNER', validFrom: '${TODAY}', validTo: '${YESTERDAY}' })`), /終わりの日が始まりの日より前/);
+  const g = env.task(`grantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: '${cl.client_id}' })`).role;
   assert.deepEqual([g.scope_type, g.client_id, g.valid_from, g.is_active], ['CLIENT', cl.client_id, TODAY, true]);
-  assert.throws(() => env.call(`apiGrantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: '${cl.client_id}' })`), /すでに付いています/);
+  assert.throws(() => env.task(`grantRole({ email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: '${cl.client_id}' })`), /すでに付いています/);
   const grantEnd = env.audit().filter((a) => a.action === 'ROLE.GRANT' && a.result === 'OK')[0];
   assert.deepEqual([grantEnd.entity_type, grantEnd.entity_id, grantEnd.client_id], ['ROLE', g.role_id, cl.client_id], '作った ID を終了の行に残す');
   const rolesOf = () => env.call('appRolesOf_(appCurrentUser_())');
@@ -241,54 +259,57 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.deepEqual(rolesOf().map((r) => [r.role, r.scope_type, r.client_id]).slice(-1), [['PLANNER', 'CLIENT', cl.client_id]]);
   // 外す: 行は残して無効にする
   env.as(OWNER);
-  const rv = env.call(`apiRevokeRole({ roleId: '${g.role_id}', rowVersion: 1 })`).role;
+  const rv = env.task(`revokeRole({ roleId: '${g.role_id}', rowVersion: 1 })`).role;
   assert.deepEqual([rv.is_active, rv.valid_to, rv.row_version, rv.updated_by], [false, TODAY, 2, OWNER]);
   const end = env.audit().filter((a) => a.action === 'ROLE.REVOKE' && a.phase === 'END')[0];
   assert.equal(JSON.parse(end.before_json).is_active, true);
   assert.equal(JSON.parse(end.after_json).is_active, false);
   assert.deepEqual([end.entity_id, end.client_id], [g.role_id, cl.client_id]);
-  assert.throws(() => env.call(`apiRevokeRole({ roleId: '${g.role_id}' })`), /すでに外れています/);
-  assert.throws(() => env.call(`apiRevokeRole({ roleId: 'RL-none' })`), /見つかりません/);
+  assert.throws(() => env.task(`revokeRole({ roleId: '${g.role_id}' })`), /すでに外れています/);
+  assert.throws(() => env.task(`revokeRole({ roleId: 'RL-none' })`), /見つかりません/);
   assert.equal(env.table('ROLES').length, 1, '外した役割の行も消さない');
   env.as(MEMBER);
   assert.equal(rolesOf().length, 2, '外した役割は効かない');
   // 期間の外は効かない（始まる前・終わった後）
   env.as(OWNER);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'APPROVER', validFrom: '${TOMORROW}' })`);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN', validFrom: '2026-01-01', validTo: '${YESTERDAY}' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'APPROVER', validFrom: '${TOMORROW}' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN', validFrom: '2026-01-01', validTo: '${YESTERDAY}' })`);
   env.as(MEMBER);
   assert.deepEqual(rolesOf().map((r) => r.role), ['VIEWER', 'CONTRIBUTOR']);
   env.as(OWNER);
-  assert.throws(() => env.call(`apiGrantRole({ email: '${MEMBER}', role: 'APPROVER' })`), /同じ期間にすでに付いています/, '期間が重なる付与は二重にしない');
+  assert.throws(() => env.task(`grantRole({ email: '${MEMBER}', role: 'APPROVER' })`), /同じ期間にすでに付いています/, '期間が重なる付与は二重にしない');
   // 所有者の管理者は外せない
   env.as(OWNER);
-  const ga = env.call(`apiGrantRole({ email: '${OWNER}', role: 'ADMIN' })`).role;
-  assert.throws(() => env.call(`apiRevokeRole({ roleId: '${ga.role_id}' })`), /所有者は管理者のまま/);
-  // 期限が切れた付与の後には付け直せる。管理者を付けた人は管理の入口を使える
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
-  env.as(MEMBER);
-  const dir = env.call('apiListDirectory()');
+  const ga = env.task(`grantRole({ email: '${OWNER}', role: 'ADMIN' })`).role;
+  assert.throws(() => env.task(`revokeRole({ roleId: '${ga.role_id}' })`), /所有者は管理者のまま/);
+  // 期限が切れた付与の後には付け直せる。管理者を付けた人も、管理の操作（所有者の操作）はできない（2026-10-13。画面の入口も無い）
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
+  const dir = env.task('listDirectory()');
   assert.deepEqual([dir.members.length, dir.owner], [2, OWNER]);
   assert.ok(dir.members.every((x) => !('_row' in x)), '行番号は画面に出さない');
+  env.as(MEMBER);
+  assert.equal(env.boot().user.isAdmin, true, '管理者の役割は付いている');
+  assert.throws(() => env.task('listDirectory()'), /権限がありません/, '所有者でない管理者は所有者の操作を使えない');
+  for (const n of REMOVED) assert.equal(typeof env.ctx[n], 'undefined', `${n} は呼べない`);
   // 役割の表が壊れていたら付与なし（最小の権限）にする
   env.data().getSheetByName('ROLES').rows[0][2] = 'kind';
   env.run('appBumpGen_()');   // 表を手で直したときは、次の書き込みか 10 分で読み直す（読んだ結果の控え）
-  assert.throws(() => env.call('apiListDirectory()'), /権限がありません/);
+  assert.equal(env.boot().user.isAdmin, false, '役割の表が読めなければ管理者の付与も効かない');
   env.as(OWNER);
-  assert.equal(env.call('apiBootstrap()').user.isAdmin, true, '所有者は表が壊れていても管理者（直すため）');
+  assert.equal(env.boot().user.isAdmin, true, '所有者は表が壊れていても管理者（直すため）');
 }
 
 // ==== 7. 楽観ロック（ほかの人の更新を上書きしない） ====
 {
   const env = setUpEnv();
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'A' })`);
-  const u1 = env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'B', rowVersion: 1 })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'A' })`);
+  const u1 = env.task(`saveMember({ email: '${MEMBER}', displayName: 'B', rowVersion: 1 })`);
   assert.deepEqual([u1.created, u1.member.row_version, u1.before.display_name], [false, 2, 'A']);
-  assert.throws(() => env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'C', rowVersion: 1 })`), /ほかの人が先に更新しました/);
+  assert.throws(() => env.task(`saveMember({ email: '${MEMBER}', displayName: 'C', rowVersion: 1 })`), /ほかの人が先に更新しました/);
   assert.equal(env.table('MEMBERS').find((x) => x.email === MEMBER).display_name, 'B');
   assert.deepEqual(env.audit().slice(-2).map((a) => [a.action, a.phase, a.result]), [['MEMBER.SAVE', 'START', ''], ['MEMBER.SAVE', 'END', 'FAILED']]);
   assert.match(env.audit().slice(-1)[0].error, /ほかの人が先に更新/);
-  assert.ok(env.errors().some((e) => e.where === 'MEMBER.SAVE' && /ほかの人が先に更新/.test(e.message)), 'エラーのログにも残す');
+  assert.ok(env.errors().some((e) => e.where === 'OWNER.TASK' && /ほかの人が先に更新/.test(e.message)), 'エラーのログにも残す（所有者の操作の入口の名前で）');
   const ok = env.audit().filter((a) => a.action === 'MEMBER.SAVE' && a.result === 'OK');
   assert.equal(JSON.parse(ok[1].before_json).display_name, 'A');
   assert.equal(JSON.parse(ok[1].after_json).display_name, 'B');
@@ -308,11 +329,11 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.equal(norm('ABC Pharma'), norm('ａｂｃ　ｐｈａｒｍａ'));
   assert.equal(norm('株主製薬'), '株主製薬', '会社の種類は語として除く（1 文字ずつは消さない）');
   assert.equal(norm('合同製薬'), '合同製薬');
-  const c = env.call(`apiSaveClient({ clientName: '株式会社テスト製薬' })`).client;
-  assert.throws(() => env.call(`apiSaveClient({ clientName: 'テスト製薬（株）' })`), /同じ名前のメーカー/);
-  const u = env.call(`apiSaveClient({ clientId: '${c.client_id}', clientName: 'テスト製薬', zacCode: 'Z9', rowVersion: 1 })`);
+  const c = env.task(`saveClient({ clientName: '株式会社テスト製薬' })`).client;
+  assert.throws(() => env.task(`saveClient({ clientName: 'テスト製薬（株）' })`), /同じ名前のメーカー/);
+  const u = env.task(`saveClient({ clientId: '${c.client_id}', clientName: 'テスト製薬', zacCode: 'Z9', isActive: true, note: '', rowVersion: 1 })`);
   assert.deepEqual([u.client.client_name, u.client.zac_code, u.client.row_version, u.created], ['テスト製薬', 'Z9', 2, false]);
-  assert.throws(() => env.call(`apiSaveClient({ clientName: ' ' })`), /メーカー名を入力/);
+  assert.throws(() => env.task(`saveClient({ clientName: ' ' })`), /メーカー名を入力/);
   assert.equal(env.table('CLIENTS').length, 1);
   assert.equal(env.table('CLIENTS')[0].aliases_json, '[]');
 }
@@ -326,7 +347,7 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
     'test.rate2': { label: '割合2', type: 'number', min: 0, max: 1, def: 0.05, unit: '割合' },
     'test.months': { label: '月数', type: 'int', min: 1, max: 24, def: 3, unit: 'か月' },
     'test.flag': { label: 'フラグ', type: 'bool', def: false, unit: 'する / しない' } })`);
-  const cur = () => Object.fromEntries(env.call('apiListSettings()').settings.map((s) => [s.key, s]));
+  const cur = () => Object.fromEntries(env.task('listSettings()').settings.map((s) => [s.key, s]));
   let s = cur();
   // 着地見込みの τ・w（2026-10-08 判断 29・11: 学んだ値は所有者が承認して書くまで使わない）
   assert.deepEqual(Object.keys(s).filter((k) => !/^test\./.test(k)), ['source.zac_spreadsheet', 'landing.tau', 'landing.w'], '本番の設定は使うものだけ');
@@ -335,12 +356,12 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
     ['test.rate', '1.5', /0〜1 の範囲/], ['test.rate', 'abc', /数値で入力/], ['test.rate', '', /数値で入力/],
     ['test.months', '2.5', /整数で入力/], ['test.flag', 'maybe', /する \/ しない/], ['no.such', '1', /未定義の設定/],
   ]) {
-    assert.throws(() => env.call('apiSaveSetting(__in)', { __in: { key, value } }), re, `${key}=${value}`);
+    assert.throws(() => env.task('saveSetting(__in)', { __in: { key, value } }), re, `${key}=${value}`);
   }
-  assert.throws(() => env.call(`apiSaveSetting({ key: 'test.rate', value: '0.2', effectiveFrom: '2026/10/01' })`), /yyyy-MM-dd/);
+  assert.throws(() => env.task(`saveSetting({ key: 'test.rate', value: '0.2', effectiveFrom: '2026/10/01' })`), /yyyy-MM-dd/);
   assert.equal(env.table('SETTINGS').length, 0, 'だめな値は保存しない');
-  env.call(`apiSaveSetting({ key: 'test.rate', value: '0.15' })`);
-  env.call(`apiSaveSetting({ key: 'test.rate', value: 0.11 })`);
+  env.task(`saveSetting({ key: 'test.rate', value: '0.15' })`);
+  env.task(`saveSetting({ key: 'test.rate', value: 0.11 })`);
   s = cur();
   assert.deepEqual([s['test.rate'].value, s['test.rate'].isDefault, s['test.rate'].effectiveFrom], [0.11, false, TODAY],
     '同じ日に 2 回変えたら後の値');
@@ -348,11 +369,11 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   const end = env.audit().filter((a) => a.action === 'SETTING.SAVE' && a.result === 'OK')[1];
   assert.equal(JSON.parse(end.before_json).value, 0.15);
   assert.equal(JSON.parse(end.after_json).value, '0.11');
-  env.call(`apiSaveSetting({ key: 'test.months', value: 6, effectiveFrom: '${TOMORROW}' })`);
+  env.task(`saveSetting({ key: 'test.months', value: 6, effectiveFrom: '${TOMORROW}' })`);
   s = cur();
   assert.equal(s['test.months'].value, 3, '先の日付の設定はその日まで効かない');
   assert.deepEqual(s['test.months'].scheduled, [{ value: '6', effectiveFrom: TOMORROW }]);
-  env.call(`apiSaveSetting({ key: 'test.flag', value: 'true' })`);
+  env.task(`saveSetting({ key: 'test.flag', value: 'true' })`);
   assert.equal(cur()['test.flag'].value, true);
   assert.equal(env.run(`appSettingValue_('test.rate')`), 0.11);
   // 表に紛れ込んだ不正な値は使わず既定値に戻す
@@ -363,8 +384,8 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
 // ==== 10. 操作の記録（鎖・改ざんの検出・一覧） ====
 {
   const env = setUpEnv();
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'A' })`);
-  env.call(`apiSaveClient({ clientName: 'テスト製薬' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'A' })`);
+  env.task(`saveClient({ clientName: 'テスト製薬' })`);
   const sh = env.auditSheet();
   assert.deepEqual([...sh.rows[0]], [...auditCols]);
   const ip = auditCols.indexOf('prev_hash');
@@ -376,22 +397,22 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   const verify = () => env.call('appVerifyAuditSheet_(__sh)', { __sh: sh });
   let v = verify();
   assert.deepEqual([v.ok, v.rows, v.lastHash], [true, sh.rows.length - 1, env.props.APP_AUDIT_LAST_HASH]);
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   assert.ok(h.setUp && h.tables.every((t) => t.ok), JSON.stringify(h.tables));
   assert.deepEqual([h.audit.ok, h.audit.matchesLatest], [true, true]);
   assert.match(h.files.data, /spreadsheets/);
   // 一覧: 新しい順・絞り込み
-  const list = env.call(`apiListAudit({ limit: 3 })`).rows;
+  const list = env.task(`listAudit({ limit: 3 })`).rows;
   assert.equal(list.length, 3);
   assert.ok(list[0].occurred_at >= list[2].occurred_at);
-  const q = env.call(`apiListAudit({ query: 'client.save' })`).rows;
+  const q = env.task(`listAudit({ query: 'client.save' })`).rows;
   assert.ok(q.length === 2 && q.every((a) => a.action === 'CLIENT.SAVE'), '大文字小文字を区別せず絞り込む');
   // 書き換え・削除を見つける
   const saved = sh.rows.map((r) => r.slice());
   sh.rows[2][4] = 'TAMPERED';
   v = verify();
   assert.deepEqual([v.ok, v.brokenAt], [false, 3]);
-  assert.equal(env.call('apiHealth()').audit.ok, false);
+  assert.equal(env.task('health()').audit.ok, false);
   sh.rows.splice(0, sh.rows.length, ...saved);
   sh.rows.splice(2, 1);
   assert.deepEqual([verify().ok, verify().brokenAt], [false, 3]);
@@ -399,12 +420,12 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   sh.rows.pop();
   v = verify();
   assert.equal(v.ok, true);
-  assert.equal(env.call('apiHealth()').audit.matchesLatest, false, '末尾を消すと最新の hash と合わない');
+  assert.equal(env.task('health()').audit.matchesLatest, false, '末尾を消すと最新の hash と合わない');
   // 定義と違う表を見つける
   sh.rows.splice(0, sh.rows.length, ...saved);
   const schemaSheet = env.data().getSheetByName('_SCHEMA');
   schemaSheet.rows[1][2] = 'x';
-  const bad = env.call('apiHealth()').tables.filter((t) => !t.ok);
+  const bad = env.task('health()').tables.filter((t) => !t.ok);
   assert.equal(bad.length, 1);
   assert.match(bad[0].note, /_SCHEMA と違う/);
   // 数値などが来ても文字列にして書く（読み戻した値で鎖が合う）
@@ -436,14 +457,14 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   env.props.APP_LOG_SPREADSHEETS_JSON = JSON.stringify({ [oldKey]: logId });
   env.files[logId].name = 'Trends2Targets_Logs_' + oldKey;
   delete env.props.APP_FY_NAMING;
-  env.call(`apiSaveClient({ clientName: 'テスト製薬' })`);
+  env.task(`saveClient({ clientName: 'テスト製薬' })`);
   assert.deepEqual(JSON.parse(env.props.APP_LOG_SPREADSHEETS_JSON), { [FY]: logId }, 'キーを 1 年ずらす');
   assert.equal(env.files[logId].name, 'Trends2Targets_Logs_' + FY, 'ファイル名も直す');
   assert.equal(env.props.APP_FY_NAMING, 'start');
   assert.equal(env.audit().length, before + 2, '同じファイルに記録を続ける（新しいファイルを作らない）');
   assert.equal(Object.values(env.files).filter((f) => /Logs_|ログ/.test(f.name)).length, 1);
   // 二度目は何もしない
-  env.call(`apiSaveClient({ clientName: '別の製薬' })`);
+  env.task(`saveClient({ clientName: '別の製薬' })`);
   assert.deepEqual(JSON.parse(env.props.APP_LOG_SPREADSHEETS_JSON), { [FY]: logId });
   assert.equal(env.state.lockHeld, false);
 }
@@ -452,15 +473,15 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
 {
   const env = setUpEnv();
   env.auditSheet().failWrites = true;
-  assert.throws(() => env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'A' })`), /write failed/);
+  assert.throws(() => env.task(`saveMember({ email: '${MEMBER}', displayName: 'A' })`), /write failed/);
   assert.equal(env.table('MEMBERS').length, 1, '開始を記録できなければ実行しない');
   env.auditSheet().failWrites = false;
   env.data().getSheetByName('MEMBERS').rows[0][1] = 'name';
-  assert.throws(() => env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'A' })`), /表の列が定義と違います（MEMBERS）/);
+  assert.throws(() => env.task(`saveMember({ email: '${MEMBER}', displayName: 'A' })`), /表の列が定義と違います（MEMBERS）/);
   assert.equal(env.data().getSheetByName('MEMBERS').rows.length, 2);
   env.data().getSheetByName('MEMBERS').rows[0][1] = 'display_name';
   env.auditSheet().rows[0][5] = 'step';
-  assert.throws(() => env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'A' })`), /ログの列が想定と違います/);
+  assert.throws(() => env.task(`saveMember({ email: '${MEMBER}', displayName: 'A' })`), /ログの列が想定と違います/);
   assert.equal(env.table('MEMBERS').length, 1);
   env.auditSheet().rows[0][5] = 'phase';
   // キーの重複・空のキーは足さない
@@ -469,7 +490,7 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.throws(() => env.run(`appInsertRows_('ROLES', [{ email: '${MEMBER}', role: 'ADMIN' }])`), /キーが空の行/);
   assert.equal(env.table('MEMBERS').length, 1);
   env.props.APP_LOG_SPREADSHEETS_JSON = JSON.stringify({ [FY]: 'missing' });
-  assert.throws(() => env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'A' })`), /not found/);
+  assert.throws(() => env.task(`saveMember({ email: '${MEMBER}', displayName: 'A' })`), /not found/);
   assert.equal(env.table('MEMBERS').length, 1, 'ログのファイルを開けなければ実行しない');
   assert.equal(env.state.lockHeld, false);
 }
@@ -480,7 +501,7 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   const isBackup = (f) => f.kind === 'file' && f.name.startsWith('Trends2Targets_Data_Backup_');
   const all = () => Object.values(env.files).filter(isBackup).sort((a, b) => a.created - b.created);
   const archiveId = () => env.props.APP_ARCHIVE_FOLDER_ID;
-  for (let i = 0; i < 16; i++) env.call('apiRunBackup()');
+  for (let i = 0; i < 16; i++) env.task('runBackup()');
   assert.equal(all().length, 16);
   const kept = env.backups().sort((a, b) => a.created - b.created);
   assert.equal(kept.length, 14, '新しい 14 世代はバックアップのフォルダに残す');
@@ -493,15 +514,15 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.equal(env.files[env.props.APP_DATA_SPREADSHEET_ID].trashed, false);
   assert.equal(env.files[env.props.APP_DATA_SPREADSHEET_ID].parent, env.files[env.props.APP_BACKUP_FOLDER_ID].parent, 'データ本体は動かさない');
   assert.equal(env.runLog().filter((r) => r.kind === 'BACKUP' && r.status === 'OK').length, 16, '実行ログに残す');
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   assert.deepEqual([h.backup.count, h.backup.enabled], [14, false], 'アーカイブへ移したものは数えない');
   assert.equal(h.backup.latest, kept[13].name);
   // 毎日のトリガー（二重に作らない）
-  assert.equal(env.call('apiEnableBackup()').already, false);
-  assert.equal(env.call('apiEnableBackup()').already, true);
+  assert.equal(env.task('enableBackup()').already, false);
+  assert.equal(env.task('enableBackup()').already, true);
   assert.equal(env.triggers.length, 1);
   assert.deepEqual([env.triggers[0].handler, env.triggers[0].everyDays, env.triggers[0].atHour], ['triggerDailyBackup', 1, 3]);
-  assert.equal(env.call('apiHealth()').backup.enabled, true);
+  assert.equal(env.task('health()').backup.enabled, true);
   // トリガーの中ではメールが空でも、このプロジェクトのトリガーなら所有者として動く
   const uid = env.triggers[0].uid;
   env.as('');

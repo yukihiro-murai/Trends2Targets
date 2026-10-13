@@ -192,8 +192,8 @@ seedA4(E1, P1);
   assert.ok(!JSON.stringify(ai).includes('A4-'), 'A-4 の番号は画面に送らない');
   assert.ok(!JSON.stringify(full).includes('@'), 'メールは送らない');
   // 閲覧の人（つなぎなし）: 件数だけ。名前を送らない
-  E1.call('apiSaveMember(__in)', { __in: { email: MEMBER, displayName: 'メンバー', department: '営業' } });
-  E1.call('apiSaveMember(__in)', { __in: { email: OTHER, displayName: '鷹野', department: '営業' } });
+  E1.task('saveMember(__in)', { __in: { email: MEMBER, displayName: 'メンバー', department: '営業' } });
+  E1.task('saveMember(__in)', { __in: { email: OTHER, displayName: '鷹野', department: '営業' } });
   E1.as(MEMBER);
   let v = E1.call('apiPeopleLearning()');
   assert.deepEqual([v.hits.people, v.hits.hidden], [[], 4], '人の行 4 件は件数だけ');
@@ -213,7 +213,7 @@ seedA4(E1, P1);
   assert.deepEqual(E1.call('apiPeopleLearning()').hits.people, [], 'ほかの人の行は見えないまま');
   E1.as(OWNER);
   // メーカー単位の予算策定担当: そのメーカーは全部
-  E1.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId: E1.table('PLANS')[0].client_id } });
+  E1.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId: E1.table('PLANS')[0].client_id } });
   E1.as(MEMBER);
   v = E1.call('apiPeopleLearning()').hits;
   assert.deepEqual([v.people.length, v.hidden], [2, 0], 'そのメーカーの担当は全部');
@@ -293,7 +293,7 @@ seedA4(E1, P1);
     const sub = E4.call('apiVersionSubmit(__in)', { __in: { planId: p } });
     E4.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   }
-  let pv = E4.call('apiYearPreview(__in)', { __in: { fy } });
+  let pv = E4.task('yearPreview(__in)', { __in: { fy } });
   assert.equal(pv.canClose, false);
   assert.equal(pv.reason, 'FY' + fy + ' の 1〜3 月の当たりをまだ数えていない計画があります（甲製薬）。3 月の実績が締まってから（4 月 5 日以降に）実績を取り込み、当たり具合を計算してから締めてください。',
     '測る専用・実績の無い計画は挙げない');
@@ -303,7 +303,7 @@ seedA4(E1, P1);
   assert.deepEqual(rows[3].months_json.map((m) => m.miss), ['forecast', 'forecast', 'forecast']);
   E4.call(`appWithLock_(() => appJournalRun_({ actor: '${OWNER}', requestId: 'T' }, 'テスト', __p, appHitOps_({ actor: '${OWNER}' }, appPlanOf_(__p), __r.filter(r => /Q4$/.test(r.quarter)), 'HIT-V1')))`,
     { __p: PA, __r: rows });
-  pv = E4.call('apiYearPreview(__in)', { __in: { fy } });
+  pv = E4.task('yearPreview(__in)', { __in: { fy } });
   assert.equal(pv.canClose, true, pv.reason);
   assert.equal(E4.runJob('YEAR.CLOSE', { fy, inputHash: pv.inputHash }).status, 'DONE');
   // 締めた後に移行の写しを動かす: 締めた年度の計画は飛ばす（書こうとすると止まる）
@@ -478,8 +478,8 @@ const learn = (env, planId) => env.table('LEARNING_LOG').filter((r) => planId ==
   const X = E7.table('PLANS').find((p) => p.plan_id === P7).client_id;
   const t = (o) => { E7.props.OWNER_TASK = JSON.stringify(o); try { return E7.call('apiOwnerTask()'); } finally { delete E7.props.OWNER_TASK; } };
   const links = () => E7.table('PERSON_LINKS');
-  E7.call('apiSaveMember(__in)', { __in: { email: MEMBER, displayName: '鷹野', department: '営業' } });
-  E7.call('apiSaveMember(__in)', { __in: { email: OTHER, displayName: 'ほかの人', department: '営業' } });
+  E7.task('saveMember(__in)', { __in: { email: MEMBER, displayName: '鷹野', department: '営業' } });
+  E7.task('saveMember(__in)', { __in: { email: OTHER, displayName: 'ほかの人', department: '営業' } });
   // 一覧と案: 入力の担当者の名前と、表示名が同じメンバー（つなぐのは所有者）
   let ls = t({ action: 'listPersonLinks' }).result;
   assert.deepEqual(ls.links, []);
