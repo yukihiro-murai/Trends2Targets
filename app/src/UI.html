@@ -1021,7 +1021,10 @@ var SKY8 = [
   { key: 'tenpen', name: '天変地異', rule: '急な変化（1 か月の急変・2 か月続いたずれ・前回の予測から 30% 以上）' },
   { key: 'mikakunin', name: '霧', rule: '推定できない（予算なし・予測なし・実績の取り込みが 3 か月以上遅れ・当たり具合の計算待ち）' }
 ];
-/** 精度の天気（月の外れ幅の平均から。学びが荒れているときは台風）。振り返り・学びの進みに使う */
+/**
+ * 精度の天気（外れ幅から。学びが荒れているときは台風）。振り返り・学びの進みに使う。
+ * 外れ幅 = 締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計（サーバーが出す。2026-10-13 から月ごとの外れの平均ではない）
+ */
 var ACC_WEATHER = [
   { key: 'kaisei', name: '快晴', rule: '外れ幅が 10% 未満' }, { key: 'harenochi', name: '晴れのち曇り', rule: '外れ幅が 10〜15%' },
   { key: 'kumori', name: '曇り', rule: '外れ幅が 15〜20%' }, { key: 'ame', name: '雨', rule: '外れ幅が 20〜30%' },
@@ -1037,6 +1040,24 @@ function skyRule(key){ var s = SKY8.filter(function(x){ return x.key === key; })
 function accRule(key){ var s = ACC_WEATHER.filter(function(x){ return x.key === key; })[0]; return s ? s.rule : ''; }
 /** 精度の天気の決まり。zero: 外れ幅が無く、比べた月がどれも売上 0 円のメーカーがある（zeroSales）。そのときの霧は「比べられる実績がまだない」と言わない */
 function accRuleZ(key, zero){ return key === 'mikakunin' && zero ? '外れ幅を % で出せる月がまだない' : accRule(key); }
+/**
+ * 精度の天気と読みのクセ（強気・弱気）を言い切る、比べた月の数の下限（旧来の B-5 が補正を学ぶ最低の月数 AUTOLEARN_MIN_EVAL_MONTHS と同じ。2026-10-13）。
+ * これより少ないうちは、天気は霧にして「比べた月がまだ N か月」と言い、強気・弱気も言わない（1 か月だけの外れで決めない）
+ */
+var ACC_MIN_MONTHS = 3;
+/** 比べた月が少ないか（1〜2 か月）。n が数でない（月の数を返さないサーバー）・0 か月なら false（今までどおり） */
+function accFew(n){ return isNum(n) && n > 0 && n < ACC_MIN_MONTHS; }
+/** 比べた月が少ないときの言い方 */
+function accFewSay(n){ return '比べた月がまだ ' + n + ' か月'; }
+/** 比べた月が少ないときの霧の決まり（説明の 1 行目） */
+function accFewRule(n){ return accFewSay(n) + '（精度の天気と強気・弱気は ' + ACC_MIN_MONTHS + ' か月から決めます）'; }
+/**
+ * 読みのクセの向き（強気・弱気・釣り合い）。v = 予測の合計 ÷ 実績の合計 − 1（計画ごとは新しい月ほど重く）。±3% 未満は釣り合い。
+ * n = 比べた月の数。少ないうち（accFew）は向きを言わず「まだ」。word: 釣り合いの言い方（'釣り合い' / 'ほぼ釣り合い'）
+ */
+function accLean(v, n, word){ return !isNum(v) ? '-' : accFew(n) ? 'まだ' : Math.abs(v) < 0.03 ? (word || '釣り合い') : v > 0 ? '強気' : '弱気'; }
+/** 読みのクセの決め方（カーソルの説明に添える） */
+var ACC_LEAN_HOW = '読みのクセ = 予測の中心の合計 ÷ 実績の合計 − 1（月ごとの外れの平均ではありません）';
 var SKY_REASON = { no_budget: '予算がまだありません', zero_sales: '予算があるのに、締まった月の売上が 0 です', no_forecast: '使える予測がまだありません',
   stale_actuals: '実績の取り込みが 3 か月以上遅れています', shock: '直近の 1 か月で急な変化がありました', shift: '2 か月続けて予測からずれています', premise: '前回の予測から 30% 以上変わりました',
   eval_pending: '当たり具合の計算待ち' };
@@ -1055,7 +1076,7 @@ function skyWhy(p){ return [skyReasonText(p), skyHow(p)].filter(Boolean).join('\
 function skyChar(key, px){ px = px || 32; return '<span class="skych" style="--sz:' + px + 'px" role="img" aria-label="' + esc(skyName(key)) + '">' + (CHAR_SVG[key] || '') + '</span>'; }   // 大きさは CSS の --sz（スマホの決まりで幅を変えられる）
 /** 表の中の空模様（キャラ 32px + 名前。説明は名前・決まり・理由）。メーカー・予測の「メーカーを選ぶ」で同じ形 */
 function skyCell(p, px){ var k = skyKey(p), why = skyWhy(p); return '<span class="skycell" data-tip="' + esc(skyName(k) + '：' + skyRule(k) + (why ? '\n' + why : '')) + '">' + skyChar(k, px || 32) + '<span class="skyn">' + esc(skyName(k)) + '</span></span>'; }
-/** 精度の天気のキー: 外れ幅（MAPE）が 10% 未満 快晴・15% 未満 晴れのち曇り・20% 未満 曇り・30% 未満 雨・それ以上か荒れている 台風・値なし 霧 */
+/** 精度の天気のキー: 外れ幅（合計の比）が 10% 未満 快晴・15% 未満 晴れのち曇り・20% 未満 曇り・30% 未満 雨・それ以上か荒れている 台風・値なし 霧 */
 function accWeather(mape, turbulent){
   if (turbulent) return 'taifuu';
   if (!isNum(mape)) return 'mikakunin';
@@ -1694,6 +1715,16 @@ function homeKpi(label, v, unit, tipText, main, sub){
 }
 function homeMape(plans){ var xs = plans.map(function(p){ return p.mape; }).filter(isNum); return { v: xs.length ? xs.reduce(function(a, x){ return a + x; }, 0) / xs.length : null, n: xs.length }; }
 /**
+ * 精度の天気に使う外れ幅（homeMape と同じメーカーの平均。ただし比べた月（mapeMonths）が 3 か月より少ないメーカーは入れない。accFew。2026-10-13）。
+ * few = 外れ幅はあるが月が少なくて入れなかったメーカーの数、fewMax = その中でいちばん多い比べた月の数。月の数を返さないサーバーは今までどおり入れる
+ */
+function homeMapeWx(plans){
+  var use = [], few = 0, fewMax = 0;
+  plans.forEach(function(p){ if (!isNum(p.mape)) return; if (accFew(p.mapeMonths)) { few++; fewMax = Math.max(fewMax, p.mapeMonths); } else use.push(p); });
+  var m = homeMape(use);
+  return { v: m.v, n: m.n, few: few, fewMax: fewMax };
+}
+/**
  * どのメーカーにも外れ幅が無いときの説明の一行（外れ幅の箱・精度の天気）。比べた月がどれも売上 0 円なら、そう言い（振り返りと同じ言い方）、
  * 動かし方は、まだ比べていないメーカーがあるときだけ添える。比べた月の数（plans[].scoredMonths）を返さないサーバーでは今までどおり。
  * short: 「まだ実績と比べたメーカーがありません。」を省く（霧の決まりで言っているとき）
@@ -1714,7 +1745,7 @@ function homeKpis(h, plans){
   var landTip = '着地の推定の合計: ' + yenU(t.landing) + '\n締まった月の実績に、残りの月の予測を足して推定しています\n' + homeRangeTip(r, all)
     + (isNum(t.ratio) ? '\n予算の ' + (t.ratio * 100).toFixed(1) + '%（着地と予算の両方がある ' + t.ratioPlans + ' メーカーで比べています' + (isNum(bothB) ? '。その予算の合計 ' + yenU(bothB) : '') + '）' : '');
   var actTip = '暫定実績の合計: ' + yenU(t.actualYtd) + '\n締まった月（月末から 5 日たってから取り込んだ月）の実績を足しています' + (months ? '（最大 ' + months + ' か月）' : '');
-  var mapeTip = '締まった月の、予測の中心と実績の差の割合（向きは問わない）の平均です。メーカーごとの平均を、さらにメーカーで平均しています'
+  var mapeTip = '締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計です。メーカーごとの外れ幅を、さらにメーカーで平均しています'
     + (m.n ? '（' + m.n + ' メーカー）' : '\n' + homeNoMape(plans));
   return '<div class="kpis hm-kpis">'
     + homeKpi('年間予算', yenShort(t.budget), '円', budgetTip, true, isNum(t.budget) ? (t.budgetPlans < all ? t.budgetPlans + ' / ' + all + ' メーカー' : all + ' メーカー') : '')
@@ -1749,19 +1780,25 @@ function homeLearnCard(h, plans){
       + '<button class="btn btn-ghost" onclick="lrLoad(\'ai\')">もう一度読み込む</button></div></div>';
     return '<div class="card">' + head + '<div class="hm-wait" role="status"><span class="hm-yomi">' + YOMI_POSE.observe + '</span><span>観測中…</span><span class="note">学びを読み込んでいます</span></div></div>';
   }
-  var m = homeMape(plans), rough = {}, roughN = {};
+  // 精度の天気は、比べた月が 3 か月以上のメーカーの外れ幅で決める（mw。少ないメーカーしか無ければ霧にして「比べた月がまだ N か月」。accFew）
+  var m = homeMape(plans), mw = homeMapeWx(plans), rough = {}, roughN = {};
   (d.health || []).forEach(function(z){
     if (!HOME_ROUGH[z.key] || String(z.fy) !== String(h.fy)) return;
     rough[z.planId] = 1; (roughN[z.key] = roughN[z.key] || {})[z.planId] = 1;
   });
-  var nRough = Object.keys(rough).length, key = accWeather(m.v, nRough > 0);
+  var nRough = Object.keys(rough).length, key = accWeather(mw.v, nRough > 0);
+  var few = m.v !== null && mw.v === null;   // 外れ幅はあるが、どのメーカーも比べた月が 3 か月より少ない
   // まだ比べた月が無いときは、荒れていても（補正が限度に張りついただけでも）出し方を言う（動かせない人には「計算されると出ます」）
   // 比べた月がどれも売上 0 円なら、「まだ」とも動かし方とも言わず、外れ幅を % で出せないと言う（homeNoMape）
   var zero = m.v === null && zeroSales(plans.filter(function(p){ return !isNum(p.mape); })).zero > 0;
-  var wTip = skyName(key) + '：' + accRuleZ(key, zero) + (m.v === null ? '\n' + homeNoMape(plans, !nRough) : '\n外れ幅の平均 ' + (m.v * 100).toFixed(1) + '%（' + m.n + ' メーカー）')
+  var wTip = skyName(key) + '：' + (few && key === 'mikakunin' ? accFewRule(mw.fewMax) : accRuleZ(key, zero))
+    + (m.v === null ? '\n' + homeNoMape(plans, !nRough)
+      : few ? '\n比べた月が ' + ACC_MIN_MONTHS + ' か月以上のメーカーがまだありません（外れ幅の平均 ' + (m.v * 100).toFixed(1) + '%・' + m.n + ' メーカー）'
+      : '\n外れ幅の平均 ' + (mw.v * 100).toFixed(1) + '%（' + mw.n + ' メーカー' + (mw.few ? '。比べた月が ' + ACC_MIN_MONTHS + ' か月より少ない ' + mw.few + ' メーカーは入れていません' : '') + '）')
     + (nRough ? '\n荒れている印: ' + Object.keys(roughN).map(function(k){ return HOME_ROUGH[k] + ' ' + Object.keys(roughN[k]).length; }).join('・') : '') + '\n精度の推移は、学びの「AI の学び」で見られます';
   // 荒れの印が 1 種類だけなら、その印の名前で言う（補正が限度に張りついただけで「荒れています」とまとめない）
-  var kinds = Object.keys(roughN), sub = nRough ? (kinds.length === 1 ? HOME_ROUGH_SHORT[kinds[0]] : '荒れています') + '（' + nRough + ' メーカー）' : m.v === null ? (zero ? '売上 0 円の月だけ' : '比べる実績はまだです') : '外れ幅 ' + (m.v * 100).toFixed(1) + '%';
+  var kinds = Object.keys(roughN), sub = nRough ? (kinds.length === 1 ? HOME_ROUGH_SHORT[kinds[0]] : '荒れています') + '（' + nRough + ' メーカー）' : m.v === null ? (zero ? '売上 0 円の月だけ' : '比べる実績はまだです')
+    : few ? accFewSay(mw.fewMax) : '外れ幅 ' + (mw.v * 100).toFixed(1) + '%';
   var pend = d.pending || [], nProp = pend.reduce(function(a, p){ return a + (p.proposals || []).length; }, 0);
   var pTip = 'AI が作った見直し案のうち、承認を待っているものです。承認者が承認して反映するまで、予測には効きません' + (pend.length ? '\n' + pend.length + ' メーカーの分' : '');
   return '<div class="card">' + head + '<div class="hm-lr">'
@@ -1773,9 +1810,9 @@ function homeLearnCard(h, plans){
 
 // ---- データからわかること（全体の傾向だけ。名前は出さない） ----
 function homeInsightCard(plans){
-  var out = [], fc = 0, act = 0, rn = 0, ro = 0, both = 0, below = 0, official = 0, pending = 0, offPend = 0;
+  var out = [], fc = 0, act = 0, fcMonths = 0, rn = 0, ro = 0, both = 0, below = 0, official = 0, pending = 0, offPend = 0;
   plans.forEach(function(p){
-    if (isNum(p.forecastYtd) && p.forecastYtd > 0 && isNum(p.actualYtd)) { fc += p.forecastYtd; act += p.actualYtd; }
+    if (isNum(p.forecastYtd) && p.forecastYtd > 0 && isNum(p.actualYtd)) { fc += p.forecastYtd; act += p.actualYtd; fcMonths = Math.max(fcMonths, isNum(p.actualMonths) ? p.actualMonths : 0); }
     rn += isNum(p.rangeN) ? p.rangeN : 0; ro += isNum(p.rangeOut) ? p.rangeOut : 0;
     var b = planBudget(p);
     if (isNum(b) && b > 0 && isNum(p.landing)) { both++; if (p.landing < b) below++; }
@@ -1784,9 +1821,13 @@ function homeInsightCard(plans){
     if (p.officialNo && p.pendingNo) offPend++;
   });
   if (fc && act > 0) {
-    var bias = fc / act - 1;
-    out.push([Math.abs(bias) >= 0.1 ? 'warn' : 'ok', '読みのクセ', Math.abs(bias) < 0.03 ? '予測と実績は、ほぼ釣り合っています' : '予測は実績より ' + Math.abs(bias * 100).toFixed(1) + '% ' + (bias > 0 ? '強気' : '弱気') + 'です',
-      '締まった月の予測（中心）の合計 ' + yenU(fc) + ' と、実績の合計 ' + yenU(act) + ' を比べています。強気は予測が実績より高いこと、弱気は低いことです']);
+    // 読みのクセ = 予測の合計 ÷ 実績の合計 − 1（計画の画面の読みのクセと同じ合計の比。計画の画面は新しい月ほど重く数える）。
+    // 比べた月が 3 か月より少ないうちは、強気・弱気を言わない（accFew。2026-10-13）
+    var bias = fc / act - 1, fewLean = accFew(fcMonths);
+    var leanTip = '締まった月の予測（中心）の合計 ' + yenU(fc) + ' と、実績の合計 ' + yenU(act) + ' を比べています（予測の合計 ÷ 実績の合計 − 1）。強気は予測が実績より高いこと、弱気は低いことです。'
+      + '計画の画面の読みのクセも同じ合計の比です（そちらは新しい月ほど重く数えます）';
+    out.push([!fewLean && Math.abs(bias) >= 0.1 ? 'warn' : 'ok', '読みのクセ', fewLean ? accFewSay(fcMonths) + 'です。強気・弱気は ' + ACC_MIN_MONTHS + ' か月から言います'
+      : Math.abs(bias) < 0.03 ? '予測と実績は、ほぼ釣り合っています' : '予測は実績より ' + Math.abs(bias * 100).toFixed(1) + '% ' + (bias > 0 ? '強気' : '弱気') + 'です', leanTip]);
   }
   if (rn) {
     var hit = 1 - ro / rn, off = covOff(rn - ro, rn);
@@ -2991,17 +3032,23 @@ function fcReviewTab(d, v){
   html += '<p class="fc-link"><a href="#" onclick="go(\'learning\');return false">全体の学びは『学び』で見られます</a></p>';
   return html;
 }
-/** 精度の天気（この計画の月の外れ幅から。キャラ・名前・外れ幅・幅に収まった割合・読みのクセ） */
+/**
+ * 精度の天気（この計画の外れ幅から。キャラ・名前・外れ幅・幅に収まった割合・読みのクセ）。
+ * 比べた月が 3 か月より少ないうちは、天気は霧にして「比べた月がまだ N か月」と言い、読みのクセも強気・弱気を言わない（accFew。2026-10-13）
+ */
 function fcRvWeather(a){
   // 見通しの幅に収まった割合が低すぎる（荒れている）ときは台風（ホーム・学びと同じ決まり）
-  var rough = accRough(a), key = accWeather(a.mape, rough), cov = a.coverage, b = a.bias;
+  var few = accFew(a.n), rough = accRough(a), key = accWeather(few ? null : a.mape, rough), cov = a.coverage, b = a.bias;
   var stat = function(k, val, u, t){ return '<div' + (t ? ' data-tip="' + esc(t) + '"' : '') + '><div class="k">' + esc(k) + '</div><div class="v">' + esc(val) + (u ? '<span class="u">' + esc(u) + '</span>' : '') + '</div></div>'; };
-  var lean = !isNum(b) ? '-' : Math.abs(b) < 0.03 ? '釣り合い' : b > 0 ? '強気' : '弱気';
-  return '<div class="card"><div class="card-head"><h2>精度の天気' + tip('この計画の月の外れ幅（予測の中心と実績の差の平均）から決めた天気です。\n快晴 10% 未満・晴れのち曇り 15% 未満・曇り 20% 未満・雨 30% 未満・台風 30% 以上。\n見通しの幅に収まった割合が 80% より低いとき（荒れている）も台風です') + '</h2></div>'
-    + '<div class="fc-wx"><span class="fc-wxch" role="img" aria-label="' + esc(skyName(key)) + '">' + (CHAR_SVG[key] || '') + '</span><div class="fc-wxnm" data-tip="' + esc(accRule(key) + (rough ? '\n見通しの幅に収まった割合が 80% より低く、荒れています（外れ幅 ' + pct0(a.mape) + '）' : '')) + '">' + esc(skyName(key)) + '</div>'
-    + '<div class="fc-stats">' + stat('外れ幅', pct0(a.mape), '', '月の予測（中心）と実績の差の平均（' + a.n + ' か月）' + (a.trend ? '\n直近 ' + pct0(a.trend.recent) + '（その前 ' + pct0(a.trend.before) + '）' : ''))
+  var lean = accLean(b, a.n);
+  var nameTip = few && key === 'mikakunin' ? accFewRule(a.n) : accRule(key) + (rough ? '\n見通しの幅に収まった割合が 80% より低く、荒れています（外れ幅 ' + pct0(a.mape) + '）' : '');
+  var leanTip = !isNum(b) ? '' : few ? accFewSay(a.n) + 'です。強気・弱気は ' + ACC_MIN_MONTHS + ' か月から言います（今は ' + pct1(b) + '）\n' + ACC_LEAN_HOW
+    : (Math.abs(b) < 0.03 ? '予測と実績はほぼ釣り合っています。' : b > 0 ? '予測が実績より高め（強気）です。' : '予測が実績より低め（弱気）です。') + '\n' + ACC_LEAN_HOW + '。新しい月ほど重く数えています';
+  return '<div class="card"><div class="card-head"><h2>精度の天気' + tip('この計画の外れ幅（予測の中心と実績の差の合計 ÷ 実績の合計）から決めた天気です。\n快晴 10% 未満・晴れのち曇り 15% 未満・曇り 20% 未満・雨 30% 未満・台風 30% 以上。\n見通しの幅に収まった割合が 80% より低いとき（荒れている）も台風です。\n比べた月が ' + ACC_MIN_MONTHS + ' か月より少ないうちは、天気を決めません（霧）') + '</h2></div>'
+    + '<div class="fc-wx"><span class="fc-wxch" role="img" aria-label="' + esc(skyName(key)) + '">' + (CHAR_SVG[key] || '') + '</span><div class="fc-wxnm" data-tip="' + esc(nameTip) + '">' + esc(skyName(key)) + '</div>'
+    + '<div class="fc-stats">' + stat('外れ幅', pct0(a.mape), few ? a.n + ' か月' : '', '月の予測（中心）と実績の差の合計 ÷ 実績の合計（' + a.n + ' か月）' + (few ? '\n' + accFewSay(a.n) + 'なので、天気はまだ決めません' : '') + (a.trend ? '\n直近 ' + pct0(a.trend.recent) + '（その前 ' + pct0(a.trend.before) + '）' : ''))
     + stat('幅に収まった割合', isNum(cov) ? Math.round(cov * 100) + '%' : '-', '目安 80%', '実績が 下振れ〜上振れ の幅に入った月の割合（' + (a.coverageN || 0) + ' か月）。4 か月以上比べて、80% より偶然では説明しにくいほど低いときは、幅が狭すぎます')
-    + stat('読みのクセ', lean, isNum(b) ? pct1(b) : '', isNum(b) ? (b > 0 ? '予測が実績より高め（強気）です。' : '予測が実績より低め（弱気）です。') + '新しい月ほど重く数えています' : '') + '</div></div></div>';
+    + stat('読みのクセ', lean, isNum(b) ? (few ? a.n + ' か月' : pct1(b)) : '', leanTip) + '</div></div></div>';
 }
 /** 精度の推移（月ごとの外れの折れ線。表で見る = 月ごとの 下振れ・中心・上振れ と実績） */
 function fcRvTrend(a){
@@ -3559,21 +3606,21 @@ function anProbCard(plans){
   return anCard('予算を超える確率', '着地が予算を超える確率です（着地の推定とそのぶれから計算）。点線は 50%。着地の推定 ÷ 予算の大きい順',
     anCot('an.prob', chartBars(rows, { min: 0, max: 1, ref: 0.5, fmt: anPct, label: '予算を超える確率' }), tbl) + anOut(out));
 }
-/** 外れ幅（締まった月の、予測の中心と実績の差の割合の平均）。大きい順 */
+/** 外れ幅（締まった月の、予測の中心と実績の差の合計 ÷ 実績の合計）。大きい順。比べた月が 3 か月より少ないメーカーの天気は霧（accFew） */
 function anMapeCard(plans){
   var use = [], out = [];
   plans.forEach(function(p){ if (p.accuracy && isNum(p.accuracy.mape)) use.push(p); else out.push([p.clientName, anWhy(p, 'accuracy')]); });
   if (!use.length) return '';
   use.sort(function(a, b){ return b.accuracy.mape - a.accuracy.mape || anByName(a, b); });
   // 精度の天気は、見通しの幅に収まった割合が低すぎる（荒れている）ときは台風（ホーム・学び・振り返りと同じ決まり）
-  var wKey = function(p){ return accWeather(p.accuracy.mape, accRough(p.accuracy)); };
-  var wTip = function(p){ var k = wKey(p); return skyName(k) + '：' + accRule(k) + (accRough(p.accuracy) ? '（見通しの幅に収まった割合 ' + anPct(p.accuracy.coverage) + '）' : ''); };
+  var wKey = function(p){ return accWeather(accFew(p.accuracy.n) ? null : p.accuracy.mape, accRough(p.accuracy)); };
+  var wTip = function(p){ var k = wKey(p); return skyName(k) + '：' + (k === 'mikakunin' && accFew(p.accuracy.n) ? accFewRule(p.accuracy.n) : accRule(k)) + (accRough(p.accuracy) ? '（見通しの幅に収まった割合 ' + anPct(p.accuracy.coverage) + '）' : ''); };
   var rows = use.map(function(p){ var a = p.accuracy; return { label: p.clientName, value: a.mape, text: anPct1(a.mape), tone: 'main', tip: p.clientName + '\n外れ幅 ' + anPct1(a.mape) + '（精度の天気: ' + skyName(wKey(p)) + '）\n比べた月 ' + (a.n || 0) + ' か月' }; });
-  var tbl = anTable(['', 152, 176, 152], '<th>メーカー</th><th class="num" data-tip="締まった月の、予測の中心と実績の差の割合の平均">外れ幅</th><th data-tip="外れ幅が 10% 未満 快晴・15% 未満 晴れのち曇り・20% 未満 曇り・30% 未満 雨・それ以上か、見通しの幅の外れが多い（荒れている）と台風">精度の天気</th><th class="num" data-tip="実績と比べられた月の数">比べた月</th>',
+  var tbl = anTable(['', 152, 176, 152], '<th>メーカー</th><th class="num" data-tip="締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計">外れ幅</th><th data-tip="外れ幅が 10% 未満 快晴・15% 未満 晴れのち曇り・20% 未満 曇り・30% 未満 雨・それ以上か、見通しの幅の外れが多い（荒れている）と台風。比べた月が 3 か月より少ないうちは霧">精度の天気</th><th class="num" data-tip="実績と比べられた月の数">比べた月</th>',
     use.map(function(p){ var a = p.accuracy, k = wKey(p); return '<tr>' + anNameTd(p) + '<td class="num">' + anPct1(a.mape) + '</td><td data-tip="' + esc(wTip(p)) + '"><span class="anwx">' + skyChar(k, 24) + esc(skyName(k)) + '</span></td><td class="num">' + (a.n || 0) + ' か月</td></tr>'; }).join(''));
   // 横の長さは 30%（台風の目安）までいつも入れる（1 社だけ・小さい値だけでも、大きな外れに見えないように）。とても大きい値は端まで（文字は正しい値）
   var mx = Math.max(0.3, Math.min(1, use[0].accuracy.mape));
-  return anCard('外れ幅', '締まった月の、予測の中心と実績の差の割合の平均です（月の外れ幅）。小さいほどよく当たっています。点線は 30%（台風の目安）。大きい順',
+  return anCard('外れ幅', '締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計です。小さいほどよく当たっています。点線は 30%（台風の目安）。大きい順',
     anCot('an.mape', chartBars(rows, { min: 0, max: mx, ref: 0.3, refLabel: '台風 30%', fmt: anPctFor(mx), label: '外れ幅' }), tbl) + anOut(out));
 }
 /** 読みのクセ（予測の中心が実績よりどちらに外れやすいか。プラス = 強気 = 暖色・マイナス = 弱気 = 寒色） */
@@ -3582,18 +3629,19 @@ function anBiasCard(plans){
   plans.forEach(function(p){ if (p.accuracy && isNum(p.accuracy.bias)) use.push(p); else out.push([p.clientName, anWhy(p, 'accuracy')]); });
   if (!use.length) return '';
   use.sort(function(a, b){ return b.accuracy.bias - a.accuracy.bias || anByName(a, b); });
-  var lean = function(v){ return Math.abs(v) < 0.03 ? 'ほぼ釣り合い' : v > 0 ? '強気' : '弱気'; };
-  var leanTip = function(v){ return Math.abs(v) < 0.03 ? '予測と実績はほぼ釣り合っています' : v > 0 ? '強気: 予測が実績より高め' : '弱気: 予測が実績より低め'; };
-  var rows = use.map(function(p){ var a = p.accuracy; return { label: p.clientName, value: a.bias, tone: Math.abs(a.bias) < 0.03 ? 'neutral' : a.bias > 0 ? 'warm' : 'cool',
-    tip: p.clientName + '\n読みのクセ ' + pct1(a.bias) + '（' + leanTip(a.bias) + '）\n' + (a.n || 0) + ' か月の平均（新しい月ほど重く）' }; });
-  var tbl = anTable(['', 152, 152, 152], '<th>メーカー</th><th class="num" data-tip="プラスは強気（予測が実績より高め）、マイナスは弱気（予測が実績より低め）">読みのクセ</th><th data-tip="強気 = 予測が実績より高め・弱気 = 低め（±3% 未満はほぼ釣り合い）">向き</th><th class="num" data-tip="実績と比べられた月の数">比べた月</th>',
-    use.map(function(p){ var a = p.accuracy; return '<tr>' + anNameTd(p) + '<td class="num">' + pct1(a.bias) + '</td><td>' + lean(a.bias) + '</td><td class="num">' + (a.n || 0) + ' か月</td></tr>'; }).join(''));
+  // 向き（強気・弱気）は、比べた月が 3 か月より少ないうちは言わない（accLean。2026-10-13）
+  var lean = function(a){ return accLean(a.bias, a.n, 'ほぼ釣り合い'); };
+  var leanTip = function(a){ var v = a.bias; return accFew(a.n) ? accFewSay(a.n) + '（強気・弱気は ' + ACC_MIN_MONTHS + ' か月から言います）' : Math.abs(v) < 0.03 ? '予測と実績はほぼ釣り合っています' : v > 0 ? '強気: 予測が実績より高め' : '弱気: 予測が実績より低め'; };
+  var rows = use.map(function(p){ var a = p.accuracy; return { label: p.clientName, value: a.bias, tone: Math.abs(a.bias) < 0.03 || accFew(a.n) ? 'neutral' : a.bias > 0 ? 'warm' : 'cool',
+    tip: p.clientName + '\n読みのクセ ' + pct1(a.bias) + '（' + leanTip(a) + '）\n' + (a.n || 0) + ' か月の予測の合計 ÷ 実績の合計 − 1（新しい月ほど重く）' }; });
+  var tbl = anTable(['', 152, 152, 152], '<th>メーカー</th><th class="num" data-tip="予測の中心の合計 ÷ 実績の合計 − 1（新しい月ほど重く）。プラスは強気（予測が実績より高め）、マイナスは弱気（予測が実績より低め）">読みのクセ</th><th data-tip="強気 = 予測が実績より高め・弱気 = 低め（±3% 未満はほぼ釣り合い。比べた月が 3 か月より少ないうちは「まだ」）">向き</th><th class="num" data-tip="実績と比べられた月の数">比べた月</th>',
+    use.map(function(p){ var a = p.accuracy; return '<tr>' + anNameTd(p) + '<td class="num">' + pct1(a.bias) + '</td><td' + (accFew(a.n) ? ' data-tip="' + esc(leanTip(a)) + '"' : '') + '>' + lean(a) + '</td><td class="num">' + (a.n || 0) + ' か月</td></tr>'; }).join(''));
   // 0 の左右にいつも少し場所を取る（片側だけでも向きが分かる）。値が 0 の両側に 10% 以上あるときは chartBars に任せ、片側だけ・小さいときだけ ±10% まで広げる。
   // 0 の線の左に「← 弱気」・右に「強気 →」（chartBars が上に書く）
   var vs = use.map(function(p){ return p.accuracy.bias; }), v0 = Math.min.apply(null, vs), v1 = Math.max.apply(null, vs);
   var lo = Math.min(-0.1, v0), hi = Math.max(0.1, v1), force = lo !== v0 || hi !== v1, n = chNice(lo, hi, chW() < 480 ? 3 : 6);
   var svg = chartBars(rows, { diverging: true, min: force ? n.lo : undefined, max: force ? n.hi : undefined, fmt: anSigned, sides: ['← 弱気', '強気 →'], label: '読みのクセ' });
-  return anCard('読みのクセ', '予測の中心が実績よりどちらに外れやすいか（新しい月ほど重く平均）。プラスは強気（予測が実績より高め・橙）、マイナスは弱気（予測が実績より低め・紺）。強気の大きい順',
+  return anCard('読みのクセ', '予測の中心が実績よりどちらに外れやすいか（予測の中心の合計 ÷ 実績の合計 − 1。新しい月ほど重く数える）。プラスは強気（予測が実績より高め・橙）、マイナスは弱気（予測が実績より低め・紺）。比べた月が 3 か月より少ないメーカーは向きを言いません。強気の大きい順',
     anCot('an.bias', svg, tbl) + anOut(out));
 }
 /**
@@ -4143,12 +4191,21 @@ function lrRoughShort(health, n){
   (health || []).forEach(function(h){ if (LR_ROUGH[h.key] && String(h.fy) === fy) k[h.key] = 1; });
   return (k.factor_clamp && k.coverage_low ? '補正が限度に張りついたり、幅が狭すぎたりしています' : k.factor_clamp ? '補正が限度に張りついています' : '見通しの幅が狭すぎます') + '（' + n + ' メーカー）。';
 }
-/** 精度の天気に使う外れ幅（ホームと同じ: 今の年度のメーカーごとの外れ幅の平均。ホームの中身が無ければ、全計画の直近 3 か月の平均） */
+/**
+ * 精度の天気に使う外れ幅（ホームと同じ: 今の年度のメーカーごとの外れ幅の平均。比べた月が 3 か月より少ないメーカーは入れない（homeMapeWx）。
+ * ホームの中身に外れ幅が無ければ、全計画の直近 3 か月の外れ幅（のべの月 rolling3N が 3 より少なければ決めない）。
+ * few = 外れ幅はあるが、比べた月が少なくて天気を決めない（fewN = いちばん多い比べた月の数）
+ */
 function lrMape(tl){
-  var fy = lrFy(), xs = B.home && B.home.plans ? B.home.plans.filter(function(p){ return String(p.fy) === fy && isNum(p.mape) && !planMeasure(p); }).map(function(p){ return p.mape; }) : [];
-  if (xs.length) return { v: xs.reduce(function(a, x){ return a + x; }, 0) / xs.length, how: 'FY' + fy + ' のメーカーごとの外れ幅の平均（' + xs.length + ' メーカー。ホームと同じ）' };
+  var fy = lrFy(), ps = B.home && B.home.plans ? B.home.plans.filter(function(p){ return String(p.fy) === fy && isNum(p.mape) && !planMeasure(p); }) : [];
+  if (ps.length) {
+    var w = homeMapeWx(ps);
+    if (isNum(w.v)) return { v: w.v, how: 'FY' + fy + ' のメーカーごとの外れ幅の平均（' + w.n + ' メーカー。ホームと同じ' + (w.few ? '。比べた月が ' + ACC_MIN_MONTHS + ' か月より少ない ' + w.few + ' メーカーは入れていません' : '') + '）' };
+    return { v: null, few: true, fewN: w.fewMax, how: '' };
+  }
   var last = tl[tl.length - 1], v = last ? (isNum(last.rolling3) ? last.rolling3 : last.mape) : null;
-  return { v: isNum(v) ? v : null, how: '全計画の直近 3 か月の外れ幅の平均' };
+  if (isNum(v) && last && accFew(last.rolling3N)) return { v: null, few: true, fewN: last.rolling3N, how: '' };
+  return { v: isNum(v) ? v : null, how: '全計画の直近 3 か月の外れ幅（外れの合計 ÷ 実績の合計）' };
 }
 /** 今の年度のメーカー（ホームの中身）を、比べた月がどれも売上 0 円の計画と、まだ比べていない計画に分ける（zeroSales。ホームの中身が無い・外れ幅のあるメーカーがあれば zero は 0） */
 function lrZero(){
@@ -4160,8 +4217,9 @@ function lrAiHero(d){
   var health = d.health || [], fy = lrFy(), rough = Object.keys(lrRough(health)).length, m = lrMape(d.timeline || []), wk = accWeather(m.v, rough > 0);
   var nProp = (d.pending || []).reduce(function(a, p){ return a + (p.proposals || []).length; }, 0);
   // 外れ幅が無いとき: 今の年度のメーカーの比べた月がどれも売上 0 円なら、「まだ」・動かし方の代わりにそう言う（ホームと同じ。lrZero）
-  var z = isNum(m.v) ? { zero: 0 } : lrZero();
-  var notYet = z.zero ? zeroSay(z, '、外れ幅がここに出ます。') : 'まだ実績と比べた月がありません。' + runWhen() + '、外れ幅がここに出ます。';
+  var z = isNum(m.v) || m.few ? { zero: 0 } : lrZero();
+  var notYet = m.few ? accFewSay(m.fewN) + 'です。精度の天気は ' + ACC_MIN_MONTHS + ' か月から決めます。'
+    : z.zero ? zeroSay(z, '、外れ幅がここに出ます。') : 'まだ実績と比べた月がありません。' + runWhen() + '、外れ幅がここに出ます。';
   // 荒れの文は、出ている印だけで作る（補正が限度に張りついただけなら、幅の外れは言わない）。比べた月がまだ無ければ、印の短い言い方と出し方だけにして
   // （「当たり方が荒れています」と「まだ比べた月がありません」を並べない）、荒れの説明はカーソルで出す
   var brief = rough && !isNum(m.v), sayTip = brief ? lrRoughSay(health) : '';
@@ -4189,11 +4247,11 @@ function lrAiHero(d){
     var ft = w[1] + (LR_ROUGH[k.key] ? '（荒れの印）' : '（荒れの印には数えません）') + '\n' + k.items.map(function(h){ var v = flagVal(h); return h.clientName + (v ? '　' + v : ''); }).join('\n');
     return '<span class="chip" tabindex="0" data-tip="' + esc(ft) + '">' + esc(w[0]) + ' ' + k.items.length + '</span>';
   }).join('') + '</div>' : '';
-  var wxTip = '精度の天気「' + skyName(wk) + '」: ' + accRuleZ(wk, z.zero > 0) + (isNum(m.v) ? '\n外れ幅 ' + pct0(m.v) + ' = ' + m.how : z.zero ? '\n' + zeroSay(z) : '')
+  var wxTip = '精度の天気「' + skyName(wk) + '」: ' + (m.few && wk === 'mikakunin' ? accFewRule(m.fewN) : accRuleZ(wk, z.zero > 0)) + (isNum(m.v) ? '\n外れ幅 ' + pct0(m.v) + ' = ' + m.how : z.zero ? '\n' + zeroSay(z) : '')
     + '\n荒れている = 今の年度に、補正が限度に張りついた計画か、見通しの幅に収まる割合が 80% より低い計画がある（ホームと同じ決まり）';
-  return '<div class="card"><div class="hero lr-hero"><div class="charbox">' + YOMI_POSE[rough ? 'discover' : isNum(m.v) || z.zero ? 'explain' : 'guide'] + '</div>'
+  return '<div class="card"><div class="hero lr-hero"><div class="charbox">' + YOMI_POSE[rough ? 'discover' : isNum(m.v) || z.zero || m.few ? 'explain' : 'guide'] + '</div>'
     + '<div class="bubble">' + (sayTip ? '<span data-tip="' + esc(sayTip) + '">' + esc(t) + '</span>' : esc(t)) + flags + '</div>'
-    + '<div class="lr-wx" tabindex="0" data-tip="' + esc(wxTip) + '">' + skyChar(wk, 72) + '<span class="nm">' + esc(skyName(wk)) + '</span><span class="v">' + (isNum(m.v) ? '外れ幅 ' + pct0(m.v) : z.zero ? '売上 0 円の月だけ' : '比べる実績なし') + '</span></div></div></div>';
+    + '<div class="lr-wx" tabindex="0" data-tip="' + esc(wxTip) + '">' + skyChar(wk, 72) + '<span class="nm">' + esc(skyName(wk)) + '</span><span class="v">' + (isNum(m.v) ? '外れ幅 ' + pct0(m.v) : m.few ? accFewSay(m.fewN) : z.zero ? '売上 0 円の月だけ' : '比べる実績なし') + '</span></div></div></div>';
 }
 /** 承認待ちの見直し案（承認は、開いた計画の振り返りで） */
 function lrPendingCard(pend){
@@ -4274,11 +4332,11 @@ function lrTimeCard(tl){
     { x: x, yFmt: chPct, yMin: 0, h: 240, label: '月の外れ幅' });
   var c2 = chartLine([{ label: '幅に収まった割合', values: tl.map(function(t){ return t.coverage; }) }],
     { x: x, band: tl.map(function(t){ return t.coverageCi80 ? { lo: t.coverageCi80[0], hi: t.coverageCi80[1] } : null; }), bandLabel: '確かさの幅', target: 0.8, targetLabel: '目標 80%', yMin: 0, yMax: 1, yFmt: chPct, h: 240, label: '見通しの幅に収まった割合' });
-  var table = lrTable([['月', '', 96], ['計画の数', 'num', 96], ['外れ幅', 'num', 96, '|予測の中心 − 実績| ÷ 実績 の平均'], ['3 か月の平均', 'num', 120], ['幅に収まった', 'num', 120, '実績が見通しの幅（下振れ〜上振れ）に収まった割合。目標 80%。かっこの中は比べた計画の数'], ['確かさの幅', 'num', 128, '収まった割合の 80% の確かさの幅（計画が少ない月は広い）']],
+  var table = lrTable([['月', '', 96], ['計画の数', 'num', 96], ['外れ幅', 'num', 96, '|予測の中心 − 実績| の合計 ÷ 実績の合計（その月の全計画）'], ['3 か月の平均', 'num', 120, 'その月までの 3 か月をまとめた外れ幅（外れの合計 ÷ 実績の合計）'], ['幅に収まった', 'num', 120, '実績が見通しの幅（下振れ〜上振れ）に収まった割合。目標 80%。かっこの中は比べた計画の数'], ['確かさの幅', 'num', 128, '収まった割合の 80% の確かさの幅（計画が少ない月は広い）']],
     tl.map(function(t){ return [esc(t.ym), t.n, pct0(t.mape), pct0(t.rolling3), isNum(t.coverage) ? lrPct(t.coverage) + (t.coverageN ? '（' + t.coverageN + '）' : '') : '-', t.coverageCi80 ? lrPct(t.coverageCi80[0]) + '〜' + lrPct(t.coverageCi80[1]) : '-']; }));
   return lrCard('外れ幅と幅の当たり', '全計画の月ごとの外れ幅（下がるほど良い）と、実績が見通しの幅（下振れ〜上振れ）に収まった割合です。収まった割合は 80% が目標で、低いと幅が狭すぎ、高いと広すぎます',
     chartOrTable('lrTime', '<h3 class="lr-h3">月の外れ幅</h3>' + c1 + '<h3 class="lr-h3">見通しの幅に収まった割合</h3>' + c2, table),
-    lrMore('外れ幅 = |予測の中心 − 実績| ÷ 実績 の平均（MAPE）。確かさの幅 = 収まった割合の Wilson の 80% 区間。締まった後に予測し直した月は除きます'));
+    lrMore('外れ幅 = Σ|予測の中心 − 実績| ÷ Σ|実績|（WAPE。月ごとの外れの平均ではないので、実績が 0 に近い月 1 つで飛ばない。金額の大きいメーカーほど重く数える）。確かさの幅 = 収まった割合の Wilson の 80% 区間。締まった後に予測し直した月は除きます'));
 }
 /** 補正の履歴（選んだ計画の、予測に掛ける倍率の移り変わり。月次の自動学習・承認した見直し案・所有者が承認した値で変わる） */
 function lrCalCard(cal, health){
