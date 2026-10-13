@@ -212,7 +212,7 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
     assert.ok(html, tab + ' の区切りがある');
     assert.doesNotMatch(html, /<input|<select/, tab + ' の区切りに入力欄を出さない');
   }
-  assert.match(vm.runInContext(`fcSection(viewForecast(), 'forecast')`, ui), /予測の実行は予算策定担当ができます/, '予測の実行は操作を出さず注記だけ');
+  assert.doesNotMatch(vm.runInContext(`fcSection(viewForecast(), 'forecast')`, ui), /fcForecastRun\(\)/, '閲覧の人には予測を実行を出さない（注記も出さない。2026-10-13）');
   assert.match(vm.runInContext(`fcSection(viewForecast(), 'input')`, ui), /入力は予算策定担当ができます/);
   assert.match(vm.runInContext(`fcSection(viewForecast(), 'review')`, ui), /承認は承認者ができます/);
   assert.match(vm.runInContext(`fcSection(viewForecast(), 'version')`, ui), /承認者が承認します/, '承認待ちを見せるが操作は出さない');

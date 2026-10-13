@@ -70,7 +70,8 @@ const totalRow = (h) => {
   return [...row.matchAll(/<td class="num"( data-tip="([^"]*)")?>([^<]*)<\/td>/g)].slice(0, 3).map((m) => [m[3], m[2] === undefined ? null : unesc(m[2])]);
 };
 const headTip = (h) => unesc(/<h2>月ごとの見通しと予算<span class="tip" tabindex="0" role="img" aria-label="[^"]*" data-tip="([^"]*)">/.exec(h)[1]);
-const runTip = (h) => unesc(/<div class="card fc-run"><div class="card-head"><h2>予測の実行<\/h2><span class="meta" data-tip="([^"]*)">/.exec(h)[1]);
+// 予測の実行の注記（最新の日時・人・これまでの実行）は出さない（2026-10-13 村井さん）
+const noRunMeta = (h) => assert.ok(!/fc-run|予測の記録なし|最新 \d{4}\//.test(h), '予測の実行の注記を出さない');
 const LEG_LINE = '旧来の計算の年度合計 下振れ 100,000,000 円・中心 110,000,000 円・上振れ 120,000,000 円（年度の売上を何度も試して出した値。記録に残しています）';
 const MID = '上下に半々で外れる見込みの真ん中';
 
@@ -81,7 +82,7 @@ const MID = '上下に半々で外れる見込みの真ん中';
   assert.deepEqual(totalRow(h), [['100,000,000', null], ['110,000,000', null], ['120,000,000', null]]);
   assert.match(headTip(h), /。年度合計（下振れ・中心・上振れ）は月の合計ではなく、年度で計算した値です$/);
   assert.equal(kpiTip(h, '中心')[0], MID + '（年度合計）');
-  assert.match(runTip(h), /^過去の売上だけの予測（年度合計）: [\s\S]*\nこれまでの実行: /);
+  noRunMeta(h);
   assert.doesNotMatch(tipsOf(h).join('\n'), /旧来の計算/);
 }
 {
@@ -99,9 +100,7 @@ const MID = '上下に半々で外れる見込みの真ん中';
   assert.deepEqual(kpiTip(h, '中心'), [MID + '（年度合計）', yu(lv.p50), '月ごとの中心を足した値です（補正を入れた値）',
     '80% の幅は、着地見込みと同じ式（締まった月なし・年の水準のぶれ 15%・幅の倍率 1 倍）でつけています', LEG_LINE], '締まった月が無ければ、月の合計が幅の真ん中');
   assert.deepEqual(kpiTip(h, '下振れ').slice(-1), ['80% の幅は、着地見込みと同じ式（締まった月なし・年の水準のぶれ 15%・幅の倍率 1 倍）でつけています']);
-  const rt = runTip(h);
-  assert.match(rt, /^過去の売上だけの予測（旧来の計算の年度合計）: /, '実行の記録の値は旧来の計算と言う');
-  assert.match(rt, /\nこれまでの実行（旧来の計算の中心）: 10\/08 10:00 中心 1\.1億、10\/01 10:00 中心 1\.1億$/);
+  noRunMeta(h);
   noCodes(h, '本番・締まった月なし');
 }
 {
@@ -163,7 +162,7 @@ const verTab = ({ shown, pending, official, versions }) => {
   assert.doesNotMatch(h, /undefined|NaN/);
   return h;
 };
-const verRows = (h) => Object.fromEntries([...h.matchAll(/<tr><td>v(\d+)<\/td><td>[\s\S]*?<\/td><td class="num">[\s\S]*?<\/td><td class="num"( data-tip="([^"]*)")?>([^<]*)<\/td>/g)].map((m) => [m[1], [m[4], m[3] === undefined ? null : unesc(m[3])]]));
+const verRows = (h) => Object.fromEntries([...h.matchAll(/<tr><td>v(\d+)<\/td><td>[\s\S]*?<\/td><td class="num"(?: data-tip="[^"]*")?>[\s\S]*?<\/td><td class="num"( data-tip="([^"]*)")?>([^<]*)<\/td>/g)].map((m) => [m[1], [m[4], m[3] === undefined ? null : unesc(m[3])]]));
 // 差の欄の説明（diffTip）は、今と版の中心の計算のしかたが違うときだけ（2026-10-09。app-v11-fix2.test.mjs）
 const cmpRow = (h) => { const m = /<tr><td( data-tip="([^"]*)")?>中心（年度）<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td><td class="num"( data-tip="([^"]*)")?>([^<]*)<\/td><\/tr>/.exec(h);
   return { tip: m[2] === undefined ? null : unesc(m[2]), now: m[3], off: m[4], diff: m[7], diffTip: m[6] === undefined ? null : unesc(m[6]) }; };

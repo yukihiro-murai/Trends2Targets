@@ -349,7 +349,7 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   assert.match(head, /<option value="[^"]*" selected>テスト薬品<\/option>/, '選ぶ欄はメーカーの名前だけ（測る専用の印は題の横。2026-10-13 村井さん）');
   const tabM = clean(run('fcForecastTab(__d, __v)', { __d: m.d, __v: m.v }), '予測と予算（測る専用）');
   assert.doesNotMatch(tabM, /fcBudget\(|fcSaveBudget\(\)|この予算に/, '予算の欄・保存・届く見込みを出さない');
-  assert.match(tabM, /fcForecastRun\(\)/, '予測の実行は出す（物差しの点を作る）');
+  assert.match(run('fcRunBtn()'), /fcForecastRun\(\)/, '予測を実行は出す（物差しの点を作る。「予測と予算」の見出しの右）');
   const stepsM = clean(run('fcStepsTab(__d, __v)', { __d: m.d, __v: m.v }), '進み（測る専用）');
   assert.match(stepsM, /<span class="act" data-tip="市場・競合の動きを AI で調べる\n測る専用の計画なので、市場は調べません（費用のため）。"><button class="btn btn-ghost" disabled aria-disabled="true">市場を調べる<\/button><\/span>/);
   assert.doesNotMatch(stepsM, /fcRun\('AI\.RESEARCH'\)/);

@@ -146,7 +146,7 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
     assert.doesNotMatch(m, /月ごとの見通しと予算|月ごとの見通しと最終予算/);
     assert.doesNotMatch(visible(m), /最終予算|採用予測|上乗せ/, '見える文字に予算の言葉を出さない（' + (table ? '表' : 'グラフ') + '）');
     assert.doesNotMatch(m, /fcBudget\(|fcSaveBudget\(\)/);
-    assert.match(m, /fcForecastRun\(\)/, '予測の実行は出す');
+    assert.match(run('fcRunBtn()'), /fcForecastRun\(\)/, '予測を実行は出す（「予測と予算」の見出しの右。2026-10-13）');
     if (table) {
       assert.match(m, /<colgroup><col style="width:96px"><col><col><col><\/colgroup>/, '月と下振れ・中心・上振れの列だけ');
       assert.match(m, /<tr class="total"><td>年度合計<\/td><td class="num">[^<]*<\/td><td class="num">[^<]*<\/td><td class="num">[^<]*<\/td><\/tr>/);

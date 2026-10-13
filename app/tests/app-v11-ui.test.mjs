@@ -199,7 +199,7 @@ reachOn();
   if (dd) {
     assert.deepEqual([dd.basis, dd.prob, dd.alloc], ['PROB', 80, 'PAST_SHAPE'], 'サーバーの下書き');
     reachOn();
-    assert.match(card(), /<div class="fc-bud"><span class="note" tabindex="0" data-tip="[^"]*">予算の下書き: 80% で決めた額（\d\d\/\d\d）<\/span><\/div>/);
+    assert.doesNotMatch(card(), /予算の下書き/, '予算の下書きの 1 行は出さない（2026-10-13）');
   }
   reachOn();
   assert.equal(chosen(card()), '', '選ぶ欄も戻る');
@@ -324,14 +324,13 @@ reachOn();
   run('S.fc.view.boot.budgetDraft = __d', { __d: draft });
   const viewer = with_('v.can.plan = false;');
   assert.equal(selectOf(viewer), null, '見るだけの人には出さない');
-  assert.match(viewer, /予算の下書き: 80% で決めた額（10\/09）/, '下書きの 1 行は見る人にも');
-  assert.match(viewer, /data-tip="[^"]*合わせるかどうかは、予算策定担当が決めます">下書きを作った後に予測が 20% 動きました/);
+  assert.doesNotMatch(viewer, /予算の下書き|動きました/, '下書きの 1 行は出さない（2026-10-13 村井さん「細かいテキストは不要」）');
   const measure = with_('v.plan.measure = true;');
   assert.equal(selectOf(measure), null, '測る専用の計画には出さない');
   assert.equal(draftLine(measure), null, '測る専用の計画には下書きの 1 行も出さない');
   const closed = with_('v.plan.frozen = true;');
   assert.equal(selectOf(closed), null, '締め済みの年度には出さない');
-  assert.match(closed, /予算の下書き: 80% で決めた額（10\/09）/);
+  assert.doesNotMatch(closed, /予算の下書き/);
   assert.doesNotMatch(closed, /動きました/, '締め済みの年度は、予測が動いた知らせを出さない');
   const closedD = with_('', `S.fc.data.plan.frozen = true;`);
   run('S.fc.data.plan.frozen = false');
@@ -339,56 +338,16 @@ reachOn();
   const chart = with_('', `S.cv.fcMonthly = 'chart';`);
   run(`S.cv.fcMonthly = 'table'`);
   assert.equal(selectOf(chart), null, 'グラフで見ていて入力も無いときは、下の欄ごと出さない（今までどおり）');
-  assert.match(chart, /予算の下書き: 80% で決めた額/, '下書きの 1 行はグラフでも');
+  assert.doesNotMatch(chart, /予算の下書き/, 'グラフでも出さない');
   run('delete S.fc.view.boot.budgetDraft');
 }
 
-// ==== U2. 予算の下書きの 1 行と、予測が動いた知らせ ====
+// ==== U2. 予算の下書きの 1 行は出さない（2026-10-13 村井さん「細かいテキストは不要」）====
 {
-  const line = (draft) => { run('S.fc.view.boot.budgetDraft = __d', { __d: draft }); const h = card(); run('delete S.fc.view.boot.budgetDraft'); return draftLine(h); };
-  const at = '2026-10-09T10:00:00+09:00';
-  const parts = (m) => [...m[1].matchAll(/<span class="([^"]*)" tabindex="0" data-tip="([^"]*)">([^<]*)<\/span>/g)].map((x) => ({ cls: x[1], tip: x[2], text: x[3] }));
-  // サーバーの形（確率で決めた下書き。予測はほとんど動いていない）
-  const srv = { basis: 'PROB', prob: 80, alloc: 'PAST_SHAPE', runId: 'FR-1', runAt: '2026-10-08T09:30:00+09:00', savedAt: at, centerAtDraft: 1000000, centerNow: 1010000,
-    drift: 0.01, driftLimit: 0.1, warn: false, adopted: 915800, uplift: 50000, months: 12 };
-  let p = parts(line(srv));
-  assert.deepEqual(p.map((x) => x.text), ['予算の下書き: 80% で決めた額（10/09）'], '1 行だけ');
-  assert.equal(p[0].cls, 'note');
-  assert.deepEqual(p[0].tip.split('\n'), ['予算の下書き（2026/10/09 10:00 に保存）', '採用予測は、届く見込み 80% の額です（月への割り振りは過去の平均の形）',
-    '採用予測 915,800 円・上乗せ 50,000 円（年度）', '予測し直しても、この下書きのまま変わりません（採用予測 = 約束、上乗せ = 挑戦）',
-    '下書きを作ったときの予測（2026/10/08 09:30）の月ごとの中心の合計 1,000,000 円・今の月ごとの中心の合計 1,010,000 円'],
-    '本番でない計画の上の中心は旧来の計算の年度合計なので、下書きの値は月ごとの中心の合計と言う（2026-10-09）');
-  // 手で直した・前に入れた・中心のまま
-  assert.equal(parts(line({ basis: 'MANUAL', alloc: 'MANUAL', savedAt: at, drift: 0 }))[0].text, '予算の下書き: 手で直した額（10/09）');
-  assert.equal(parts(line({ basis: 'BASELINE', alloc: 'MANUAL', savedAt: at }))[0].text, '予算の下書き: 前に入れた額（10/09）');
-  assert.equal(parts(line({ basis: 'CENTER', alloc: 'FORECAST_SHAPE', savedAt: at }))[0].text, '予算の下書き: 予測の中心のまま（10/09）');
-  // 予測が動いた（サーバーが知らせると決めた）: 知らせを足す
-  p = parts(line(Object.assign({}, srv, { prob: 70, centerNow: 1124000, drift: 0.124, warn: true })));
-  assert.deepEqual(p.map((x) => x.text), ['予算の下書き: 70% で決めた額（10/09）', '下書きを作った後に予測が 12% 動きました']);
-  assert.equal(p[1].cls, 'note warn-text');
-  assert.deepEqual(p[1].tip.split('\n'), ['下書きを作ったときから、予測の月ごとの中心の合計が +12.4% 動きました', '1,000,000 円 → 1,124,000 円', '予算の下書きは、予測し直しても変わりません', '今の予測に合わせるときは、確率で選び直して保存します']);
-  p = parts(line({ basis: 'MANUAL', alloc: 'MANUAL', savedAt: at, centerAtDraft: 1000000, centerNow: 880000, drift: -0.12, warn: true }));
-  assert.equal(p[1].text, '下書きを作った後に予測が 12% 動きました', '下がったときも');
-  assert.match(p[1].tip, /予測の月ごとの中心の合計が -12\.0% 動きました[\s\S]*採用予測を見直して保存します$/);
-  // 知らせるかはサーバー（warn）が決める。warn の無いサーバーでは driftLimit（無ければ 10%）以上
-  assert.equal(parts(line(Object.assign({}, srv, { drift: 0.3, warn: false }))).length, 1, 'サーバーが知らせないと決めた');
-  assert.equal(parts(line(Object.assign({}, srv, { drift: 0.02, warn: true })))[1].text, '下書きを作った後に予測が 2% 動きました', 'サーバーが知らせると決めた');
-  assert.equal(parts(line({ basis: 'PROB', prob: 80, savedAt: at, drift: 0.1 })).length, 2, '10% ちょうどから知らせる');
-  assert.equal(parts(line({ basis: 'PROB', prob: 80, savedAt: at, drift: 0.099 })).length, 1);
-  assert.equal(parts(line({ basis: 'PROB', prob: 80, savedAt: at, drift: 0.06, driftLimit: 0.05 })).length, 2, 'サーバーの目安');
-  assert.equal(parts(line({ basis: 'PROB', prob: 80, savedAt: at, drift: 0.04, driftLimit: 0.05 })).length, 1);
-  assert.equal(parts(line({ basis: 'PROB', prob: 80, savedAt: at, drift: null, warn: true })).length, 1, '動きが無ければ知らせない');
-  // 下書きが無い・形が違う: 何も出さない
-  assert.equal(line(null), null);
-  assert.equal(line({}), null);
-  assert.equal(line('x'), null);
-  // 保存した日が無い下書き: 日付を付けない
-  assert.equal(parts(line({ basis: 'PROB', prob: 60 }))[0].text, '予算の下書き: 60% で決めた額');
-  // 見える言葉・説明に中の印を出さない
-  const all = line(Object.assign({}, srv, { drift: 0.124, warn: true }))[0];
-  assert.doesNotMatch(visible(all), CODES);
-  tipsOf(all).forEach((t) => assert.doesNotMatch(t, /PROB|PAST_SHAPE|FR-1|drift/));
-  assert.ok(css.includes('.fc-bud{display:flex;flex-wrap:wrap;'), '狭い画面では折り返す');
+  run('S.fc.view.boot.budgetDraft = __d', { __d: { basis: 'PROB', prob: 80, alloc: 'PAST_SHAPE', savedAt: '2026-10-09T10:00:00+09:00', centerAtDraft: 1000000, centerNow: 1200000, drift: 0.2, driftLimit: 0.1, warn: true } });
+  assert.equal(draftLine(card()), null);
+  assert.doesNotMatch(card(), /予算の下書き|動きました/);
+  run('delete S.fc.view.boot.budgetDraft');
 }
 
 // ==== U3. 公式版: 出したときの届く見込み ====
@@ -408,46 +367,21 @@ reachOn();
   // 版の一覧: 列は増やさない（1280px の枠に入る並びのまま）。届く見込みは最終予算の下の段。
   // 状態の列は札（.chip.st 112px）+ 左右の余白 24px = 136px（120px では札の右が切れていた。2026-10-13）
   assert.match(h, /<table class="tbl fc-vers"><colgroup><col style="width:56px"><col style="width:136px"><col style="width:128px"><col style="width:128px"><col style="width:112px"><col style="width:112px"><col><col style="width:152px"><\/colgroup>/);
-  assert.match(h, /<th class="num" data-tip="最終予算の年度合計。下の段は、出したときにこの最終予算に届く見込み（前の版には無い）">最終予算<\/th>/);
-  const rows = [...h.matchAll(/<tr><td>v(\d+)<\/td><td>[\s\S]*?<\/td><td class="num">([\s\S]*?)<\/td>/g)].map((x) => [x[1], x[2]]);
+  // 届く見込みは見える所に出さず、最終予算のセルのカーソルの説明に（2026-10-13 村井さん「細かいテキストは不要」）
+  const rows = [...h.matchAll(/<tr><td>v(\d+)<\/td><td>[\s\S]*?<\/td><td class="num"(?: data-tip="([^"]*)")?>([\s\S]*?)<\/td>/g)].map((x) => [x[1], { tip: x[2] || '', v: x[3] }]);
   assert.deepEqual(rows.map((x) => x[0]), ['5', '4', '3', '2', '1']);
   const cell = Object.fromEntries(rows);
-  const note = (c) => /<span class="note" tabindex="0" data-tip="([^"]*)">([\s\S]*?)<\/span>$/.exec(c);
-  const n5 = note(cell[5]);
-  assert.ok(cell[5].startsWith('1,200,000<span class="note"'), '金額の下の段');
-  assert.equal(n5[2], '約 70% <span class="chip fc-act">試し</span>', '試し（SHADOW）は札');
-  assert.deepEqual(n5[1].split('\n'), ['出したときの届く見込み（試し）', '最終予算 1,200,000 円 に 約 70%', '採用予測 1,000,000 円 に 約 85%',
-    '前提: 着地の推定 1,050,000 円・幅（標準偏差）120,000 円・年の水準のぶれ 15%・幅の倍率 1 倍・締まった月 3 か月', '本番の計算に切り替える前の試しの値です', '出したときの値のまま、後から変えません']);
-  const n4 = note(cell[4]);
-  assert.equal(n4[2], '約 50%', '本番（LIVE）は札なし');
-  assert.deepEqual(n4[1].split('\n'), ['出したときの届く見込み', '最終予算 1,200,000 円 に 約 50%', '採用予測 1,000,000 円 に 約 70%',
-    '前提: 着地の推定 1,210,000 円・幅（標準偏差）90,000 円・年の水準のぶれ 12.3%・幅の倍率 1.25 倍・締まった月なし', '出したときの値のまま、後から変えません']);
-  const n3 = note(cell[3]);
-  assert.deepEqual([n3[2], n3[1]], ['-', '出したときは着地見込みがまだ無かったので、届く見込みはありません'], '出したときに着地見込みが無かった版は「-」（札なし）');
-  assert.equal(cell[2], '1,200,000', '前の版は空（金額だけ）');
-  assert.equal(cell[1], '1,200,000');
-  assert.ok(css.includes('.tbl.fc-vers td.num > .note{display:block}'), '下の段');
-  // 128px の列（左右の余白 24px を除いて 104px）に入る: 一番長い「5% 未満 試し」（14px の字: 全角 14・半角 8・空白 4。札は字 + 左右 6px）
-  assert.ok(2 * 8 + 4 + 2 * 14 + 4 + (2 * 14 + 12) <= 128 - 24);
-  // 承認待ちのカード（承認する人が判断する所）: 最終予算と採用予測の両方
+  ['5', '4', '3', '2', '1'].forEach((k) => assert.equal(cell[k].v, '1,200,000', '金額だけ（下の段の注記は出さない）'));
+  assert.deepEqual(cell[5].tip.split('\n').slice(0, 3), ['出したときの届く見込み（試し）', '最終予算 1,200,000 円 に 約 70%', '採用予測 1,000,000 円 に 約 85%']);
+  assert.deepEqual(cell[4].tip.split('\n').slice(0, 2), ['出したときの届く見込み', '最終予算 1,200,000 円 に 約 50%'], '本番（LIVE）は試しと言わない');
+  assert.equal(cell[3].tip, '出したときは着地見込みがまだ無かったので、届く見込みはありません');
+  assert.equal(cell[2].tip, '', '前の版は説明なし');
+  assert.doesNotMatch(visible(h), /届く見込み|試し|未満|超/, '見える所に届く見込みを出さない');
+  // 承認待ちのカード: 届く見込みの行は出さない（承認する人は、版の一覧の最終予算のカーソルで見られる）
   const pend = /<div class="card caution"><div class="card-head"><h2>承認待ち（v5）<\/h2>[\s\S]*?<\/div><\/div>/.exec(h)[0];
-  const pl = /<p class="mt4" tabindex="0" data-tip="([^"]*)">([^<]*)<\/p>/.exec(pend);
-  assert.equal(pl[2], '届く見込み: 最終予算に 約 70%・採用予測に 約 85%（試し）');
-  assert.equal(pl[1], n5[1], '前提はカーソルで（一覧と同じ）');
+  assert.doesNotMatch(pend, /届く見込み/);
   assert.match(pend, /承認する<\/button>/, '承認する人が見る所');
-  // 本番の承認待ち: 試しと書かない。着地見込みの無かった承認待ち: 「-」。届く見込みの無い承認待ち（前のサーバー）: 何も出さない
-  assert.match(tab(Object.assign({}, r, { pending: ver(5, 'SUBMITTED', LV) })), />届く見込み: 最終予算に 約 50%・採用予測に 約 70%<\/p>/);
-  assert.match(tab(Object.assign({}, r, { pending: ver(5, 'SUBMITTED', NO) })), /<p class="mt4" tabindex="0" data-tip="出したときは着地見込みがまだ無かったので、届く見込みはありません">届く見込み: -<\/p>/);
-  const none = tab(Object.assign({}, r, { pending: ver(5, 'SUBMITTED', undefined), versions: versions.map((x) => Object.assign({}, x, { reach: undefined })) }));
-  assert.doesNotMatch(none, /届く見込み:|class="note" tabindex|試し/, '届く見込みの無い版だけなら何も足さない');
-  // 片方だけの値・丸め（5% 刻み。5% 未満・95% 超）
-  const one = { final: 0.02, adopted: 0.99, mode: 'LIVE' };
-  const edge = tab(Object.assign({}, r, { pending: ver(5, 'SUBMITTED', one), versions: [ver(5, 'SUBMITTED', one), ver(4, 'APPROVED', { adopted: 0.5, mode: 'SHADOW' })] }));
-  assert.match(edge, />届く見込み: 最終予算に 5% 未満・採用予測に 95% 超<\/p>/);
-  assert.match(edge, /data-tip="出したときの届く見込み（試し）\n最終予算 1,200,000 円 に -\n採用予測 1,000,000 円 に 約 50%\n前提: 着地の推定 -・幅（標準偏差）-・年の水準のぶれ -・幅の倍率 -・締まった月なし\n/, '値の無い前提は「-」');
-  // 承認する人でない人（見るだけ）にも、一覧と承認待ちの見込みは出る
   const viewer = tab(Object.assign({}, r, { can: { submit: false, approve: false } }));
-  assert.match(viewer, />届く見込み: 最終予算に 約 70%・採用予測に 約 85%（試し）<\/p>/);
   assert.doesNotMatch(viewer, /承認する<\/button>/);
   // 見える言葉・説明に中の印を出さない
   assert.doesNotMatch(visible(h), CODES);
@@ -457,8 +391,7 @@ reachOn();
   const rl = env.call('apiVersionList(__in)', { __in: { planId: X } });
   const real = tab(rl);
   assert.match(real, /承認待ち（v1）/);
-  if (rl.pending.reach) assert.match(real, /<p class="mt4" tabindex="0" data-tip="[^"]*">届く見込み: [^<]+<\/p>/);
-  else assert.doesNotMatch(real, /届く見込み:|<span class="note" tabindex/);
+  assert.doesNotMatch(visible(real), /届く見込み:/);
 }
 
 console.log('app-v11-ui: ok');

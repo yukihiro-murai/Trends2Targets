@@ -849,7 +849,18 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
     return run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; fcForecastTab(__d, __v)`, { __d: d, __v: v });
   };
   const midTip = (h) => (/<div class="kpi main" data-tip="([^"]*)"><div class="k">中心<\/div>/.exec(h) || [])[1].split('\n');
-  const meta = (h) => { const m = /<span class="meta" data-tip="([^"]*)">(この予算に[^<]*)<\/span>/.exec(h); return m ? { tip: m[1].split('\n'), say: m[2] } : null; };
+  // 届く見込みは見える所に出さず、最終予算の箱のカーソルの説明に入れる（2026-10-13 村井さん「細かいテキストは不要」）。前の言い方（say）は説明の中身から作って比べる
+  const meta = (h) => {
+    assert.doesNotMatch(h.replace(/data-tip="[^"]*"/g, ''), /この予算に届/, '届く見込みを見える所に出さない');
+    const m = /<div class="kpi" data-tip="([^"]*)"><div class="k">最終予算<\/div>/.exec(h);
+    const parts = m ? m[1].replace(/&amp;/g, '&').split('\n\n') : [];
+    if (parts.length < 2) return null;
+    const tip = parts.slice(1).join('\n\n').split('\n').filter((x) => !/^[\d,]+ 円$/.test(x));   // 箱の正確な金額の行は除く
+    const w = /^この予算に届く見込み(（試し）)?: (.*)$/.exec(tip[0]);
+    if (w) return { tip, say: 'この予算に届く見込み ' + w[2] + (w[1] || '') };
+    const d = /に(届きました|届きませんでした)$/.exec(tip[0]), a = /^実績の合計 ([\d,]+) 円/.exec(tip[1] || '');
+    return { tip, say: 'この予算に' + (d ? d[1] : '') + '（実績の合計 ' + run('yenShort(' + Number(a ? a[1].replace(/,/g, '') : 0) + ')') + '円）' };
+  };
   // (a) 見出しの説明: 年度合計の 3 つ（下振れ・中心・上振れ）が月の合計ではない
   const base = tab({ aligned: aligned(), reach: reach() });
   assert.match(tipOf(base, '月ごとの見通しと予算'), /。年度合計（下振れ・中心・上振れ）は月の合計ではなく、年度で計算した値です$/);

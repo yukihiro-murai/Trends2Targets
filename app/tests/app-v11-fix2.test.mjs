@@ -201,10 +201,7 @@ part('D2 予算の下書きの言い方', () => {
   assert.deepEqual([view.boot.budgetDraft.centerAtDraft, view.boot.budgetDraft.centerNow, latest.shadow.annual.basis], [12000, 12000, 'landing'], '前提: 下書きの値は月の合計・上の中心は着地の推定');
   const html = R(`S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; fcForecastTab(__d, __v)`, { __id: idMid, __v: J(view), __d: J(latest) });
   assert.equal(kpi(html, '中心').v, ys(latest.shadow.annual.p50), '上の中心は着地の推定');
-  const draftTip = tipsOf(html).find((t) => t.startsWith('予算の下書き'));
-  assert.ok(draftTip, '下書きの 1 行');
-  assert.match(draftTip, /の月ごとの中心の合計 12,000 円・今の月ごとの中心の合計 12,000 円\n上の中心は着地の推定（締まった月の実績＋残りの月）で、この合計とは違う数です$/);
-  assert.doesNotMatch(draftTip, /今の中心/);
+  assert.ok(!tipsOf(html).some((t) => t.startsWith('予算の下書き')) && !/予算の下書き/.test(html), '予算の下書きの 1 行は出さない（2026-10-13 村井さん「細かいテキストは不要」）');
 });
 
 // ==== D3・D5. 分析の見直しの流れ ====

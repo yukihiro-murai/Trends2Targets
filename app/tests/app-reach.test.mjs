@@ -298,9 +298,9 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   const html = R(`S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; fcForecastTab(__d, __v)`, { __id: idCur, __d: latest, __v: view });
   const a = latest.shadow.aligned, rc = latest.shadow.reach;
   const ys = (n) => R(`yenShort(${n})`);
-  assert.ok(html.includes('<div class="hm-sub">月の合計 ' + ys(a.center) + '<span class="nw">（試し）</span></div>'), '中心の下に試しの中心');
+  assert.ok(!html.replace(/data-tip="[^"]*"/g, '').includes('（試し）'), '見える所に「試し」の注記を出さない（2026-10-13 村井さん）');
   const pctText = R(`reachPct(${rc.draft.pct})`);
-  assert.match(html, new RegExp('<span class="meta" data-tip="この予算に届く見込み（試し）: ' + pctText + '\\n[^"]*">この予算に届く見込み ' + pctText + '（試し）</span>'), '予算のカードに届く見込み');
+  assert.match(html, new RegExp('data-tip="採用予測と上乗せの年度合計\\n\\nこの予算に届く見込み（試し）: ' + pctText + '\\n[^"]*"><div class="k">最終予算'), '届く見込みは最終予算の箱のカーソルで見込み');
   const t = tips(html);
   // 締まった月がある年度は、月の合計の中心だけを出し、幅は着地の推定の幅で見る（年度の途中の幅を広げすぎない）
   assert.match(t, /月の合計でそろえると 中心 [^・（]+（試し）/);
