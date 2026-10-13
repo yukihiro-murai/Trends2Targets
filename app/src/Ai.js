@@ -152,7 +152,7 @@ function appAiMissingTopics_(scratch) {
 
 // ---- 手で始める回数の上限・前の回の引き継ぎ ----
 
-const APP_AI_MANUAL_PROP = 'APP_AI_MANUAL';   // 手で始めた回数（Script Properties。{ date: 日本の日付, counts: { 計画|操作: 回数 } }。その日の分だけ持つ）
+const APP_AI_MANUAL_PROP = 'APP_AI_MANUAL';   // 手で始めた回数（アプリの状態なので所有者の UserProperties。Store.js の appProps_ が振り分ける。{ date: 日本の日付, counts: { 計画|操作: 回数 } }。その日の分だけ持つ）
 const APP_AI_RUN_KEY = 'AIRUN_';              // 計画ごとの、最後に始めた A-4 の回（CacheService。6 時間。{ actionId, asOfMs }）
 const APP_AI_RESUME_MS = 6 * 3600 * 1000;     // 引き継げるのは、前の回を始めてから 6 時間まで（控えた答えの保存期間と同じ）
 
