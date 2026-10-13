@@ -517,4 +517,23 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   assert.ok(view.endsWith(card), '物差しは俯瞰の最後');
 }
 
+// ==== 外れ幅は合計の比（WAPE。精度の画面と同じ）: 実績が 0 に近い月が 1 つあっても壊れない（2026-10-13 提案 1） ====
+{
+  const rows = [];
+  ['P1', 'P2'].forEach((pid) => {
+    for (let i = 0; i < 6; i++) {
+      const actual = pid === 'P1' && i === 5 ? 1e4 : 1e8;   // P1 の 1 か月だけ実績 1 万円
+      ['STAT_ONLY', 'LAST_YEAR'].forEach((m) => rows.push({ plan_id: pid, target_ym: '2026/0' + (4 + i), method: m, counted: true, p50: m === 'STAT_ONLY' ? 1e8 : 1.1e8, actual, p10: 0.8e8, p90: 1.2e8, horizon: i + 1 }));
+    }
+  });
+  const sum = env.run('appBacktestSummary_(__r, { P1: "A", P2: "B" })', { __r: rows });
+  const stat = sum.methods.find((m) => m.method === 'STAT_ONLY');
+  // P1: Σ|e| = 1e8 − 1e4 ≒ 1e8、Σ実績 = 5e8 + 1e4 → 約 20%。P2: 0%。メーカーを同じ重さで平均 → 約 10%（月ごとの平均なら P1 だけで 1,666% になる）
+  assert.ok(Math.abs(stat.mape - 0.1) < 0.001, '外れ幅 ' + stat.mape);
+  assert.equal(stat.n, 12, '点の数は月の数のまま');
+  const ly = sum.methods.find((m) => m.method === 'LAST_YEAR');
+  // P1: (5 × 0.1 億 + 1.1 億) ÷ 5 億 ≒ 32%、P2: 0.6 億 ÷ 6 億 = 10% → 平均 約 21%
+  assert.ok(Math.abs(ly.mape - 0.21) < 0.001, '比べる方法も合計の比 ' + ly.mape);
+}
+
 console.log('app-v10-backtest: all tests passed');

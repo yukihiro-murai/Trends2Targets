@@ -138,7 +138,8 @@ function appHitA4Runs_(planId) {
  * 計画の年度の四半期のうち、3 か月とも締まった四半期だけ（締まっていない月が入る四半期は数えない）
  */
 function appHitRowsOf_(plan, t, a4, links, measured) {
-  const cutoff = appLandingCutoff_(t.PROCESS_STATUS || []);
+  // 締まった月の境目は、ほかの画面と同じ（実績の取り込みの後・当たり具合の計算の前は、前の境目のまま。appPlanCutoff_。提案 9）
+  const cutoff = appPlanCutoff_(plan.plan_id, t.PROCESS_STATUS || []);
   if (!cutoff) return [];
   const quarters = [1, 2, 3, 4].map(q => 'FY' + Number(plan.fy) + '-Q' + q).filter(q => appHitQuarterMonths_(q)[2] < cutoff);
   if (!quarters.length) return [];
