@@ -113,19 +113,21 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 .guide{display:flex;gap:var(--s4);align-items:flex-start}
 .charbox{width:var(--w-char);height:var(--w-char);flex:0 0 var(--w-char)}
 .charbox svg{width:100%;height:100%;display:block}
-.bubble{position:relative;background:var(--primary-soft);border-radius:var(--radius);padding:var(--s3) var(--s5);flex:1;min-width:0;font-size:var(--fs-b);color:var(--navy)}
+.bubble{position:relative;background:var(--primary-soft);border-radius:var(--radius);padding:var(--s3) var(--s5);flex:1;min-width:0;font-size:var(--fs-b);color:var(--navy);
+  display:flex;flex-direction:column;justify-content:center;min-height:var(--w-char)}   /* 話は吹き出しの上下の真ん中（上に寄せない） */
+.guide{align-items:stretch}.guide .charbox{align-self:center}
 .bubble .chip{background:#fff}
 .bubble::before{content:"";position:absolute;left:-8px;top:24px;border:8px solid transparent;border-right-color:var(--primary-soft);border-left:none}
-.hero{display:flex;gap:var(--s5);align-items:flex-start}
+.hero{display:flex;gap:var(--s5);align-items:center}
 .hero .charbox{width:96px;height:96px;flex:0 0 96px}
 .hero .bubble{font-size:var(--fs-h3);line-height:1.6;padding:var(--s4) var(--s5)}
-.hero .bubble::before{top:40px}   /* 吹き出しの三角は、キャラ（96px）の真ん中の高さ */
+.hero .bubble::before{top:50%;margin-top:-8px}   /* 吹き出しの三角は、吹き出しの上下の真ん中（キャラも真ん中に置く） */
+.guide .bubble::before{top:50%;margin-top:-8px}
 .hero .bubble{min-height:96px}
 .bubble .says{list-style:none;display:grid;gap:var(--s2);margin:0;font-size:var(--fs-b);line-height:1.6}
 .bubble .says li{display:flex;align-items:baseline;gap:var(--s3)}
 .bubble .says li .lvl{flex:0 0 auto;transform:translateY(-1px)}
 .bubble .says li .t{flex:1;min-width:0}
-.vrole{margin:calc(-1 * var(--s4)) 0 var(--s6);font-size:var(--fs-s);color:var(--muted)}   /* 画面の役割（題のすぐ下に 1 行） */
 .hero .say-act{margin-top:var(--s3)}
 /* 天気のキャラ（小さく並べるとき。大きさは skyChar の引数） */
 .skych{display:inline-block;vertical-align:middle;flex:0 0 auto;width:var(--sz,32px);height:var(--sz,32px)}
@@ -329,11 +331,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .sky{display:flex;flex-direction:column;align-items:center;gap:var(--s1);min-width:0;padding:var(--s3) var(--s1);border:1px solid var(--line-soft);border-radius:var(--radius-s);background:#fff;cursor:pointer;font:inherit;color:var(--navy);text-align:center}
 .sky:hover{border-color:var(--primary)}
 .sky.none .ch{opacity:.4}.sky.none .ct{color:var(--muted)}
-.sky .ch{width:56px;height:56px}.sky .ch svg{width:100%;height:100%;display:block}
+.sky .ch{width:80px;height:80px}.sky .ch svg{width:100%;height:100%;display:block}
+.sky .mk{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%;font-size:var(--fs-s);line-height:1.4;color:var(--navy)}
+.sky .mk span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sky .nm{font-size:var(--fs-s);line-height:1.4;word-break:keep-all;overflow-wrap:normal}
-.sky .ct{margin-top:auto;font-size:var(--fs-h2);line-height:1.3;font-variant-numeric:tabular-nums}
+.sky .ct{font-size:var(--fs-h2);line-height:1.3;font-variant-numeric:tabular-nums}
 /* 学びの進み: 精度の天気と、承認待ちの見直し案（「学びを見る」で AI の学び） */
-.hm-lr{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--col2)),1fr));gap:var(--s3)}
+.hm-lr{display:grid;grid-template-columns:1fr;gap:var(--s3)}   /* 学びの進みは 1 カラム（2026-10-13 村井さん） */
 .hm-lrbox{display:flex;align-items:center;gap:var(--s4);min-width:0;min-height:96px;padding:var(--s3) var(--s4);border:1px solid var(--line-soft);border-radius:var(--radius-s);background:#fff;font:inherit;color:var(--text);text-align:left}
 .hm-lrt{display:flex;flex-direction:column;flex:1;min-width:0}
 .hm-lrt .k{font-size:var(--fs-s);color:var(--muted)}
@@ -347,7 +351,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .todo li{flex-wrap:wrap}.todo li .t{flex:1 1 calc(100% - 40px)}.todo li .btn{margin-left:auto}
   .todo li .k{flex:1 1 calc(100% - 40px)}.todo li .k + .t{flex:1 1 100%}
   .skys{grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s2)}
-  .sky{padding:var(--s2) 2px}.sky .ch{width:40px;height:40px}.sky .ct{font-size:var(--fs-h3)}
+  .sky{padding:var(--s2) 2px}.sky .ch{width:56px;height:56px}.sky .ct{font-size:var(--fs-h3)}
   .hm-lrbox{min-height:80px;gap:var(--s3)}
   .todo li .btn.hm-mk{display:none}   /* 続きの行の「メーカー」は下のメニューと同じなので、スマホでは出さない（行を短く） */
 }
@@ -524,8 +528,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .kpis,.kpis.k5{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
   .hero .charbox{width:64px;height:64px;flex-basis:64px}
   /* スマホ: よみは吹き出しの上に置き、吹き出しを幅いっぱいに（横に並べると吹き出しが細くなり、話が縦に長くなる）。三角は上向きでキャラを指す */
-  .hero{flex-direction:column;gap:var(--s3)}
-  .hero .bubble{min-height:0;width:100%}.hero .bubble::before{top:-8px;left:24px;border:8px solid transparent;border-bottom-color:var(--primary-soft);border-top:none}
+  .hero{flex-direction:column;align-items:flex-start;gap:var(--s3)}
+  .hero .bubble{min-height:0;width:100%}.hero .bubble::before{top:-8px;margin-top:0;left:24px;border:8px solid transparent;border-bottom-color:var(--primary-soft);border-top:none}
   .hero .bubble{font-size:var(--fs-b)}
   .kpi{padding:var(--s3) var(--s4)}
   .kpi .v{font-size:var(--fs-h3)}
@@ -819,7 +823,7 @@ function pollJob(){
 }
 
 // ---- 画面の切り替え（メニュー: ホーム・メーカー・予測・分析・学び。使える人は全員同じ。管理の画面は外した。2026-10-06 村井さん） ----
-var NAV = [['home','ホーム'],['makers','メーカー'],['forecast','予測'],['analysis','分析'],['learning','学び']];
+var NAV = [['home','ホーム'],['makers','メーカー一覧'],['forecast','予測'],['analysis','分析'],['learning','学び']];
 /** メニューと画面の題の印（Dots2Lines と同じ線の絵: 20 の枠・線の太さ 1.7・角は丸） */
 var SVG_I = '<svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
 var NAV_ICON = {
@@ -831,18 +835,14 @@ var NAV_ICON = {
 };
 function navItems(){ return B.setUp && B.allowed ? NAV : [['home','ホーム']]; }
 /** 画面の題: 印（淡い水色の角丸）+ 題名。右の道具（計画を選ぶ欄など）は右端へ、data-near の道具（年度など）は題のすぐ横へ */
-/** 画面ごとの役割（題の下の 1 行。何を見る画面かをはっきりさせる。2026-10-13 村井さん） */
-var VIEW_ROLE = { home: '全体の見通しと、よみからの気づき', makers: 'メーカーごとに、予算と実績・着地を比べる', forecast: '1 つのメーカーの予測を見て、予算を決める',
-  analysis: 'メーカーを並べて、ずれと傾向を読み解く', learning: '当たり外れから学び、次の予測に活かす' };
-function viewRole(){ var r = VIEW_ROLE[S.view]; return r ? '<p class="vrole">' + esc(r) + '</p>' : ''; }
 function viewTitle(head){
   if (!head) return '';
   var icon = '<span class="ttlic" aria-hidden="true">' + (NAV_ICON[S.view] || NAV_ICON.home) + '</span>';
   var m = /^<div class="page-head"><h1>([\s\S]*?)<\/h1>([\s\S]*)<\/div>$/.exec(head);
-  if (m && /^<[^>]*data-near/.test(m[2])) return '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + m[1] + '</h1><span class="vnear">' + m[2] + '</span></div></div>' + viewRole();
-  if (m) return '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + m[1] + '</h1></div>' + (m[2] ? '<div class="vtools">' + m[2] + '</div>' : '') + '</div>' + viewRole();
+  if (m && /^<[^>]*data-near/.test(m[2])) return '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + m[1] + '</h1><span class="vnear">' + m[2] + '</span></div></div>';
+  if (m) return '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + m[1] + '</h1></div>' + (m[2] ? '<div class="vtools">' + m[2] + '</div>' : '') + '</div>';
   var h = /^<h1>([\s\S]*?)<\/h1>$/.exec(head);
-  return h ? '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + h[1] + '</h1></div></div>' + viewRole() : head;
+  return h ? '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + h[1] + '</h1></div></div>' : head;
 }
 /** 画面の中のタブ（下線）。list: [[key, 名前]]、onclick: 押したときに呼ぶ関数の名前（key を渡す） */
 function subTabs(list, cur, onclick){ return '<div class="tabs" role="tablist">' + list.map(function(t){ return '<button class="tab' + (cur === t[0] ? ' on' : '') + '" role="tab" aria-selected="' + (cur === t[0]) + '" onclick="' + onclick + '(\'' + t[0] + '\')">' + t[1] + '</button>'; }).join('') + '</div>'; }
@@ -1046,8 +1046,8 @@ var SKY8 = [
   { key: 'kumori', name: '曇り', rule: '着地の推定が予算の 90% 以下' },
   { key: 'ame', name: '雨', rule: '着地の推定が予算の 50% 以下' },
   { key: 'sekka', name: '雪', rule: '予算があるのに売上が 0' },
-  { key: 'tenpen', name: '天変地異', rule: '急な変化（1 か月の急変・2 か月続いたずれ・前回の予測から 30% 以上）' },
-  { key: 'mikakunin', name: '霧', rule: '推定できない（予算なし・予測なし・実績の取り込みが 3 か月以上遅れ・当たり具合の計算待ち）' }
+  { key: 'mikakunin', name: '霧', rule: '推定できない（予算なし・予測なし・実績の取り込みが 3 か月以上遅れ・当たり具合の計算待ち）' },
+  { key: 'tenpen', name: '天変地異', rule: '急な変化（1 か月の急変・2 か月続いたずれ・前回の予測から 30% 以上）' }
 ];
 /**
  * 精度の天気（外れ幅から。学びが荒れているときは台風）。振り返り・学びの進みに使う。
@@ -1791,11 +1791,11 @@ function homeKpis(h, plans){
   var mapeTip = '締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計です。メーカーごとの外れ幅を、さらにメーカーで平均しています'
     + (m.n ? '（' + m.n + ' メーカー）' : '\n' + homeNoMape(plans));
   return '<div class="card"><div class="card-head"><h2>FY' + esc(h.fy) + ' の数字</h2></div><div class="kpis hm-kpis">'
-    + homeKpi('年間予算', yenShort(t.budget), '円', budgetTip, true, isNum(t.budget) ? (t.budgetPlans < all ? t.budgetPlans + ' / ' + all + ' メーカー' : all + ' メーカー') : '')
-    + homeKpi('着地の推定', yenShort(t.landing), '円', landTip, false, isNum(t.landing) ? [(t.landingPlans < all ? t.landingPlans + ' / ' + all + ' メーカー' : all + ' メーカー'),
+    + homeKpi('年間予算', yenShort(t.budget), '円', '', true, isNum(t.budget) ? (t.budgetPlans < all ? t.budgetPlans + ' / ' + all + ' メーカー' : all + ' メーカー') : '')
+    + homeKpi('着地の推定', yenShort(t.landing), '円', '', false, isNum(t.landing) ? [(t.landingPlans < all ? t.landingPlans + ' / ' + all + ' メーカー' : all + ' メーカー'),
       isNum(t.ratio) ? '予算の ' + (t.ratio * 100).toFixed(1) + '%' + (same ? '' : '（同じ ' + t.ratioPlans + '）') : ''] : '')
-    + homeKpi('暫定実績', yenShort(t.actualYtd), '円', actTip, false, months ? months + ' か月分' : '')
-    + homeKpi('外れ幅', m.v === null ? '-' : (m.v * 100).toFixed(1), '%', mapeTip, false, m.n ? m.n + ' メーカーの平均' : '')
+    + homeKpi('暫定実績', yenShort(t.actualYtd), '円', '', false, months ? months + ' か月分' : '')
+    + homeKpi('外れ幅', m.v === null ? '-' : (m.v * 100).toFixed(1), '%', '', false, m.n ? m.n + ' メーカーの平均' : '')
     + '</div></div>';
 }
 
@@ -1804,10 +1804,11 @@ function homeSkyCard(plans){
   var by = {}; plans.forEach(function(p){ var k = skyKey(p); (by[k] = by[k] || []).push(p.clientName); });
   var tiles = SKY8.map(function(s){
     var names = by[s.key] || [];
-    return '<div class="sky' + (names.length ? '' : ' none') + '" tabindex="0" role="img" aria-label="' + esc(s.name + ' ' + names.length + ' メーカー') + '" data-tip="' + esc(s.name + '：' + s.rule) + '">'
-      + '<span class="ch">' + (CHAR_SVG[s.key] || '') + '</span><span class="nm">' + esc(s.name).replace('のち', 'のち<wbr>') + '</span><span class="ct">' + names.length + '</span></div>';
+    return '<div class="sky' + (names.length ? '' : ' none') + '" tabindex="0" role="group" aria-label="' + esc(s.name + ' ' + names.length + ' メーカー') + '" data-tip="' + esc(s.name + '：' + s.rule) + '">'
+      + '<span class="ch">' + (CHAR_SVG[s.key] || '') + '</span><span class="ct">' + names.length + '</span>'
+      + '<span class="mk">' + names.map(function(n){ return '<span>' + esc(n) + '</span>'; }).join('') + '</span></div>';
   }).join('');
-  return '<div class="card"><div class="card-head"><h2>見通しの空模様' + tip('締まった月の実績と予測から推定した着地を予算と比べ、メーカーを 8 つの空模様に分けます。カーソルを合わせると決まりが出ます。どのメーカーがどれかは、メーカーと分析の画面で見られます') + '</h2></div><div class="skys">' + tiles + '</div></div>';
+  return '<div class="card"><div class="card-head"><h2>見通しの空模様' + tip('締まった月の実績と予測から推定した着地を予算と比べ、メーカーを 8 つの空模様に分けます。カーソルを合わせると、その空模様の決まりが出ます') + '</h2></div><div class="skys">' + tiles + '</div></div>';
 }
 
 // ---- 学びの進み（精度の天気・承認待ちの見直し案。apiAiLearning は学びの画面と同じ読み込み S.lr.ai。失敗はこのカードだけ） ----
@@ -2022,7 +2023,7 @@ function mkFy(){
 }
 function viewMakers(){
   var plans = mkPlans();
-  if (!plans) return '<h1>メーカー</h1>' + (slot('mk', 'メーカーを読み込んでいます', 'mkLoad()') || loading('メーカーを読み込んでいます'));
+  if (!plans) return '<h1>メーカー一覧</h1>' + (slot('mk', 'メーカーを読み込んでいます', 'mkLoad()') || loading('メーカーを読み込んでいます'));
   var fys = mkFys(), fy = mkFy();
   // 測る専用の計画は後ろに分けて並べる（状態の数・合計には入れない）
   var rows = plans.filter(function(p){ return String(p.fy) === fy; }).sort(function(a, b){ return (planMeasure(a) ? 1 : 0) - (planMeasure(b) ? 1 : 0) || String(a.clientName).localeCompare(String(b.clientName), 'ja'); });
@@ -2030,7 +2031,7 @@ function viewMakers(){
   // 年度は題の横（2026-10-06 村井さん）。絞り込み・並べ替えは置かない
   var sel = fys.length ? '<select class="inp sm" id="mk_fy" data-near="1" aria-label="年度" onchange="S.mkFy=this.value;render()">'
     + fys.map(function(f){ return '<option value="' + esc(f) + '"' + (f === fy ? ' selected' : '') + '>FY' + esc(f) + '</option>'; }).join('') + '</select>' : '';
-  if (!rows.length) return '<div class="page-head"><h1>メーカー</h1>' + sel + '</div>' + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここに並びます。');
+  if (!rows.length) return '<div class="page-head"><h1>メーカー一覧</h1>' + sel + '</div>' + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここに並びます。');
   var count = function(st){ return bud.filter(function(p){ return mkState(p) === st; }).length; };
   // 承認待ちのうち、前の版が承認済みのメーカー（ホームの「承認済み」はこれも数える）
   var both = bud.filter(function(p){ return p.pendingNo && p.officialNo; }).length;
@@ -2038,7 +2039,7 @@ function viewMakers(){
     draft: '予測はあるが、公式版をまだ出していないメーカー', none: 'まだ予測がないメーカー' };
   var summary = ['official', 'pending', 'draft', 'none'].map(function(st){ return '<span class="chip ' + MK_STATES[st][1] + '" data-tip="' + esc(stTip[st]) + '">' + MK_STATES[st][0] + ' ' + count(st) + '</span>'; }).join('')
     + (nM ? '<span class="chip off" data-tip="' + esc(MEASURE_TIP) + '">測る専用 ' + nM + '</span>' : '');
-  return '<div class="page-head"><h1>メーカー</h1>' + sel + '</div><div class="card"><div class="card-head"><h2>メーカーの一覧' + tip('FY' + fy + ' の計画があるメーカーの、空模様・予算策定の状態・年度の数字です。名前か「開く」で、そのメーカーの予測を開きます') + '</h2>'
+  return '<div class="page-head"><h1>メーカー一覧</h1>' + sel + '</div><div class="card"><div class="card-head"><h2>メーカーの一覧' + tip('FY' + fy + ' の計画があるメーカーの、空模様・予算策定の状態・年度の数字です。名前か「開く」で、そのメーカーの予測を開きます') + '</h2>'
     + '<span class="mk-sum">' + summary + '</span></div><div class="tblwrap">' + mkTable(rows) + '</div></div>';
 }
 /** 確率の短い表し方（1% 未満・99% 超はそう書く。年度が締まって着地にぶれが無いときは、決まった値なのでそのまま） */

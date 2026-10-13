@@ -325,8 +325,7 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   const hh = R(`S.view = 'home'; B.home = __h; viewHome()`, { __h: home });
   const r = home.totals.reach;
   assert.equal(r.plans, 1, '見せる年度（FY2026）の計画は 1 つ');
-  assert.ok(tips(hh).includes('この予算に届く見込み（試し）: ' + R(`reachPct(${r.independent.pct})`) + '\n着地と予算の両方がある 1 メーカーの予算'), 'ホームの年間予算の説明（1 つなら値も 1 つ）');
-  noCodes(tips(hh).split('この予算に届く見込み')[1], 'ホームの届く見込み');
+  assert.ok(!tips(hh).includes('この予算に届く見込み'), 'ホームの年度の数字に長い説明を付けない（2026-10-13 村井さん）');
   const two = R('homeReachTip(__r)', { __r: { plans: 3, budget: 3000, landing: 3300, independent: { p: 0.9, pct: 90 }, together: { p: 0.7, pct: 70 }, tau: 0.15, w: 1 } });
   assert.match(two, /^\nこの予算に届く見込み（試し）: 独立なら 約 90%〜全部同じ向きなら 約 70%\n着地と予算の両方がある 3 メーカーの予算 3,000 円 で見ています。メーカーどうしが別々に動くとみなすと前の値、全部が同じ向きに動くとみなすと後の値で、本当はその間です（年の水準のぶれ 15%・幅の倍率 1 倍）。保存している数字は変わりません$/);
   assert.equal(R(`homeReachTip(null)`), '', '合計の届く見込みが無ければ何も足さない');

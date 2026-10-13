@@ -275,7 +275,7 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
   const clean = (html, what) => { assert.ok(!/undefined|NaN/.test(html), what + 'に undefined や NaN を出さない'); return html; };
   // ホーム: 外れ幅は「-」、説明で当たり具合を計算を案内する。精度の天気は霧
   const h = clean(run(`S.view = 'home'; B.home = __h; S.lr.ai = __ai; viewHome()`, { __h: home, __ai: ai }), 'ホーム');
-  assert.match(h, /<div class="kpi" data-tip="[^"]*まだ実績と比べたメーカーがありません。各計画の振り返りで「当たり具合を計算」を動かすと出ます"><div class="k">外れ幅<\/div><div class="v">-<\/div><\/div>/);
+  assert.match(h, /<div class="kpi"><div class="k">外れ幅<\/div><div class="v">-<\/div><\/div>/, '年度の数字は説明なし（2026-10-13）');
   assert.match(h, /data-tip="霧：比べられる実績がまだない\n各計画の振り返りで「当たり具合を計算」を動かすと出ます\n[^"]*"><span class="skych"[^>]*aria-label="霧"[\s\S]*精度の天気[\s\S]*霧[\s\S]*比べる実績はまだです/);
   // 分析: 外れ幅・読みのクセのカードは出さず、案内に当たり具合を計算を出す
   const a = clean(run(`S.view = 'analysis'; S.an.data = __a; S.an.tab = 'overview'; viewAnalysis()`, { __a: an }), '分析');
@@ -338,7 +338,7 @@ const anGuide = (plans, fy = '2026') => (/<div class="guide">[\s\S]*?<div class=
     assert.match(run('lrAiView({})'), /<div class="bubble">実績が締まって、当たり具合が計算されると、AI が何を学んだか（重み・偏り・外れ幅・補正）がここに出ます。<\/div>/);
     assert.match(run('lrAiHero({ health: [], timeline: [] })'), /<div class="bubble">まだ実績と比べた月がありません。当たり具合が計算されると、外れ幅がここに出ます。/);
     // ホーム: 外れ幅の箱・精度の天気の説明
-    assert.match(run('homeKpis(__h, __h.plans)', { __h: home }), /data-tip="[^"]*\nまだ実績と比べたメーカーがありません。当たり具合が計算されると出ます"><div class="k">外れ幅<\/div>/);
+    assert.match(run('homeKpis(__h, __h.plans)', { __h: home }), /<div class="kpi"><div class="k">外れ幅<\/div>/, '年度の数字は説明なし（2026-10-13）');
     assert.match(run('S.lr.ai = { health: [], pending: [] }; homeLearnCard(__h, __h.plans)', { __h: home }), /data-tip="霧：比べられる実績がまだない\n当たり具合が計算されると出ます\n精度の推移は/);
     // 分析
     assert.equal(anGuide([AN_PLAN]), 'まだ数字がそろっていないため、外れ幅・読みのクセは出していません。当たり具合が計算されると、ここに出てきます。');
@@ -714,16 +714,8 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   const ZERO2 = '比べた 2 か月は、どれも売上が 0 円のため、外れ幅を % で出せません。';
   const zp = { planId: 'P1', clientName: 'テスト製薬', fy, mape: null, scoredMonths: 2 };
   const np = { planId: 'P2', clientName: '別の製薬', fy, mape: null, scoredMonths: 0 };
-  const kpiTip = (plans) => (/<div class="kpi" data-tip="([^"]*)"><div class="k">外れ幅<\/div>/.exec(run('homeKpis(__h, __h.plans)', { __h: { fy, plans } })) || [])[1];
-  // ホームの外れ幅の箱: 「まだ」とも動かし方とも言わない。まだ比べていないメーカーがあれば、その出し方だけ
-  assert.ok(kpiTip([zp]).endsWith('\n' + ZERO2), kpiTip([zp]));
-  assert.doesNotMatch(kpiTip([zp]), /まだ実績と比べた|当たり具合を計算/);
-  assert.ok(kpiTip([zp, np]).endsWith('\n' + ZERO2 + 'ほかのメーカーは、各計画の振り返りで「当たり具合を計算」を動かすと出ます'));
-  assert.ok(kpiTip([zp, Object.assign({}, zp, { planId: 'P3', scoredMonths: 3 })]).endsWith('\n比べた のべ 5 か月は、どれも売上が 0 円のため、外れ幅を % で出せません。'), '2 メーカー以上は「のべ」');
-  asRoles(VIEWER_ROLES, () => assert.ok(kpiTip([zp, np]).endsWith('ほかのメーカーは、当たり具合が計算されると出ます')));
-  // 比べた月の数が無い・外れ幅のあるメーカーがある: 今までどおり
-  assert.ok(kpiTip([Object.assign({}, zp, { scoredMonths: undefined })]).endsWith('\nまだ実績と比べたメーカーがありません。各計画の振り返りで「当たり具合を計算」を動かすと出ます'));
-  assert.match(kpiTip([zp, Object.assign({}, np, { mape: 0.1, scoredMonths: 3 })]), /（1 メーカー）$/);
+  // ホームの外れ幅の箱は説明なし（2026-10-13 村井さん: 年度の数字に長い説明は要らない）。出し方の案内は精度の天気の説明に
+  assert.ok(!/data-tip/.test(run('homeKpis(__h, __h.plans)', { __h: { fy, plans: [zp, np] } })), '年度の数字は説明なし');
   // ホームの精度の天気: 説明と見える短い言い方
   const card = (plans, health) => run('S.lr.ai = { health: __hl, pending: [] }; homeLearnCard(__h, __h.plans)', { __hl: health || [], __h: { fy, plans } });
   const c1 = card([zp]);
@@ -798,7 +790,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   const home = { fy: '2026', plans: [{ planId: 'P1', clientName: 'テスト製薬', fy: '2026', landing: 0.3, landingSd: 1, mape: null }] };
   const k = run('homeKpis(__h, __h.plans)', { __h: home });
   assert.doesNotMatch(k, /80% の幅: -/);
-  assert.match(k, /80% の幅: 0〜/);
+  assert.doesNotMatch(k, /data-tip/, 'ホームの年度の数字は説明なし（2026-10-13）');
 }
 
 // ==== 26. 学び > AI の学び「着地の幅の学び」: 今の値と学んだ値（試し）を分ける。使っているかは値ごと・見せる丸めで ====
