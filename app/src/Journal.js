@@ -101,6 +101,9 @@ function appJournalRequireAppends_(ops) {
 }
 
 function appJournalFinish_(fileId) {
+  // 書いた表を、書きかけの印を外す前にシートへ反映する（印が無いのに書いた行がまだ届いていない、という間を作らない。
+  // バックアップはロックの中で印を見て写すので、印が無ければ写しても食い違わない。Backup.js の appCopyDataBook_）
+  appFlush_();
   appProps_().deleteProperty(APP_JOURNAL_PROP);
   appBumpGen_();
   try { DriveApp.getFileById(fileId).setTrashed(true); } catch (e) { Logger.log('保存の控えを消せません: ' + (e && e.message ? e.message : e)); }

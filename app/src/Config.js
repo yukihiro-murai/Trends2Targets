@@ -32,7 +32,7 @@ const APP_FILES_LEGACY = {
   monthlyBackupPrefixes: ['売上予測アプリ データ 月次 ', 'Trends2Targets データ 月次 ']
 };
 
-/** Script Properties のキー（ファイルの ID と鎖の最新ハッシュ。秘密情報は置かない） */
+/** 値のキー（秘密情報は置かない）。置き場は Store.js の appPropsInScript_: 初期設定で決まる ID と社内のドメインは Script Properties、ほかは所有者の UserProperties */
 const APP_PROP = {
   folderId: 'APP_FOLDER_ID',
   dataId: 'APP_DATA_SPREADSHEET_ID',

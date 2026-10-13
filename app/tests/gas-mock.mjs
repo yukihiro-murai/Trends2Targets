@@ -346,7 +346,45 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
     mailQuota: undefined,   // その日の残りの送信枠（undefined なら十分ある）
     mailFail: undefined,   // true か関数（宛先ごとに失敗させる）で送信を失敗させる
     scopeRequests: [] };   // ScriptApp.requireScopes の呼び出しの記録（本物の許可はしない）
-  const props = {};
+  // 値の置き場は 2 つ（本物と同じ）: Script Properties と、所有者の UserProperties。アプリは Store.js の appPropsInScript_ で振り分ける
+  const scriptProps = {};
+  const userProps = {};
+  let ctxRef = null;   // アプリを読み込んだ後の実行環境（振り分けの関数を借りる）
+  const inScript = (k) => (ctxRef && typeof ctxRef.appPropsInScript_ === 'function' ? ctxRef.appPropsInScript_(String(k)) : true);
+  const storeOf = (k) => (inScript(k) ? scriptProps : userProps);
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  /**
+   * テストから見る値（アプリと同じ振り分けで、2 つの置き場を 1 つに見せる。読む・書く・消す・一覧のどれも振り分ける）。
+   * どちらの置き場にあるかを確かめるときは scriptProps・userProps を直接見る
+   */
+  const props = new Proxy({}, {
+    get: (t, k) => (typeof k === 'symbol' || !own(storeOf(k), k) ? undefined : storeOf(k)[k]),
+    set: (t, k, v) => { storeOf(k)[k] = v; return true; },
+    deleteProperty: (t, k) => { delete storeOf(k)[k]; return true; },
+    has: (t, k) => typeof k !== 'symbol' && own(storeOf(k), k),
+    ownKeys: () => Object.keys(scriptProps).filter((k) => inScript(k)).concat(Object.keys(userProps).filter((k) => !inScript(k))),
+    getOwnPropertyDescriptor: (t, k) => (typeof k !== 'symbol' && own(storeOf(k), k) ? { value: storeOf(k)[k], writable: true, enumerable: true, configurable: true } : undefined),
+  });
+  /** PropertiesService の 1 つの置き場（本物の上限: 値 1 つ 9KB、全体 500KB） */
+  const propsApi = (store, label) => {
+    const put = (k, v) => {
+      assert.ok(String(v).length <= 9 * 1024, label + ' の値は 9KB まで: ' + k);
+      store[k] = String(v);
+    };
+    const total = () => assert.ok(Object.entries(store).reduce((a, [kk, vv]) => a + kk.length + String(vv).length, 0) <= 500 * 1024, label + ' は全体で 500KB まで');
+    return {
+      getProperty: (k) => (own(store, k) ? store[k] : null),
+      setProperty: (k, v) => { put(k, v); total(); },
+      setProperties: (o, deleteAllOthers) => {
+        if (deleteAllOthers) Object.keys(store).forEach((k) => { if (!own(o, k)) delete store[k]; });
+        Object.keys(o).forEach((k) => put(k, o[k]));
+        total();
+      },
+      deleteProperty: (k) => { delete store[k]; },
+      getKeys: () => Object.keys(store),
+      getProperties: () => Object.assign({}, store),   // 本物と同じく写しを返す（書き換えても元は変わらない）
+    };
+  };
   const cache = {};
   const files = {};
   const sheetsById = {};
@@ -408,18 +446,8 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
     Logger: { log: (m) => logs.push(String(m)) },
     Session: { getActiveUser: () => ({ getEmail: () => state.active }), getEffectiveUser: () => ({ getEmail: () => state.owner }), getScriptTimeZone: () => 'Asia/Tokyo' },
     PropertiesService: {
-      getScriptProperties: () => ({
-        getProperty: (k) => (k in props ? props[k] : null),
-        setProperty: (k, v) => {
-          // 本物の上限: 値 1 つ 9KB、全体 500KB
-          assert.ok(String(v).length <= 9 * 1024, 'Script Properties の値は 9KB まで: ' + k);
-          props[k] = String(v);
-          assert.ok(Object.entries(props).reduce((a, [kk, vv]) => a + kk.length + vv.length, 0) <= 500 * 1024, 'Script Properties は全体で 500KB まで');
-        },
-        deleteProperty: (k) => { delete props[k]; },
-        getKeys: () => Object.keys(props),
-        getProperties: () => Object.assign({}, props),   // 本物と同じく写しを返す（書き換えても元は変わらない）
-      }),
+      getScriptProperties: () => propsApi(scriptProps, 'Script Properties'),
+      getUserProperties: () => propsApi(userProps, 'User Properties'),
     },
     CacheService: {
       getScriptCache: () => ({
@@ -511,6 +539,7 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
     },
   };
   const ctx = vm.createContext(env);
+  ctxRef = ctx;
   const names = order === 'reverse' ? [...jsFiles].reverse() : jsFiles;
   for (const n of names) vm.runInContext(sources[n], ctx, { filename: n });
   vm.runInContext(TEST_SUPPORT, ctx, { filename: 'test-support.js' });
@@ -560,7 +589,7 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
   /** テスト用の計画を、見本のブック（makeBook）の中身で作る（データ本体に直接。計画の ID を返す） */
   const seedPlan = (book) => run('appTestSeedPlan_(__book)', { __book: book });
   return {
-    ctx, state, props, cache, files, sheetsById, triggers, logs, run, call, as, data, log, makeBook, fireTriggers, runJob, seedPlan,
+    ctx, state, props, scriptProps, userProps, cache, files, sheetsById, triggers, logs, run, call, as, data, log, makeBook, fireTriggers, runJob, seedPlan,
     table: (name) => objects(data().getSheetByName(name)),
     auditSheet: () => log().getSheetByName('AUDIT_' + MONTH),
     audit: () => objects(log() && log().getSheetByName('AUDIT_' + MONTH)),

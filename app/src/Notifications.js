@@ -1,12 +1,12 @@
 /**
- * Notifications.js — 毎日の処理（バックアップと手入れ。triggerDailyBackup → appDailyMaintenance_）で
- * 異常があった日にだけ、管理者へメールを送る。正常な日は送らない。
+ * Notifications.js — 毎日の処理（バックアップ: triggerDailyBackup → appDailyMaintenance_、手入れ: その後の裏の処理 SYSTEM.HOUSEKEEPING →
+ * appHousekeepingJob_。Housekeeping.js）で異常があった日にだけ、管理者へメールを送る。正常な日は送らない。
  * 手で動かす入口（apiRunBackup・apiRunHousekeeping・apiVerifyAudit）は呼ばない（知らせは定期の処理だけ）。
  *
  * - 送る先は「所有者」と、ROLES 表でいま効いている全体の管理者だけ（呼び出し側から宛先を受け取らない）。
  *   社外のメール・クライアント単位の管理者・期限の切れた・無効な付与は除く。決められなければ空（fail-closed）。
  * - メールには、顧客名・ID・金額・エラーの文を入れない（異常の種類だけ）。実行ログにも宛先と本文は残さない。
- * - 同じ日に同じ知らせを何度も送らないよう、「日付 + 宛先 + 種類」の指紋（SHA-256）を Script Properties に控える。
+ * - 同じ日に同じ知らせを何度も送らないよう、「日付 + 宛先 + 種類」の指紋（SHA-256）を所有者の UserProperties に控える。
  * - 送信の失敗（その日の枠・許可・一時的なエラー）は例外にせず FAILED を返す（知らせの失敗で毎日の処理を潰さない）。
  * - 注意: メールの送信と控えの記録は別の操作なので、Google 側の障害の途中では
  *   「送れたのに控えられなかった」（翌回もう一度届く）・「控えたのに届いていない」ことが起こりうる。

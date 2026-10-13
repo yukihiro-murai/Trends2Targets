@@ -89,7 +89,7 @@ function appHomeTotals_(plans, fy, used) {
   return out;
 }
 
-/** 仕組みの状態（管理者）。バックアップは、バックアップしたときに残した要点を読む（ドライブを数えない。Backup.js の appBackupStatusFast_） */
+/** 仕組みの状態（管理者）。バックアップは、バックアップしたときに残した要点を読む（ドライブを数えない。Backup.js の appBackupStatusFast_）。手入れは印に止まったか（stalled）を足す */
 function appHomeSystem_() {
   let backup = null;
   try { backup = appBackupStatusFast_(); } catch (e) { backup = { error: String(e && e.message || e) }; }
@@ -99,5 +99,5 @@ function appHomeSystem_() {
   try { journal = appJournalPending_(); } catch (e) { journal = null; }
   let autoResearch = null;   // 自動の AI 調査（AutoResearch.js）
   try { autoResearch = appAutoResearchStatus_(); } catch (e) { autoResearch = { error: String(e && e.message || e) }; }
-  return { backup: backup, backupAuto: backupAuto, housekeeping: appHousekeepingLast_(), journal: journal, autoResearch: autoResearch };
+  return { backup: backup, backupAuto: backupAuto, housekeeping: appHousekeepingStatus_(), journal: journal, autoResearch: autoResearch };
 }

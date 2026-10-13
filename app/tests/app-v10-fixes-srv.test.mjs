@@ -440,7 +440,7 @@ const NEW_TABLES = ['INPUT_LOG', 'AI_RESEARCH_LOG', 'LAYER_EFFECTS', 'HIT_RECORD
     appV10BackfillInputLog_ = function (ctx) {
       // この写しの間に、ほかの操作が 3 つとも済ませた（その操作の控え）
       const at = { at: '2026-10-08T10:00:00+0900', v: 10, rows: 1 };
-      PropertiesService.getScriptProperties().setProperty('APP_BACKFILLS', JSON.stringify({ done: { appV10BackfillInputLog_: at, appV10BackfillAiResearchLog_: at, appV10BackfillHitRecords_: at }, failed: {} }));
+      appProps_().setProperty('APP_BACKFILLS', JSON.stringify({ done: { appV10BackfillInputLog_: at, appV10BackfillAiResearchLog_: at, appV10BackfillHitRecords_: at }, failed: {} }));
       return { more: true, rows: 0 };
     };
     appV10BackfillAiResearchLog_ = function () { throw new Error('Lock timeout'); };

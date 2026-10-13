@@ -3,7 +3,8 @@
  * それより古い世代は「アーカイブ」フォルダへ移す（消さない・ゴミ箱にも送らない。2026-10-05 村井さん承認）。
  * アーカイブのフォルダが決まっていない・開けないときは、複製を作る前に止める（作ってから移せないと、残すはずのものを失う）。
  * スタンドアロンのアプリなので、データ本体を複製してもスクリプトは複製されない。
- * バックアップした後に、フォルダの要点（世代の数・最新の名前と時刻）を Script Properties に残す。
+ * 写しは保存と同じロックの中で取り、書きかけの保存があれば先に書き終える（書き終えられなければ写さない。appCopyDataBook_。2026-10-13）。
+ * バックアップした後に、フォルダの要点（世代の数・最新の名前と時刻）を所有者の UserProperties に残す（置き場は Store.js の appProps_）。
  * ホームはドライブを数えずにこれを読む（appBackupStatusFast_）。毎日のバックアップが有効かは残さず、毎回トリガーを見る。
  * 状態の点検（apiHealth）は今までどおりドライブを数える。
  * 毎日のバックアップのトリガーは、所有者が画面を開いたとき（確かめるのは 1 日 1 回）に、無ければ作る（2026-10-07 村井さん承認。appEnsureBackupTrigger_）。
@@ -29,7 +30,38 @@ function appBackupFiles_() {
   return files.sort((a, b) => b.getDateCreated().getTime() - a.getDateCreated().getTime());
 }
 
-function appBackup_(ctx) {
+/**
+ * データ本体の写しを、保存と同じロック（appWithLock_）の中で作る（保存の途中を写さない）。返り値 { copy, recovered, pending }。
+ * 書きかけの保存の控え（Journal.js）があれば、写す前に控えのとおりに書き終える（保存の前と同じ appJournalRecover_。何度書いても同じ結果）。
+ * 書き終えられないとき（控えが読めない・締めた年度の計画など）は写さずに止める: 写しには書きかけの印（APP_WRITE_JOURNAL）が無いので、
+ * 戻すと表どうしが食い違ったまま気づけない。前の世代はそのまま残り、次の機会（翌日・手で取り直す）にもう一度試す。
+ * opts.allowPending: 書き終えられなくても写す（表の列を足す移行の前の写しだけ。移行は見出しに列を足すだけで書きかけの行には触らず、
+ * 控えは移行の後に書き終える。ここで止めると、列を足す前の表に書く控えが書けないまま、移行も始められなくなる）。そのときは pending に控えの要点を返す
+ */
+function appCopyDataBook_(ctx, name, folder, opts) {
+  const dataId = appProps_().getProperty(APP_PROP.dataId);
+  if (!dataId) throw new Error('初期設定がまだです。');
+  return appWithLock_(() => {
+    let recovered = null, pending = null;
+    if (appJournalPending_()) {
+      try {
+        recovered = appJournalRecover_(ctx);
+      } catch (e) {
+        const p = appJournalPending_() || {};
+        if (!(opts && opts.allowPending)) {
+          throw new Error('データ本体の保存が途中で止まっていて（' + (p.label || '保存') + '）、続きを書けません。書きかけのまま写すと、戻したときに表どうしが食い違うので、写しを取りませんでした: ' +
+            String(e && e.message ? e.message : e));
+        }
+        pending = { id: p.id || '', label: p.label || '', planId: p.planId || '', at: p.at || '' };
+      }
+    }
+    SpreadsheetApp.flush();
+    return { copy: DriveApp.getFileById(dataId).makeCopy(name, folder), recovered: recovered, pending: pending };
+  });
+}
+
+/** バックアップ（毎日のトリガー・所有者の runBackup・表の列を足す移行の前）。写しはロックの中で取る（appCopyDataBook_）。opts は appCopyDataBook_ と同じ */
+function appBackup_(ctx, opts) {
   const props = appProps_();
   const dataId = props.getProperty(APP_PROP.dataId);
   const folderId = props.getProperty(APP_PROP.backupFolderId);
@@ -40,8 +72,9 @@ function appBackup_(ctx) {
   const archive = DriveApp.getFolderById(archiveId);
   const started = new Date();
   const name = APP_FILES.backupPrefix + Utilities.formatDate(started, APP_TZ, 'yyyy-MM-dd HHmm');
-  SpreadsheetApp.flush();
-  const copy = DriveApp.getFileById(dataId).makeCopy(name, DriveApp.getFolderById(folderId));
+  const made = appCopyDataBook_(ctx, name, DriveApp.getFolderById(folderId), opts);
+  const copy = made.copy;
+  // 古い世代をアーカイブへ移すのはロックの外（ドライブの移動だけで、データ本体には触らない）
   const files = appBackupFiles_();
   const old = files.slice(APP_BACKUP_KEEP);
   let moved = 0;
@@ -53,6 +86,8 @@ function appBackup_(ctx) {
     appBackupRecordStatus_(files.length - moved + (listed ? 0 : 1), copy);
   }
   const res = { backup: copy.getName(), archived: old.map(f => f.getName()), keep: APP_BACKUP_KEEP };
+  if (made.recovered) res.recovered = { journalId: made.recovered.id, label: made.recovered.label };   // 写す前に書き終えた保存
+  if (made.pending) res.journalPending = made.pending;   // 書きかけのまま写した（移行の前の写しだけ）
   appRunLog_({ requestId: ctx.requestId, kind: 'BACKUP', startedAt: Utilities.formatDate(started, APP_TZ, "yyyy-MM-dd'T'HH:mm:ssZ"),
     durationMs: new Date().getTime() - started.getTime(), status: 'OK', detail: res });
   return res;
@@ -74,7 +109,7 @@ function appBackupEnabled_() {
 }
 
 /**
- * バックアップのフォルダの要点を Script Properties に残す（count = 残っている世代の数、latest = 一番新しいファイル）。失敗してもバックアップは止めない。
+ * バックアップのフォルダの要点を UserProperties に残す（count = 残っている世代の数、latest = 一番新しいファイル）。失敗してもバックアップは止めない。
  * 毎日のバックアップが有効かは残さない（アプリの外でトリガーを消すと古くなるので、読むときに見る）
  */
 function appBackupRecordStatus_(count, latest) {

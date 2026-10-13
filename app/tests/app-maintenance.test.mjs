@@ -11,6 +11,13 @@ import { setUpEnv, OWNER, MEMBER, OTHER, OUTSIDER, jstDay } from './gas-mock.mjs
 const DCTX = `{ user: appCurrentUser_(), roles: [], actor: 'test', requestId: 'M1' }`;
 const notify = (env, codes) => env.call(`appNotifyMaintenance_(${DCTX}, __c)`, { __c: codes });
 const daily = (env) => env.call(`appDailyMaintenance_(${DCTX})`);
+/** 毎日の処理が待ち行列に入れた手入れ（裏の処理 SYSTEM.HOUSEKEEPING）を動かし、その結果を返す */
+const runHousekeepingJob = (env, jobId) => {
+  env.fireTriggers('triggerRunJob');
+  const st = env.call('apiJobStatus(__in)', { __in: { jobId } });
+  assert.equal(st.status, 'DONE', JSON.stringify(st));
+  return st.result;
+};
 const recipients = (env, extra) => env.call(`appMaintenanceRecipients_(${extra || DCTX})`);
 const isBackup = (f) => f.kind === 'file' && f.name.startsWith('Trends2Targets_Data_Backup_');
 const all = (env) => Object.values(env.files).filter(isBackup).sort((a, b) => a.created - b.created);
@@ -27,8 +34,11 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   assert.equal(env.state.mail.length, 0);
   const r = daily(env);
   assert.ok(r.backup.backup, 'バックアップを作る');
-  assert.equal(r.housekeeping.ok, true, JSON.stringify(r.housekeeping));
+  assert.equal(r.housekeeping.scheduled, true, '手入れは別の実行（裏の処理）として入れる: ' + JSON.stringify(r.housekeeping));
   assert.equal(r.notify.status, 'SKIPPED', '異常がなければ知らせない');
+  const hk = runHousekeepingJob(env, r.housekeeping.jobId);
+  assert.equal(hk.ok, true, JSON.stringify(hk));
+  assert.equal(hk.notify.status, 'SKIPPED', '手入れに異常がなければ知らせない');
   assert.equal(env.state.mail.length, 0);
   assert.ok(env.state.lockHeld === false);
 }
@@ -178,14 +188,15 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
   const props = env.state;
   let n = 0;
-  const orig = env.ctx.PropertiesService.getScriptProperties;
-  env.ctx.PropertiesService = { getScriptProperties: () => Object.assign(orig(), {
+  const real = env.ctx.PropertiesService;
+  const orig = real.getUserProperties;   // 知らせの控えは所有者の UserProperties
+  env.ctx.PropertiesService = { getScriptProperties: real.getScriptProperties, getUserProperties: () => Object.assign(orig(), {
     setProperty: (k, v) => { if (k === 'APP_MAINTENANCE_NOTICES' && ++n > 1) throw new Error('書けない（テスト）'); orig().setProperty(k, v); } }) };
   const r = notify(env, ['ERRORS']);
   assert.equal(r.status, 'FAILED', '控えの書き込みが失敗したら FAILED');
   assert.equal(r.reason, 'persist');
   assert.ok(env.state.mail.length >= 1, '送れた分は送れている（届いたかの区別は記録に残す）');
-  env.ctx.PropertiesService = { getScriptProperties: orig };
+  env.ctx.PropertiesService = real;
   void props;
 }
 {
@@ -284,13 +295,14 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   const env = setUpEnv();
   assert.equal(notify(env, ['ERRORS']).status, 'SENT');
   const sent = JSON.parse(env.props.APP_MAINTENANCE_NOTICES).sent;
-  const origProps = env.ctx.PropertiesService.getScriptProperties;
-  env.ctx.PropertiesService = { getScriptProperties: () => Object.assign(origProps(), {
+  const realPS = env.ctx.PropertiesService;
+  const origProps = realPS.getUserProperties;   // 知らせの控えは所有者の UserProperties
+  env.ctx.PropertiesService = { getScriptProperties: realPS.getScriptProperties, getUserProperties: () => Object.assign(origProps(), {
     getProperty: (k) => { if (k === 'APP_MAINTENANCE_NOTICES') throw new Error('読めない（テスト）'); return origProps().getProperty(k); } }) };
   const r = notify(env, ['ERRORS']);
   assert.equal(r.status, 'FAILED', '控えが読めなければ送らない（読めずに再送しない）');
   assert.equal(env.state.mail.length, 1, '追加で送らない');
-  env.ctx.PropertiesService = { getScriptProperties: origProps };
+  env.ctx.PropertiesService = realPS;
   const r2 = notify(env, ['ERRORS']);
   assert.equal(r2.status, 'SKIPPED', '直れば控えは残っている（同じ人にもう一度送らない）');
   assert.equal(env.state.mail.length, 1);
@@ -354,7 +366,7 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   assert.equal(env.files[oldest.id].parent, env.props.APP_ARCHIVE_FOLDER_ID, 'やり直せば、同じものが同じ ID でアーカイブへ移る');
 }
 
-// ==== 8. 毎日の処理: バックアップが失敗しても手入れと知らせは動き、最後に失敗を投げ直す ====
+// ==== 8. 毎日の処理: バックアップが失敗しても手入れ（別の実行）と知らせは動き、最後に失敗を投げ直す ====
 {
   const env = setUpEnv();
   env.call('apiEnableBackup()');
@@ -364,23 +376,38 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   assert.throws(() => env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`));
   const last = env.audit().slice(-1)[0];
   assert.deepEqual([last.action, last.result], ['BACKUP.DAILY', 'FAILED'], '失敗は記録に残る');
+  assert.ok(env.state.mail.length >= 1 && env.state.mail[0].body.includes('バックアップ'), 'バックアップの失敗は、その実行で知らせる');
+  env.fireTriggers('triggerRunJob');   // 待ち行列に入れた手入れ
   assert.ok(env.runLog().some((r) => r.kind === 'HOUSEKEEPING'), '手入れは動かす');
-  assert.ok(env.state.mail.length >= 1, '異常を知らせる');
   assert.ok(env.state.mail.every((m) => m.subject === SUBJECT));
   assert.ok(env.runLog().some((r) => r.kind === 'MAINTENANCE.NOTIFY'));
 }
 
-// ==== 9. 毎日の処理: 手入れが失敗してもバックアップの結果は返し、知らせは届く ====
+// ==== 9. 毎日の処理: 手入れが失敗してもバックアップの結果は返し、知らせは届く（別の実行でも、この実行で続けて動かしたときも） ====
 {
   const env = setUpEnv();
   env.run(`appHousekeeping_ = function () { throw new Error('hk boom'); }`);
   const r = daily(env);
   assert.ok(r.backup.backup, 'バックアップは成功のまま返す');
-  assert.match(r.housekeeping.error, /hk boom/);
-  assert.equal(r.notify.status, 'SENT');
+  assert.equal(r.notify.status, 'SKIPPED', 'バックアップの実行では、手入れの異常はまだ分からない');
+  const hk = runHousekeepingJob(env, r.housekeeping.jobId);
+  assert.match(hk.error, /hk boom/);
+  assert.equal(hk.notify.status, 'SENT');
   assert.equal(env.state.mail.length, 1);
   assert.ok(env.state.mail[0].body.includes('手入れ'));
   assert.equal(env.state.lockHeld, false);
+}
+{
+  // 手入れを入れられない（トリガーの上限）ときは、この実行で続けて動かす
+  const env = setUpEnv();
+  env.run(`appHousekeeping_ = function () { throw new Error('hk boom'); }`);
+  for (let i = 0; env.triggers.length < 20; i++) env.run(`ScriptApp.newTrigger('triggerDummy').timeBased().everyDays(1).atHour(5).create()`);
+  const r = daily(env);
+  assert.ok(r.backup.backup);
+  assert.deepEqual([r.housekeeping.inline, r.housekeeping.reason], [true, 'TRIGGER_LIMIT']);
+  assert.match(r.housekeeping.error, /hk boom/);
+  assert.equal(r.notify.status, 'SENT');
+  assert.ok(env.state.mail[0].body.includes('手入れ'));
 }
 
 // ==== 10. 改名（2026-10-06）の前の名前で作ったバックアップと月次の写しも数える（今あるファイルは同じ ID のまま改名した） ====

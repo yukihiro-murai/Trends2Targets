@@ -2,7 +2,7 @@
  * Jobs.js — 時間のかかる処理（予測の実行・計画への保存と実行・計画の作成など）を、画面の通信から切り離して動かす。
  * 画面から始めると、1 回だけ動く時間主導のトリガーを作り、裏で最後まで実行する。画面は数秒ごとに状態を尋ねて結果を受け取る。
  * 画面と 1 分以上つながったままにすると通信が切れる（HTTP 503）ことがあるため（2026-10-01 に発生）。
- * 状態は Script Properties（APP_JOB_<id>、小さい）、結果は CacheService（6 時間）に置く。処理そのものの記録は監査ログに残る。
+ * 状態は所有者の UserProperties（APP_JOB_<id>、小さい。置き場は Store.js の appProps_）、結果は CacheService（6 時間）に置く。処理そのものの記録は監査ログに残る。
  */
 const APP_JOB_PREFIX = 'APP_JOB_';
 const APP_JOB_RESULT_PREFIX = 'APP_JOB_RESULT_';
@@ -38,6 +38,8 @@ function appJobSpec_(kind) {
     'YEAR.CLOSE': { minRole: 'ADMIN', label: '年度を締める' },
     // 途中で止まった保存の続きを、控え（Journal.js）のとおりに書く。予算策定担当以上（控えは、権限を確かめて始めた保存のもの）
     'SYSTEM.RECOVER': { minRole: 'PLANNER', label: '保存の続き' },
+    // 毎日の手入れ（Housekeeping.js）: 毎日のバックアップ（triggerDailyBackup）が数分後に動くよう入れる。頼んだ人は所有者。画面からは始められない
+    'SYSTEM.HOUSEKEEPING': { minRole: 'ADMIN', label: '毎日の手入れ', internal: true },
     // 物差し（Backtest.js。表の版 10 の 3-7）: 所有者だけ（apiOwnerTask の runBacktest）。手で始める。
     // 組み立て（続きは同じ処理を続けて動かす）→ 計算と保存（BACKTEST に 60 行を足す）
     'MEASURE.BACKTEST': { minRole: 'ADMIN', ownerOnly: true, planScoped: true, label: '物差し' },
@@ -69,7 +71,7 @@ function appJobOwnerOnly_(spec, payload) {
 }
 
 /**
- * 画面から渡された大きい中身（入力の行など）は、処理の記録（Script Properties、8KB まで）ではなく CacheService に置く。
+ * 画面から渡された大きい中身（入力の行など）は、処理の記録（UserProperties、8KB まで）ではなく CacheService に置く。
  * 処理は数分以内に動くので、6 時間の保存期間で足りる
  */
 function appJobStashArgs_(payload) {
@@ -151,6 +153,10 @@ function appJobExecute_(ctx, job) {
     case 'SYSTEM.RECOVER':
       return appAudited_(ctx, 'SYSTEM.RECOVER', { entityType: 'SYSTEM', detail: { jobId: job.id, pending: appJournalPending_() },
         after: res => res }, () => appWithLock_(() => appJournalRecover_(ctx) || { nothing: true }));
+    case 'SYSTEM.HOUSEKEEPING':
+      return appAudited_(ctx, 'HOUSEKEEPING.DAILY', { entityType: 'SYSTEM', detail: { jobId: job.id },
+        after: res => ({ ok: res.ok, problems: res.problems, error: res.error, durationMs: res.durationMs, notify: res.notify && res.notify.status }) },
+        () => appHousekeepingJob_(ctx));
     case 'MEASURE.BACKTEST':
       return appAudited_(ctx, 'MEASURE.BACKTEST.BUILD', { entityType: 'PLAN', entityId: p.planId,
         detail: { planId: p.planId, fy: p.fy, btId: p.btId || '', built: p.build ? p.build.done.length : 0, jobId: job.id },
@@ -165,7 +171,7 @@ function appJobExecute_(ctx, job) {
   }
 }
 
-// ---- 保存（Script Properties と CacheService） ----
+// ---- 保存（UserProperties と CacheService） ----
 
 function appJobGet_(id) {
   const raw = appProps_().getProperty(APP_JOB_PREFIX + id);
@@ -178,7 +184,7 @@ function appJobSave_(job) {
   appProps_().setProperty(APP_JOB_PREFIX + job.id, JSON.stringify(job));
 }
 
-/** 処理の記録の一覧（古い順）。Script Properties は 1 回でまとめて読む（getProperties） */
+/** 処理の記録の一覧（古い順）。置き場は 1 回でまとめて読む（getProperties） */
 function appJobList_() {
   const all = appProps_().getProperties();
   return Object.keys(all).filter(k => k.indexOf(APP_JOB_PREFIX) === 0 && k.indexOf(APP_JOB_RESULT_PREFIX) !== 0)
@@ -309,12 +315,12 @@ function appStartJobNow_(ctx, input) {
   return { jobId: started.jobId, status: last ? (last.nextJobId ? 'QUEUED' : last.status) : started.status, direct: !!last };
 }
 
-/** 処理を待ち行列に入れ、1 回だけ動くトリガーを作る（ロックの中で呼ぶ） */
-function appEnqueueJob_(kind, payload, requestedBy, parentId) {
+/** 処理を待ち行列に入れ、1 回だけ動くトリガーを作る（ロックの中で呼ぶ）。delayMs: トリガーが動くまで（省けば 1 秒） */
+function appEnqueueJob_(kind, payload, requestedBy, parentId, delayMs) {
   const job = { id: appId_('JOB'), kind: kind, payload: payload || {}, status: 'QUEUED', requestedBy: requestedBy, parentId: parentId || '',
     createdAt: new Date().toISOString(), startedAt: '', finishedAt: '', error: '', attempts: 0, nextJobId: '' };
   if (appUtf8Bytes_(JSON.stringify(job)) > 8000) throw new Error('処理に渡す内容が大きすぎます。');   // 1 つの値の上限は約 9KB（文字数ではなくバイト数）
-  const trigger = ScriptApp.newTrigger('triggerRunJob').timeBased().after(1000).create();
+  const trigger = ScriptApp.newTrigger('triggerRunJob').timeBased().after(Math.max(1000, Number(delayMs) || 1000)).create();
   job.triggerUid = String(trigger.getUniqueId());
   appJobSave_(job);
   return job;
@@ -448,7 +454,7 @@ function appRunJob_(id) {
   done.error = error;
   done.nextJobId = nextJobId;
   done.finishedAt = new Date().toISOString();
-  done.payload = appJobClientPayload_(done.payload);   // 終わった処理は、画面に要る項目だけ残す（Script Properties の全体の上限 500KB）
+  done.payload = appJobClientPayload_(done.payload);   // 終わった処理は、画面に要る項目だけ残す（UserProperties の全体の上限 500KB）
   appJobSave_(done);
   appRunLog_({ requestId: id, kind: 'JOB:' + job.kind, startedAt: job.startedAt, durationMs: new Date().getTime() - t0, status: status,
     detail: { jobId: id, requestedBy: job.requestedBy, attempts: done.attempts }, error: error });
