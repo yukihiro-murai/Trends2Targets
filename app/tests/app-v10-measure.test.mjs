@@ -340,13 +340,13 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
     const v = env.call('apiPlanView(__in)', { __in: { planId: id } });
     // 月ごとの予算の欄（旧来の画面の中身の形。モックの旧来の画面は月の行を読まないので、ここで入れる）
     v.boot.output.sections[0].monthly = Array.from({ length: 12 }, (_, i) => ({ row: 29 + i, month: fy + '/' + String(i + 1).padStart(2, '0'), p10: 70, p50: 80, p90: 90, adopted: 80, uplift: '', final: 80 }));
-    run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.fc.tab = 'forecast'`, { __l: env.call('apiListPlans()').plans, __id: id, __v: v, __d: d });
+    run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null`, { __l: env.call('apiListPlans()').plans, __id: id, __v: v, __d: d });
     return { d, v };
   };
   const m = fc(planM);
   const head = clean(run('viewForecast()'), '予測（測る専用）');
   assert.match(head, /<h1>予測[\s\S]*?<span class="chip off" data-tip="測る専用の計画です。[^"]*">測る専用<\/span><\/h1>/);
-  assert.match(head, /テスト薬品 FY\d{4}（測る専用）<\/option>/, '選ぶ欄にも印');
+  assert.match(head, /<option value="[^"]*" selected>テスト薬品<\/option>/, '選ぶ欄はメーカーの名前だけ（測る専用の印は題の横。2026-10-13 村井さん）');
   const tabM = clean(run('fcForecastTab(__d, __v)', { __d: m.d, __v: m.v }), '予測と予算（測る専用）');
   assert.doesNotMatch(tabM, /fcBudget\(|fcSaveBudget\(\)|この予算に/, '予算の欄・保存・届く見込みを出さない');
   assert.match(tabM, /fcForecastRun\(\)/, '予測の実行は出す（物差しの点を作る）');

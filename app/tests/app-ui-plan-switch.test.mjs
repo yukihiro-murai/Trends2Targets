@@ -94,8 +94,8 @@ vm.runInContext(js, ui);
 const run = (code, vars) => { Object.assign(ui, vars || {}); return vm.runInContext(code, ui); };
 flush();   // 起動のときのホームの読み込み
 timers.length = 0;
-/** 入力の表の、理由の欄の値（行の順） */
-const reasons = (html) => [...html.matchAll(/<input class="inp cell" type="text" value="([^"]*)" oninput="fcInputType\(\d+,'reason'/g)].map((m) => m[1]);
+/** 製品の入力の表の、理由の欄の値（行の順）。入力の 4 種類は 1 カラムに並ぶので、製品のカードの欄だけ */
+const reasons = (html) => [...html.matchAll(/<input class="inp cell" type="text" value="([^"]*)" oninput="fcInputType\(\d+,'reason',this\.value,'product'\)/g)].map((m) => m[1]);
 const grid = () => run(`S.fc.inputKind = 'product'; viewForecast()`);
 const lastStart = () => started[started.length - 1];
 

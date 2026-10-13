@@ -2,10 +2,10 @@
 /*
  * app-ui-load-keep.test.mjs — 読んだ中身の控え（LD_KEEP 10 分・古いの印 crossStale）。2026-10-13 提案 27。
  * 画面（UI.html の script）を vm で読み、google.script.run をモックのサーバー（gas-mock）につなぐ（応答は順に流す。呼ばれた入口を数える）。
- *   1. 同じ計画の根拠・振り返り・公式版のタブを行き来しても読み直さない。ホーム・メーカー・予測（計画の一覧）を行き来しても読み直さない
- *   2. 「もう一度読み込む」などの読む関数を直接呼べば、今までどおり読む。読み込み中のタブを押し直しても重ねて読まない
+ *   1. 予測は 1 カラム（2026-10-13）: 開いたら根拠・振り返り・公式版も並べて読む。ホーム・メーカー・予測を行き来しても読み直さない
+ *   2. 「もう一度読み込む」などの読む関数を直接呼べば、今までどおり読む。読み込み中に開き直しても重ねて読まない
  *   3. 10 分たったら読み直す
- *   4. 保存（裏の処理）の後は古いとみなし、次に開いたときに読み直す（開いているタブはその場で読み直す）。読み込み中に古くなったものも
+ *   4. 保存（裏の処理）の後は古いとみなし、次に開いたときに読み直す（開いている計画はその場で根拠なども読み直す）。読み込み中に古くなったものも
  *   5. 公式版を出した後も同じ。別の計画に移ったら、その計画のものを読む
  *   6. 初期データにホームがあるときは、ほかの画面から戻ってもすぐには読み直さない
  * 名前と数字はテスト用の架空のもの。本物の Apps Script・ブラウザの上での確認の代わりではない。
@@ -14,7 +14,7 @@
  */
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { setUpEnv, uiHtml, OWNER } from './gas-mock.mjs';
+import { fcSection, setUpEnv, uiHtml, OWNER } from './gas-mock.mjs';
 
 const D = (y, m, d = 1) => new Date(y, m - 1, d);
 const env = setUpEnv();
@@ -86,22 +86,29 @@ const u = makeUi();
 u.flush();   // 起動のときのホームの読み込み（初期データにホームが無い）
 u.timers.length = 0;
 const { run, callsOf } = u;
-const TAB_API = { basis: 'apiForecastBasis', review: 'apiLearningView', version: 'apiVersionList' };
 
-// ==== 1. 同じ計画のタブ・画面を行き来しても読み直さない ====
+// ==== 1. 予測は 1 カラム: 開いたら根拠・振り返り・公式版も並べて読む。同じ計画・画面を行き来しても読み直さない ====
 assert.deepEqual(callsOf(`go('makers')`), ['apiPortfolio'], 'メーカーは最初の 1 回だけ読む');
 assert.deepEqual(callsOf(`go('home')`).filter((f) => f === 'apiHome'), [], 'ホームに戻っても読み直さない（読んでから 10 分以内）');
 assert.deepEqual(callsOf(`go('makers')`), [], 'メーカーに戻っても読み直さない');
+const ALL = ['apiForecastBasis', 'apiForecastLatest', 'apiLearningView', 'apiPlanView', 'apiVersionList'];
 const first = callsOf(`openPlan('${X}', 'basis')`);
-assert.deepEqual(first.slice().sort(), ['apiForecastBasis', 'apiForecastLatest', 'apiListPlans', 'apiPlanView'], '予測を開く: 一覧・計画の中身・根拠');
+assert.deepEqual(first.slice().sort(), ALL.concat(['apiListPlans']).sort(), '予測を開く: 一覧・計画の中身・根拠・振り返り・公式版を並べて読む');
 assert.equal(run('S.fc.basis.planId'), X);
-assert.deepEqual(callsOf(`fcTab('review')`), ['apiLearningView'], '振り返りは最初に開いたときに読む');
-assert.deepEqual(callsOf(`fcTab('version')`), ['apiVersionList'], '公式版も最初に開いたときに読む');
-for (const t of ['basis', 'review', 'version', 'input', 'basis', 'forecast', 'version', 'review']) assert.deepEqual(callsOf(`fcTab('${t}')`), [], `同じ計画の ${t} に戻っても読み直さない`);
-assert.match(run('viewForecast()'), /<button class="tab on"[^>]*>振り返り<\/button>/);
-assert.doesNotMatch(run('viewForecast()'), /観測中…/, '控えた中身をすぐ出す（「観測中…」を出さない）');
-assert.deepEqual(callsOf(`go('home'); go('makers'); go('forecast')`).filter((f) => f !== 'apiAiLearning'), [], 'ホーム・メーカー・予測（計画の一覧・開いているタブ）を行き来しても読み直さない');
-assert.deepEqual(callsOf(`openPlan('${X}', 'basis')`), [], '同じ計画を開き直しても、計画の一覧と根拠は読み直さない');
+assert.equal(run('S.fc.learn.planId'), X);
+assert.equal(run('S.fc.ver.planId'), X);
+assert.equal(run('S.fc.jump'), 'basis', '根拠の区切りへ送る（描けたら送る）');
+{
+  const page = run('viewForecast()');
+  assert.doesNotMatch(page, /観測中…/, '読めた中身をすぐ出す（「観測中…」を出さない）');
+  assert.doesNotMatch(page, /role="tablist"[^>]*>\s*<button class="tab/, '画面の中のタブは無い');
+  const ids = [...page.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(ids, ['forecast', 'basis', 'input', 'review', 'version', 'steps'], '区切りは今までのタブの順に上から');
+}
+assert.deepEqual(callsOf(`go('home'); go('makers'); go('forecast')`).filter((f) => f !== 'apiAiLearning'), [], 'ホーム・メーカー・予測（計画の一覧・根拠・振り返り・公式版）を行き来しても読み直さない');
+assert.deepEqual(callsOf(`openPlan('${X}', 'review')`), [], '同じ計画を開き直しても読み直さない');
+assert.deepEqual(callsOf(`openPlan('${X}')`), [], '「開く」（区切りの指定なし）でも読み直さない');
+assert.equal(run('S.fc.jump'), '', '区切りの指定が無ければ画面の先頭から（送らない）');
 
 // ==== 2. 読む関数を直接呼べば今までどおり読む。読み込み中は重ねない ====
 assert.deepEqual(callsOf('fcLoadBasis()'), ['apiForecastBasis'], '「もう一度読み込む」（fcLoadBasis）は読む');
@@ -110,54 +117,49 @@ assert.deepEqual(callsOf('mkLoad()'), ['apiPortfolio'], '「もう一度読み�
 assert.deepEqual(callsOf('fcLoadPlans()'), ['apiListPlans']);
 {
   const n = u.calls.length;
-  run(`S.ld.fcLearn.at = 0; fcTab('review'); fcTab('basis'); fcTab('review')`);   // 読み込み中に押し直す
-  assert.deepEqual(u.calls.slice(n), ['apiLearningView'], '読み込み中のタブを押し直しても重ねて読まない');
+  run(`S.ld.fcLearn.at = 0; fcEnter(); fcEnter(); go('forecast')`);   // 読み込み中に開き直す
+  assert.deepEqual(u.calls.slice(n), ['apiLearningView'], '読み込み中に開き直しても重ねて読まない');
   u.flush();
   assert.equal(run('S.fc.learn.planId'), X);
 }
-// 失敗した後は、タブを開き直すと読む（「もう一度読み込む」と同じ）
+// 失敗した後は、その区切りの場所に理由ともう一度読む。開き直すと読む（「もう一度読み込む」と同じ）
 run(`S.ld.fcVer = { error: 'つながりません', at: Date.now() }`);
-assert.match(run(`S.fc.ver = null; S.fc.tab = 'version'; viewForecast()`), /読み込めませんでした[\s\S]*fcLoadVersions\(\)[\s\S]*もう一度読み込む/);
-assert.deepEqual(callsOf(`fcTab('version')`), ['apiVersionList'], '失敗した後に開き直すと読む');
+{
+  const page = run(`S.fc.ver = null; viewForecast()`);
+  assert.match(fcSection(page, 'version'), /読み込めませんでした[\s\S]*fcLoadVersions\(\)[\s\S]*もう一度読み込む/, '公式版の場所だけに出す');
+  assert.doesNotMatch(fcSection(page, 'basis'), /読み込めませんでした/, 'ほかの区切りはそのまま');
+}
+assert.deepEqual(callsOf(`go('forecast')`), ['apiVersionList'], '失敗した後に開き直すと読む');
 
 // ==== 3. 10 分たったら読み直す ====
 run(`S.ld.fcBasis.at -= LD_KEEP + 1; S.ld.home.at -= LD_KEEP + 1; S.ld.mk.at -= LD_KEEP + 1; S.ld.fcPlans.at -= LD_KEEP + 1`);
-assert.deepEqual(callsOf(`fcTab('basis')`), ['apiForecastBasis'], '10 分より古い根拠は読み直す');
-assert.deepEqual(callsOf(`fcTab('review')`), [], '振り返りはまだ 10 分たっていない');
 assert.ok(callsOf(`go('home')`).includes('apiHome'), '10 分より古いホームは読み直す');
 assert.deepEqual(callsOf(`go('makers')`), ['apiPortfolio'], '10 分より古いメーカーは読み直す');
-assert.deepEqual(callsOf(`go('forecast')`), ['apiListPlans'], '10 分より古い計画の一覧は読み直す（根拠は新しいまま）');
+assert.deepEqual(callsOf(`go('forecast')`).sort(), ['apiForecastBasis', 'apiListPlans'], '10 分より古い計画の一覧と根拠は読み直す（振り返り・公式版は新しいまま）');
 
-// ==== 4. 保存（裏の処理）の後は古いとみなす ====
+// ==== 4. 保存（裏の処理）の後は古いとみなす。開いている計画は根拠・振り返り・公式版も並べて読み直す ====
 {
-  // 入力のタブで保存する（PLAN.EDIT）。終わると開いている計画を読み直す
-  run(`fcTab('input'); S.fc.inputKind = 'product'; viewForecast(); fcInput(0, 'reason', '甲の理由（直した）')`);
+  // 製品の入力のカードで保存する（PLAN.EDIT）。終わると開いている計画を読み直す
+  run(`viewForecast(); fcInput(0, 'reason', '甲の理由（直した）', 'product')`);
   const n0 = u.calls.length;
-  run('fcSaveInput()'); u.flush();   // 裏の処理の問い合わせ（setTimeout）は残す
+  run(`fcSaveInput('product')`); u.flush();   // 裏の処理の問い合わせ（setTimeout）は残す
   assert.deepEqual(u.calls.slice(n0), ['apiStartJob']);
   const n = u.calls.length;
   u.finishJobs();
   const after = u.calls.slice(n).filter((f) => f !== 'apiJobStatus');
-  assert.deepEqual(after.slice().sort(), ['apiForecastLatest', 'apiPlanView'], '終わったら開いている計画を読み直す（入力のタブにはほかの中身は無い）');
+  assert.deepEqual(after.slice().sort(), ALL, '終わったら開いている計画を読み直す（1 カラムに並ぶ根拠・振り返り・公式版も）');
   assert.equal(view(X).boot.input.product[0].reason, '甲の理由（直した）');
-  for (const k of ['home', 'mk', 'fcPlans', 'fcBasis', 'fcLearn', 'fcVer']) assert.equal(run(`S.ld.${k}.at`), 0, k + ' に古いの印');
-  // 次に開いたときに読み直す（1 回だけ）
-  for (const t of ['basis', 'review', 'version']) {
-    assert.deepEqual(callsOf(`fcTab('${t}')`), [TAB_API[t]], `保存の後は ${t} を読み直す`);
-    assert.deepEqual(callsOf(`fcTab('${t}')`), [], `読み直した後は ${t} をまた控える`);
-  }
+  for (const k of ['home', 'mk', 'fcPlans']) assert.equal(run(`S.ld.${k}.at`), 0, k + ' に古いの印');
+  assert.deepEqual(callsOf(`go('forecast')`), ['apiListPlans'], '保存の後は計画の一覧を読み直す（中身は読み直したばかり）');
   assert.ok(callsOf(`go('home')`).includes('apiHome'), '保存の後はホームを読み直す');
   assert.deepEqual(callsOf(`go('makers')`), ['apiPortfolio'], '保存の後はメーカーを読み直す');
-  assert.deepEqual(callsOf(`go('forecast')`), ['apiListPlans'], '保存の後は計画の一覧を読み直す');
   assert.deepEqual(callsOf(`go('home'); go('makers'); go('forecast')`).filter((f) => f !== 'apiAiLearning'), [], 'その後はまた控える');
 }
 {
-  // 開いているタブで処理が終わったら、そのタブはその場で読み直す（根拠のタブで予測を保存した形）
-  run(`fcTab('basis')`);
+  // 処理が終わったら、開いている計画はその場で読み直す（予測を保存した形）
   const n = u.calls.length;
   run(`jobReload('${X}', { action: 'FORECAST.RUN' })`); u.flush();
-  assert.deepEqual(u.calls.slice(n).sort(), ['apiForecastBasis', 'apiForecastLatest', 'apiPlanView'], '開いている根拠のタブは、その場で読み直す');
-  assert.deepEqual(callsOf(`fcTab('review')`), ['apiLearningView'], 'ほかのタブは次に開いたときに読み直す');
+  assert.deepEqual(u.calls.slice(n).sort(), ALL, '開いている計画は、根拠・振り返り・公式版もその場で読み直す');
 }
 {
   // 読み込み中に古くなった（保存が先に終わった）ものは、届いても古いとみなす
@@ -166,12 +168,11 @@ assert.deepEqual(callsOf(`go('forecast')`), ['apiListPlans'], '10 分より古�
   u.flush();
   assert.equal(run('S.ld.fcBasis.at'), 0, '読み込み中に古くなったものは、届いても古い');
   assert.equal(run('S.fc.basis.planId'), X, '中身は出す');
-  assert.deepEqual(callsOf(`fcTab('input'); fcTab('basis')`), ['apiForecastBasis'], '次に開いたときに読み直す');
+  assert.deepEqual(callsOf(`fcEnter()`).sort(), ['apiForecastBasis', 'apiLearningView', 'apiListPlans', 'apiVersionList'], '次に開いたときに読み直す');
 }
 
 // ==== 5. 公式版を出した後・別の計画に移ったとき ====
 {
-  run(`fcTab('version')`); u.flush();
   // 公式版を出す（確かめる画面で「出す」）。出せたら公式版を読み直し、ほかは古いとみなす
   assert.equal(run('S.fc.ver.versions.length'), 0);
   run(`document.getElementById = (function(g){ return function(id){ var e = g(id); if (id === 'ver_submit_note') e.value = 'テスト'; return e; }; })(document.getElementById); verSubmit()`);
@@ -180,17 +181,16 @@ assert.deepEqual(callsOf(`go('forecast')`), ['apiListPlans'], '10 分より古�
   assert.deepEqual(u.calls.slice(n), ['apiVersionSubmit', 'apiVersionList'], '出したら公式版を読み直す');
   assert.equal(run('S.fc.ver.versions.length'), 1, '出した版が一覧に出る');
   for (const k of ['home', 'mk', 'fcPlans', 'fcBasis', 'fcLearn']) assert.equal(run(`S.ld.${k}.at`), 0, '出したら ' + k + ' は古い');
-  assert.deepEqual(callsOf(`fcTab('basis')`), ['apiForecastBasis'], '出した後は根拠を読み直す');
+  assert.deepEqual(callsOf(`fcEnter()`).sort(), ['apiForecastBasis', 'apiLearningView', 'apiListPlans'], '出した後は根拠・振り返り・計画の一覧を読み直す');
   assert.deepEqual(callsOf(`go('makers')`), ['apiPortfolio'], '出した後はメーカー（状態の列）を読み直す');
   run(`go('forecast')`); u.flush();
 }
 {
-  assert.deepEqual(callsOf(`fcSwitch('${Y}')`).sort(), ['apiForecastBasis', 'apiForecastLatest', 'apiPlanView'], '別の計画に移ると、その計画の中身と開いているタブを読む');
+  assert.deepEqual(callsOf(`fcSwitch('${Y}')`).sort(), ALL, '別の計画に移ると、その計画の中身と根拠・振り返り・公式版を読む');
   assert.equal(run('S.fc.basis.planId'), Y);
-  assert.deepEqual(callsOf(`fcTab('review')`), ['apiLearningView'], '別の計画の振り返りは読む（前の計画の控えを使わない）');
-  assert.equal(run('S.fc.learn.planId'), Y);
-  assert.deepEqual(callsOf(`fcTab('basis'); fcTab('review')`), [], 'その計画の中でも控える');
-  assert.deepEqual(callsOf(`fcSwitch('${X}')`).sort(), ['apiForecastLatest', 'apiLearningView', 'apiPlanView'], '戻ったら元の計画を読み直す（控えは開いている計画の分だけ）');
+  assert.equal(run('S.fc.learn.planId'), Y, '前の計画の控えを使わない');
+  assert.deepEqual(callsOf(`fcEnter()`), [], 'その計画の中でも控える');
+  assert.deepEqual(callsOf(`fcSwitch('${X}')`).sort(), ALL, '戻ったら元の計画を読み直す（控えは開いている計画の分だけ）');
 }
 
 // ==== 6. 初期データにホームがあるとき ====

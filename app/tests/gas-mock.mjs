@@ -28,6 +28,8 @@ export const OTHER = 'other@bigm2y.com';
 export const OUTSIDER = 'someone@gmail.com';
 export const SHEETS_MIME = 'application/vnd.google-apps.spreadsheet';
 
+/** 予測の画面（1 カラム）の HTML から、区切り（予測と予算 forecast・根拠 basis・入力 input・振り返り review・公式版 version・進み steps）のカードだけを取り出す（無ければ空） */
+export const fcSection = (html, key) => { const i = String(html).indexOf('<section class="card fcsec" id="fcs-' + key + '"'); return i < 0 ? '' : html.slice(i, html.indexOf('</section>', i) + 10); };
 export const sha = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
 export const J = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 export const isDate = (v) => Object.prototype.toString.call(v) === '[object Date]';
