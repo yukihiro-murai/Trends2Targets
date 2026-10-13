@@ -97,6 +97,15 @@ const OLD_COMPUTE_SRC = `function oldAutoLearnComputeState_(pairs, opts) {
   };
 }`;
 
+// 今まで（月ごとの誤差の平均）の写しに、目標の係数と暦月の偏りだけ 2026-10-13 の式（1 ÷ (1 + 偏り)）を当てたもの。
+// 実績がどの月も同じなら、今の合計の比はこれと同じ（12. で照合する。合計の比と月ごとの平均の違いだけを見る）
+const OLD_EXACT_SRC = OLD_COMPUTE_SRC
+  .replace('function oldAutoLearnComputeState_', 'function oldExactAutoLearnComputeState_')
+  .replace('clamp_(1 - postBias, fMin, fMax)', 'clamp_(postBias > -1 + 1e-9 ? 1 / (1 + postBias) : fMax, fMin, fMax)')
+  .replace('clamp_(-(g.we / Math.max(1e-9, g.w + kM)), -monthCap, monthCap)',
+    '(e => clamp_(e > -1 + 1e-9 ? 1 / (1 + e) - 1 : monthCap, -monthCap, monthCap))(g.we / Math.max(1e-9, g.w + kM))');
+assert.ok(OLD_EXACT_SRC.includes('1 / (1 + postBias)') && OLD_EXACT_SRC.includes('1 / (1 + e) - 1'), '写しの式を差し替えた');
+
 const harness = [
   ...constLines,
   "const SHEETS = { FORECAST_SNAPSHOT: 'FORECAST_SNAPSHOT' };",
@@ -118,6 +127,7 @@ const harness = [
   extractFunction('parseResidualMonthBiasJson_'),
   extractFunction('canonicalMonthBiasJson_'),
   OLD_COMPUTE_SRC,
+  OLD_EXACT_SRC,
 ].join('\n');
 
 // fmtYM_ は Utilities.formatDate(d,TZ,'yyyy/MM') を使う — Node 側で最小実装を注入。
@@ -129,8 +139,8 @@ const sandbox = { Math, JSON, Number, String, isFinite, console, TZ: 'Asia/Tokyo
     return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`;
   } } };
 vm.createContext(sandbox);
-vm.runInContext(`${harness}\n;this.__fns = { autoLearnComputeState_, parseResidualMonthBiasJson_, canonicalMonthBiasJson_, ymKey_, attachAppliedCalibration_, oldAutoLearnComputeState_ };`, sandbox);
-const { autoLearnComputeState_, parseResidualMonthBiasJson_, canonicalMonthBiasJson_, ymKey_, attachAppliedCalibration_, oldAutoLearnComputeState_ } = sandbox.__fns;
+vm.runInContext(`${harness}\n;this.__fns = { autoLearnComputeState_, parseResidualMonthBiasJson_, canonicalMonthBiasJson_, ymKey_, attachAppliedCalibration_, oldAutoLearnComputeState_, oldExactAutoLearnComputeState_ };`, sandbox);
+const { autoLearnComputeState_, parseResidualMonthBiasJson_, canonicalMonthBiasJson_, ymKey_, attachAppliedCalibration_, oldAutoLearnComputeState_, oldExactAutoLearnComputeState_ } = sandbox.__fns;
 
 const AUTOLEARN_MIN_EVAL_MONTHS = 3;
 const pairs = n => Array.from({ length: n }, (_, i) => ({ ym: `2025/${String(12 - i).padStart(2, '0')}`, pred: 110, actual: 100 }));
@@ -190,7 +200,7 @@ const pairs = n => Array.from({ length: n }, (_, i) => ({ ym: `2025/${String(12 
   ];
   const r = autoLearnComputeState_(data);
   assert.equal(r.ready, true);
-  assert.ok(r.monthBias['4'] < -0.10, `4月の過剰予測 → 負の補正: ${r.monthBias['4']}`);
+  assert.ok(r.monthBias['4'] < -0.09, `4月の過剰予測 → 負の補正: ${r.monthBias['4']}`);   // 縮めた誤差 e から 1 ÷ (1 + e) − 1（近似の −e より少し小さい）
   assert.ok(Math.abs(r.monthBias['4']) <= 0.20, '暦月バイアスは±0.20にキャップ');
   assert.equal(r.monthBias['3'], undefined, '誤差のない月は登録されない');
 }
@@ -285,7 +295,7 @@ function closeTo(a, b, msg) {
     });
     // 実績がどの月も同じ（ここでは 120）なら、今まで（月ごとの誤差の平均）と同じ
     const flat = pairs.map((p) => ({ ...p, actual: p.actual === 0 ? 0 : 120 }));
-    closeTo(autoLearnComputeState_(flat, { curFactor: cur }), oldAutoLearnComputeState_(flat, { curFactor: cur }), `set ${k} 実績が同じ`);
+    closeTo(autoLearnComputeState_(flat, { curFactor: cur }), oldExactAutoLearnComputeState_(flat, { curFactor: cur }), `set ${k} 実績が同じ`);
   }
 }
 
@@ -333,10 +343,11 @@ function simulate(learn, rawBias, months, opts) {
   const N = 48;
   const nw = simulate(autoLearnComputeState_, () => 0.10, N);
   const od = simulate(oldAutoLearnComputeState_, () => 0.10, N);
-  // 今後の落ち着き先: 今までと同じ縮め方 1 − 0.10 × S / (S + 3)（S = 48 か月の重みの和 ≈ 6.28）≈ 0.932
+  // 今後の落ち着き先: 今までと同じ縮め方の偏り 0.10 × S / (S + 3)（S = 48 か月の重みの和 ≈ 6.28）を、1 ÷ (1 + 偏り) にする ≈ 0.937
+  // （2026-10-13 から近似しない。前の 1 − 偏り なら 0.932）
   const S = Array.from({ length: N }, (_, i) => Math.pow(0.5, i / 4)).reduce((s, x) => s + x, 0);
-  const fStar = 1 - 0.10 * S / (S + 3);
-  assert.ok(Math.abs(fStar - 0.9323) < 1e-4, String(fStar));
+  const fStar = 1 / (1 + 0.10 * S / (S + 3));
+  assert.ok(Math.abs(fStar - 0.9366) < 1e-4, String(fStar));
   const fN = nw[N - 1].F; const fO = od[N - 1].F;
   assert.ok(Math.abs(fN - fStar) < 1e-3, `今後は ${fStar.toFixed(4)} に落ち着く: ${fN}`);
   nw.forEach(p => assert.ok(p.F <= p.prev + 1e-12, `今後は一度も 1 の側へ戻らない: ${p.ym} ${p.prev} → ${p.F}`));
@@ -346,16 +357,15 @@ function simulate(learn, rawBias, months, opts) {
   const firstO = od.find(p => p.ready).F;
   assert.ok(Math.max(...od.map(p => p.F)) > firstO + 0.005, `今までは下げた後に戻る: ${firstO} → ${Math.max(...od.map(p => p.F))}`);
   assert.ok(fO > fStar + 0.02, `今まで ${fO} / 今後 ${fN}`);
-  // 補正の後に残る誤差（最後の月の予測）: 今後 約 +2.6%、今まで 約 +5.7%
-  assert.ok(nw[N - 1].err < 0.03 && od[N - 1].err > 0.05, `残る誤差 今後 ${nw[N - 1].err} / 今まで ${od[N - 1].err}`);
+  // 補正の後に残る誤差（最後の月の予測）: 今後 約 +3.0%（縮めた分だけ残る。1.1 × 0.937 − 1）、今まで 約 +5.7%
+  assert.ok(nw[N - 1].err < 0.035 && od[N - 1].err > 0.05, `残る誤差 今後 ${nw[N - 1].err} / 今まで ${od[N - 1].err}`);
   // どちらも 1 回の幅 0.05 と上下限を守る
   [nw, od].forEach(path => path.forEach(p => { assert.ok(Math.abs(p.F - p.prev) <= 0.05 + 1e-12); assert.ok(p.F >= 0.75 && p.F <= 1.25); }));
 
-  // 縮めなければ（kG=0。テストのためだけ）今後は 1 − 0.10 = 0.900 へ。今までは 0.952（= 2 / 2.1）の辺りで止まる。
-  // 0.909（= 1 / 1.1）との差は 1 − postBias の近似によるもの（式は変えていない）
+  // 縮めなければ（kG=0。テストのためだけ）今後は 1 ÷ 1.1 = 0.909 へ（ちょうど直る。前の 1 − 偏り の近似なら 0.900 で直し過ぎた）。今までは 0.952（= 2 / 2.1）の辺りで止まる
   const nw0 = simulate(autoLearnComputeState_, () => 0.10, N, { kG: 0 });
   const od0 = simulate(oldAutoLearnComputeState_, () => 0.10, N, { kG: 0 });
-  assert.ok(Math.abs(nw0[N - 1].F - 0.9) < 1e-3, String(nw0[N - 1].F));
+  assert.ok(Math.abs(nw0[N - 1].F - 1 / 1.1) < 1e-3, String(nw0[N - 1].F));
   assert.ok(od0[N - 1].F > 0.94, String(od0[N - 1].F));
 }
 
@@ -493,13 +503,14 @@ function simulate(learn, rawBias, months, opts) {
   assert.equal(curOld, 0.75, '今まで: 下限まで下がる');
   assert.ok(Math.abs(curNew - bad.targetFactor) < 1e-12 && curNew > 0.78, `今後: 目標で止まる ${curNew}`);
   assert.equal(autoLearnComputeState_(rows.slice(-2)).ready, false, '3 か月未満では学ばない');
-  // 暦月バイアス: 1 か月だけの暦月は、今までと同じ（その月の誤差を縮めた値。上限 ±0.20）
+  // 暦月バイアス: 1 か月だけの暦月は、その月の誤差を縮めた値から（上限 ±0.20）
   assert.equal(bad.monthBias[String(Number(ymOf(5).slice(5)))], -0.2);
   // 同じ暦月が 2 回ある（13 か月以上）ときは、その暦月の合計の比で縮める
   const two = [{ ym: '2025/04', pred: 100, actual: 50 }, { ym: '2025/05', pred: 100, actual: 100 }, { ym: '2025/06', pred: 100, actual: 100 }, { ym: '2026/04', pred: 100, actual: 150 }];
   const r2 = autoLearnComputeState_(two, { kM: 0 });
   const w4 = [Math.pow(0.5, 3 / 4), 1];   // 2025/04 は新しい方から 4 番目、2026/04 はいちばん新しい
-  const exp4 = -((w4[0] * 50 + w4[1] * -50) / (w4[0] * 50 + w4[1] * 150));
+  const e4 = (w4[0] * 50 + w4[1] * -50) / (w4[0] * 50 + w4[1] * 150);
+  const exp4 = 1 / (1 + e4) - 1;   // 2026-10-13 から 1 ÷ (1 + 誤差) − 1（近似の −誤差 ではなく）
   assert.ok(Math.abs(r2.monthBias['4'] - Number(exp4.toFixed(4))) < 1e-12, `4 月: ${r2.monthBias['4']} / ${exp4}`);
 }
 

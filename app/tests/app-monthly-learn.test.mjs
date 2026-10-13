@@ -52,15 +52,15 @@ function book(env, factorUsed, evalLog) {
   });
 }
 
-/** 期待値（エンジンとは別に、設計の式から）: 新しい月から w = 0.5^(i/4)、postBias = Σw·e / (Σw + 3)、1 回の幅 ±0.05、暦月は Σw·eM / (Σw + 2) */
+/** 期待値（エンジンとは別に、設計の式から）: 新しい月から w = 0.5^(i/4)、postBias = Σw·e / (Σw + 3)、目標 = 1 ÷ (1 + postBias)、1 回の幅 ±0.05、暦月は 1 ÷ (1 + Σw·eM / (Σw + 2)) − 1（2026-10-13 から近似しない） */
 function expected(e, eM, cur) {
   const w = MONTHS.map((_, i) => Math.pow(0.5, i / 4));
   const ws = w.reduce((s, x) => s + x, 0);
-  const target = 1 - (e * ws) / (ws + 3);
+  const target = 1 / (1 + (e * ws) / (ws + 3));
   const factor = cur + Math.max(-0.05, Math.min(0.05, target - cur));
   const mb = {};
   // 新しい月（2026/03）から順に。暦月はどれも 1 回だけ
-  [...MONTHS].reverse().forEach((ym, i) => { const b = -(w[i] * eM) / (w[i] + 2); if (Math.abs(b) >= 0.005) mb[String(Number(ym.slice(5)))] = Number(b.toFixed(4)); });
+  [...MONTHS].reverse().forEach((ym, i) => { const b = 1 / (1 + (w[i] * eM) / (w[i] + 2)) - 1; if (Math.abs(b) >= 0.005) mb[String(Number(ym.slice(5)))] = Number(b.toFixed(4)); });
   return { factor, target, mb };
 }
 
@@ -92,7 +92,7 @@ const sameMonthBias = (json, exp) => {
   assert.ok(Number(cal.bias_correction_factor) < 0.95, '係数は下がり続ける（今までは 1 に向かって戻っていた）');
   // 今までの学び方（104.5 をそのまま使う）なら e = +4.5% で、係数は 0.974 へ戻っていた
   const old = expected(RAW * 0.95 / ACTUAL - 1, RAW * 0.95 / ACTUAL - 1, 0.95);
-  assert.ok(old.factor > 0.97 && Math.abs(Number(cal.bias_correction_factor) - old.factor) > 0.03);
+  assert.ok(old.factor > 0.97 && Math.abs(Number(cal.bias_correction_factor) - old.factor) > 0.025);
   sameMonthBias(cal.residual_month_bias_json, exp.mb);
   assert.match(cal.note, /^auto-learned .+ \(n=6, raw, corrected=6\)$/, 'どの学び方かをメモに残す');
   const h = history(env, planId);

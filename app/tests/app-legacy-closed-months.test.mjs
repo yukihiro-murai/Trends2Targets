@@ -330,14 +330,14 @@ const near = (a, b, msg) => assert.ok(Math.abs(Number(a) - b) < 1e-9, `${msg}: $
   const w = [0, 1, 2].map((i) => Math.pow(0.5, i / 4));   // 新しい月（9 月）から
   const S = w.reduce((a, b) => a + b, 0);
   const e = (PRE - 1000) / 1000;
-  const factor = 1 - (e * S) / (S + 3);
+  const factor = 1 / (1 + (e * S) / (S + 3));   // 目標 = 1 ÷ (1 + 縮めた偏り)（2026-10-13 から近似しない）
   const c = P.cal();
   near(c.bias_correction_factor, factor, 'B-5 の係数（7〜9 月・6/19 の予測）');
   assert.ok(Number(c.bias_correction_factor) < 1, '6/19 の予測は多すぎたので下げる（10/02 の回 900 なら上げていた）');
   assert.match(c.note, /\(n=3, raw, corrected=0\)$/, '3 か月だけで学んだ（前の版の行・締まっていない月は入らない）');
   const mb = JSON.parse(c.residual_month_bias_json);
   assert.deepEqual(Object.keys(mb).sort(), ['7', '8', '9'], '暦月の偏りも 7〜9 月だけ');
-  ['9', '8', '7'].forEach((m, i) => near(mb[m], Number((-(w[i] * e) / (w[i] + 2)).toFixed(4)), m + ' 月の偏り'));
+  ['9', '8', '7'].forEach((m, i) => near(mb[m], Number((1 / (1 + (w[i] * e) / (w[i] + 2)) - 1).toFixed(4)), m + ' 月の偏り'));
   assert.deepEqual(P.rows('CALIBRATION_HISTORY').map((r) => [r.review_id, r.factor_name, r.old_value]),
     [['AUTO-MONTHLY', 'bias_correction_factor', '1'], ['AUTO-MONTHLY', 'residual_month_bias_json', '{}']], '履歴に前の値を残す');
 
