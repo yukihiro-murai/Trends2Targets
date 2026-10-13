@@ -2,7 +2,9 @@
 /*
  * forecast-autolearn.test.mjs — B-5 月次ベイズ自動学習の純粋計算部を Node で検証する。
  * Forecast_Agent.js から対象関数と AUTOLEARN_* 定数を抽出し vm で実行（GAS API 非依存の範囲）。
- * 12〜17（2026-10-07）: 補正を掛ける前の予測で学ぶ。補正が無ければ今までと同じ・何か月回しても戻らない・上下限・回の選び直し。
+ * 12〜17（2026-10-07）: 補正を掛ける前の予測で学ぶ。補正が無ければ割り戻さない・何か月回しても戻らない・上下限・回の選び直し。
+ * 18（2026-10-13）: 偏りは重みつきの合計の比（Σw(予測 − 実績) ÷ Σw|実績|）。実績が 0 に近い月 1 つで目標の係数が下限に張りつかない。
+ *   実績がどの月も同じなら、月ごとの誤差の平均（今まで）と同じ。
  *
  *   node tests/forecast-autolearn.test.mjs
  */
@@ -249,7 +251,19 @@ function sameAsOld(a, b, msg) {
   assert.equal(JSON.stringify(a.monthBias), JSON.stringify(b.monthBias), `${msg}: monthBias`);
 }
 
-// ---- 12. 補正が掛かっていない（係数 1・暦月バイアス 0）・分からない組は、今までとまったく同じ結果 ----
+// ---- 12. 補正が掛かっていない（係数 1・暦月バイアス 0）・分からない組は、何も割り戻さない（補正の無い組と 1 ビットも違わない）。
+//          実績がどの月も同じなら、偏りの合計の比は月ごとの誤差の平均と同じなので、2026-10-07 より前の結果とも同じ（計算の順の誤差のほか） ----
+/** 2 つの結果の数が、計算の順の誤差のほかは同じか（暦月バイアスは 4 桁に丸めた値なので、丸めの境目の 1 だけの違いは許す） */
+function closeTo(a, b, msg) {
+  for (const k of ['ready', 'reason', 'n', 'curFactor']) assert.ok(Object.is(a[k], b[k]), `${msg}: ${k} ${a[k]} / ${b[k]}`);
+  for (const k of ['postBias', 'factor', 'targetFactor']) {
+    if (b[k] === undefined) { assert.equal(a[k], undefined, `${msg}: ${k}`); continue; }
+    assert.ok(Math.abs(a[k] - b[k]) < 1e-12, `${msg}: ${k} ${a[k]} / ${b[k]}`);
+  }
+  const ka = Object.keys(a.monthBias || {}).sort(), kb = Object.keys(b.monthBias || {}).sort();
+  assert.deepEqual(ka.filter((k) => Math.abs(a.monthBias[k]) > 0.0051), kb.filter((k) => Math.abs(b.monthBias[k]) > 0.0051), `${msg}: monthBias の月`);
+  ka.filter((k) => k in (b.monthBias || {})).forEach((k) => assert.ok(Math.abs(a.monthBias[k] - b.monthBias[k]) <= 1.0001e-4, `${msg}: monthBias ${k}`));
+}
 {
   const r = rng(7);
   for (let k = 0; k < 200; k++) {
@@ -258,31 +272,33 @@ function sameAsOld(a, b, msg) {
     const pairs = Array.from({ length: n }, (_, i) => ({ ym: ymOf(start + i), pred: 50 + r() * 100, actual: r() < 0.05 ? 0 : 50 + r() * 100 }));
     if (k % 7 === 0) pairs.push({ ym: ymOf(start + n), pred: 'x', actual: 100 });
     const cur = 0.75 + r() * 0.5;
-    const old = oldAutoLearnComputeState_(pairs, { curFactor: cur });
+    const plain = autoLearnComputeState_(pairs, { curFactor: cur });
     const unknowns = [undefined, null, '', 'x', 0, -1, NaN];
     const variants = [
-      pairs,                                                                              // 何も付いていない（今までの組）
       pairs.map(p => ({ ...p, factorUsed: 1, monthBiasUsed: 0 })),                          // 補正なしの回
       pairs.map((p, i) => ({ ...p, factorUsed: unknowns[i % 7], monthBiasUsed: unknowns[(i + 3) % 7] })),   // 読めない値は補正なし
     ];
     variants.forEach((v, j) => {
       const res = autoLearnComputeState_(v, { curFactor: cur });
-      sameAsOld(res, old, `set ${k} variant ${j}`);
-      if (res.ready) { assert.equal(res.method, 'raw'); assert.equal(res.corrected, 0); }
+      sameAsOld(res, plain, `set ${k} variant ${j}`);
+      if (res.ready) { assert.equal(res.method, 'raw'); assert.equal(res.corrected, 0); assert.equal(res.measure, 'ratio'); }
     });
+    // 実績がどの月も同じ（ここでは 120）なら、今まで（月ごとの誤差の平均）と同じ
+    const flat = pairs.map((p) => ({ ...p, actual: p.actual === 0 ? 0 : 120 }));
+    closeTo(autoLearnComputeState_(flat, { curFactor: cur }), oldAutoLearnComputeState_(flat, { curFactor: cur }), `set ${k} 実績が同じ`);
   }
 }
 
 // ---- 13. 補正が掛かった予測は割り戻してから学ぶ（1 回分） ----
 {
-  // 全体: 係数 0.93・暦月バイアスを掛けた予測は、補正の前の予測（raw）で今までの式に入れたのと同じ
-  // 暦月: 暦月バイアスだけを割り戻した予測（raw × 係数）で今までの式に入れたのと同じ（全体の係数を掛けた後に残る誤差を直す分）
+  // 全体: 係数・暦月バイアスを掛けた予測は、補正の前の予測（raw）を補正なしで入れたのと同じ
+  // 暦月: 暦月バイアスだけを割り戻した予測（raw × 係数）を補正なしで入れたのと同じ（全体の係数を掛けた後に残る誤差を直す分）
   const r = rng(11);
   const raw = Array.from({ length: 14 }, (_, i) => ({ ym: ymOf(i), raw: 80 + r() * 60, actual: 80 + r() * 60, f: 0.85 + r() * 0.3, mb: -0.2 + r() * 0.4 }));
   const corrected = raw.map(p => ({ ym: p.ym, pred: p.raw * p.f * (1 + p.mb), actual: p.actual, factorUsed: p.f, monthBiasUsed: p.mb }));
   const res = autoLearnComputeState_(corrected, { curFactor: 0.97 });
-  const g = oldAutoLearnComputeState_(raw.map(p => ({ ym: p.ym, pred: p.raw, actual: p.actual })), { curFactor: 0.97 });
-  const m = oldAutoLearnComputeState_(raw.map(p => ({ ym: p.ym, pred: p.raw * p.f, actual: p.actual })), { curFactor: 0.97 });
+  const g = autoLearnComputeState_(raw.map(p => ({ ym: p.ym, pred: p.raw, actual: p.actual })), { curFactor: 0.97 });
+  const m = autoLearnComputeState_(raw.map(p => ({ ym: p.ym, pred: p.raw * p.f, actual: p.actual })), { curFactor: 0.97 });
   for (const k of ['postBias', 'targetFactor', 'factor']) assert.ok(Math.abs(res[k] - g[k]) < 1e-12, `${k}: ${res[k]} / ${g[k]}`);
   assert.equal(JSON.stringify(res.monthBias), JSON.stringify(m.monthBias));
   assert.equal(res.corrected, 14);
@@ -445,6 +461,46 @@ function simulate(learn, rawBias, months, opts) {
   assert.deepEqual(used(book(rows, HEAD.slice(0, 14)), evalPairs), none);
   assert.deepEqual(used(book([]), evalPairs), none);
   assert.deepEqual(used(book(rows), []), []);
+}
+
+// ---- 18. 2026-10-13: 偏りは重みつきの合計の比。実績が 0 に近い月が 1 つあっても、目標の係数は下限に張りつかない ----
+{
+  // 報告の例: 6 か月とも予測（中心）1 億・実績ほぼ 1 億。いちばん新しい月だけ実績が 1 万円
+  const preds = 1e8;
+  const acts = [1.02e8, 0.97e8, 1.03e8, 0.98e8, 1.01e8, 0.99e8];
+  const six = (last) => acts.map((a, i) => ({ ym: ymOf(i), pred: preds, actual: i === 5 ? last : a }));
+  const ok = autoLearnComputeState_(six(0.99e8));
+  const bad = autoLearnComputeState_(six(1e4));
+  const oldBad = oldAutoLearnComputeState_(six(1e4));
+  // 今まで（月ごとの誤差の平均）: その月の誤差は 9,999 倍。偏りが何千 % になり、目標は下限 0.75、係数は 1 回 0.05 ずつ下がる
+  assert.ok(oldBad.postBias > 1000, `今まで postBias ${oldBad.postBias}`);
+  assert.equal(oldBad.targetFactor, 0.75);
+  // 今後: 合計の比。重み（新しい月ほど重い）を付けた予測と実績の合計で、その月は金額のとおりに数える
+  const w = Array.from({ length: 6 }, (_, i) => Math.pow(0.5, (5 - i) / 4));
+  const S = w.reduce((t, x) => t + x, 0);
+  const rows = six(1e4);
+  const ratio = rows.reduce((t, p, i) => t + w[i] * (p.pred - p.actual), 0) / rows.reduce((t, p, i) => t + w[i] * Math.abs(p.actual), 0);
+  assert.ok(Math.abs(bad.postBias - ratio * S / (S + 3)) < 1e-12, `postBias = 合計の比 × Σw ÷ (Σw + kG): ${bad.postBias}`);
+  assert.ok(bad.postBias > 0.1 && bad.postBias < 0.3, `偏りは 1 万円の月のぶん強気に寄るが、何千 % にはならない: ${bad.postBias}`);
+  assert.ok(bad.targetFactor > 0.75 + 0.03 && bad.targetFactor < 0.9, `目標の係数は下限に張りつかない: ${bad.targetFactor}`);
+  assert.ok(Math.abs(ok.postBias) < 0.01 && Math.abs(ok.targetFactor - 1) < 0.01, `実績がほぼ 1 億なら偏りはほぼ 0: ${ok.postBias}`);
+  // 何か月も回すと、今までは下限 0.75 まで下がる。今後はその目標で止まる（3 か月未満では学ばない決まりは同じ）
+  let curNew = 1, curOld = 1;
+  for (let k = 0; k < 10; k++) {
+    curNew = autoLearnComputeState_(rows, { curFactor: curNew }).factor;
+    curOld = oldAutoLearnComputeState_(rows, { curFactor: curOld }).factor;
+  }
+  assert.equal(curOld, 0.75, '今まで: 下限まで下がる');
+  assert.ok(Math.abs(curNew - bad.targetFactor) < 1e-12 && curNew > 0.78, `今後: 目標で止まる ${curNew}`);
+  assert.equal(autoLearnComputeState_(rows.slice(-2)).ready, false, '3 か月未満では学ばない');
+  // 暦月バイアス: 1 か月だけの暦月は、今までと同じ（その月の誤差を縮めた値。上限 ±0.20）
+  assert.equal(bad.monthBias[String(Number(ymOf(5).slice(5)))], -0.2);
+  // 同じ暦月が 2 回ある（13 か月以上）ときは、その暦月の合計の比で縮める
+  const two = [{ ym: '2025/04', pred: 100, actual: 50 }, { ym: '2025/05', pred: 100, actual: 100 }, { ym: '2025/06', pred: 100, actual: 100 }, { ym: '2026/04', pred: 100, actual: 150 }];
+  const r2 = autoLearnComputeState_(two, { kM: 0 });
+  const w4 = [Math.pow(0.5, 3 / 4), 1];   // 2025/04 は新しい方から 4 番目、2026/04 はいちばん新しい
+  const exp4 = -((w4[0] * 50 + w4[1] * -50) / (w4[0] * 50 + w4[1] * 150));
+  assert.ok(Math.abs(r2.monthBias['4'] - Number(exp4.toFixed(4))) < 1e-12, `4 月: ${r2.monthBias['4']} / ${exp4}`);
 }
 
 process.stdout.write('PASS forecast-autolearn contract tests\n');
