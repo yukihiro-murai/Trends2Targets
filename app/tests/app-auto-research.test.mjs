@@ -15,7 +15,7 @@ import { OWNER, MEMBER, setUpEnv as setUpBase, jstDay, J, sources } from './gas-
 
 /**
  * このファイルは AI 調査のトリガーと手入れの待ちを見るので、所有者が開いても毎日のバックアップのトリガーは自動では作らない（BACKUP_AUTO_ENABLE）。
- * バックアップのトリガーが要るところは apiEnableBackup で作る。自動で作るほうは app-backup-auto.test.mjs
+ * バックアップのトリガーが要るところは 所有者の enableBackup で作る。自動で作るほうは app-backup-auto.test.mjs
  */
 const setUpEnv = (opts) => { const e = setUpBase(opts); e.props.BACKUP_AUTO_ENABLE = 'false'; return e; };
 
@@ -121,6 +121,7 @@ const LEGACY_FAIL = 'AI調査エラー: Vertex調査エラー: Vertex AI への�
 // ==== 1. トリガー: 所有者が開いたとき・毎日の手入れで、無ければ作る（1 日 1 回だけ確かめる・二重にしない・上限・止めるスイッチ） ====
 {
   const env = setUpEnv();
+  env.boot();   // 初期設定の後の最初の操作で動く一度だけの写し（監査に残る）を先に済ませる
   const audits = env.audit().length;
   env.run('doGet({})');
   assert.equal(autoTriggers(env).length, 1, '所有者が開くとトリガーを作る');
@@ -165,7 +166,7 @@ const LEGACY_FAIL = 'AI調査エラー: Vertex調査エラー: Vertex AI への�
   // 毎日の手入れ（triggerDailyBackup）でも作る
   env.triggers.splice(env.triggers.indexOf(autoTriggers(env)[0]), 1);
   delete env.props.APP_AUTO_RESEARCH_CHECKED;
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   const uid = env.triggers.find((t) => t.handler === 'triggerDailyBackup').uid;
   env.as('');
   const daily = env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`);
@@ -278,7 +279,7 @@ const LEGACY_FAIL = 'AI調査エラー: Vertex調査エラー: Vertex AI への�
   setNow(env, jst(B, 6, 59));
   assert.equal(tick(env).reason, 'NO_STALE_PLAN');
   // 毎日のバックアップのトリガーがあれば、その日の手入れが終わってから
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   delete env.props.APP_HOUSEKEEPING;
   setNow(env, jst(B, 4, 35));
   assert.equal(tick(env).reason, 'MAINTENANCE_PENDING', '手入れの控えが無い');

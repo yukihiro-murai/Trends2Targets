@@ -28,7 +28,7 @@ const rec = (client, product, month, amount) => { const r = ext.slice(); r[40] =
 const zacRows = [ext.map((_, i) => 'c' + (i + 1))];
 for (let m = 1; m <= 12; m++) zacRows.push(rec('甲製薬', '製品A', D(FY - 1, m, 15), 1000000), rec('甲製薬', '製品B', D(FY - 1, m, 15), 400000), rec('乙薬品', '製品Q', D(FY - 1, m, 15), 300000));
 const zac = env.makeBook('売上の元', { ['*' + (FY - 1) + '_actual_value']: { cols: 70, values: zacRows } });
-env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
 const makePlan = (client, people) => {
   const st = env.runJob('PLAN.CREATE', { clientName: client, fy: FY, peopleCsv: people });
   assert.equal(st.status, 'DONE', st.error);

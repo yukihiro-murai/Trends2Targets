@@ -208,28 +208,28 @@ function legacySpec() {
 {
   const env = setUpEnv();
   assert.equal(env.data().getSheetByName('IMPORT_BATCHES'), null, '新しく作らない');
-  assert.ok(!env.call('apiHealth()').tables.some((t) => t.name === 'IMPORT_BATCHES'));
+  assert.ok(!env.task('health()').tables.some((t) => t.name === 'IMPORT_BATCHES'));
   const old = env.data().insertSheet('IMPORT_BATCHES');
   old.getRange(1, 1, 2, 2).setNumberFormat('@').setValues([['batch_id', 'plan_id'], ['IB-1', 'PL-1']]);
   env.props.APP_TABLES_VERSION = '7';   // 版を上げる前のデータ本体
-  env.call('apiHealth()');   // 最初の操作で表をそろえる
+  env.task('health()');   // 最初の操作で表をそろえる
   assert.equal(env.props.APP_TABLES_VERSION, String(env.run('APP_SCHEMA_VERSION')));
   assert.equal(old.isSheetHidden(), true, '隠す');
   assert.deepEqual(old.getRange(2, 1, 1, 2).getValues(), [['IB-1', 'PL-1']], '中身はそのまま');
-  assert.ok(env.call('apiHealth()').tables.every((t) => t.ok));
+  assert.ok(env.task('health()').tables.every((t) => t.ok));
 }
 
 // ==== 6. 表を足した版: 足りない表は「状態」に出て、初期設定をもう一度実行すると作られる ====
 {
   const env = setUpEnv();
   env.data().deleteSheet(env.data().getSheetByName('ENG_RUN_LOG'));
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   const t = h.tables.find((x) => x.name === 'ENG_RUN_LOG');
   assert.deepEqual([t.ok, t.missing, t.engine], [false, true, true]);
   assert.match(t.note, /未作成/);
   assert.ok(h.tables.filter((x) => x.name !== 'ENG_RUN_LOG').every((x) => x.ok));
   assert.deepEqual(env.call('apiSetup()').tables, ['ENG_RUN_LOG']);
-  assert.ok(env.call('apiHealth()').tables.every((x) => x.ok));
+  assert.ok(env.task('health()').tables.every((x) => x.ok));
   // 列の多い表もシートの列数を合わせて作る（既定の 26 列を超える）
   assert.equal(env.data().getSheetByName('ENG_EVAL_INSIGHTS').getMaxColumns(), 27);
   assert.equal(env.data().getSheetByName('MEMBERS').getMaxColumns(), 10, '余った列は消してセルの上限を節約する');
@@ -263,7 +263,7 @@ function legacySpec() {
   // 終わるまで次の処理は始めない
   assert.throws(() => env.call('apiStartJob(__in)', { __in: RECOVER }), /ほかの処理（保存の続き）が終わるまで/);
   // 画面を開き直したときに続きから待てる
-  assert.equal(env.call('apiBootstrap()').activeJob.jobId, started.jobId);
+  assert.equal(env.boot().activeJob.jobId, started.jobId);
   // トリガーの中では操作者のメールが空でも、自分で作ったトリガーなら所有者として動く
   const fired = env.fireTriggers('triggerRunJob');
   assert.equal(fired.length, 1);
@@ -271,7 +271,7 @@ function legacySpec() {
   const st1 = env.call('apiJobStatus(__in)', { __in: { jobId: started.jobId } });
   assert.equal(st1.status, 'DONE');
   assert.equal(st1.result.nothing, true);
-  assert.equal(env.call('apiBootstrap()').activeJob, null);
+  assert.equal(env.boot().activeJob, null);
   const audit = env.audit().filter((a) => a.action === 'SYSTEM.RECOVER');
   assert.deepEqual(audit.map((a) => [a.phase, a.result, a.actor_email]), [['START', '', OWNER], ['END', 'OK', OWNER]], '裏の処理も頼んだ人の名前で記録する');
   assert.ok(env.runLog().some((r) => r.kind === 'JOB:SYSTEM.RECOVER' && r.status === 'DONE'));

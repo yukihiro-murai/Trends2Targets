@@ -194,7 +194,7 @@ const upKo = (5 + 3 * 0.75) / 9, upOtsu = (4 + 3 * 0.75) / 9;
   // 前からある当たりの行: 甲 = 基準つき（いつも上と同じだけ当たった 8/10・基準 8）と基準の無い前の行、乙 = 基準つき（10 回で 9 当たり・基準 6）
   const P1 = reviewPlan(CL('甲'), [['a', 10, 8, 'expected=8.0000'], ['old', 10, 10, '']]);
   const P2 = reviewPlan(CL('乙'), [['b', 10, 9, 'expected=6.0000']]);
-  const pv = e.call('apiPoolPreview()');
+  const pv = e.task('poolPreview()');
   const op = pv.types.find((t) => t.type === 'opinion');
   assert.deepEqual([op.ok, op.plans, op.n, op.hit, pv.noBaseEvidence, pv.skippedEvidence], [true, 2, 20, 17, 1, 0], '基準の無い前の行は読み飛ばす');
   close(op.expected, 14, 1e-12);

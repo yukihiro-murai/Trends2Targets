@@ -2306,7 +2306,8 @@ function fcDate(s, time){
 }
 /** 月の短い名前（2026/04 → 4月。グラフの横の名前） */
 function fcMon(ym){ var m = /(\d{4})[\/-](\d{1,2})/.exec(String(ym || '')); return m ? Number(m[2]) + '月' : String(ym || ''); }
-function fcWho(email){ return String(email || '').split('@')[0]; }
+/** 操作した人（メールの @ の前）。閲覧の人にはサーバーが空で渡すので「-」 */
+function fcWho(email){ return String(email || '').split('@')[0] || '-'; }
 /** 月/日（10/01。年は無い）を、今日より前の一番近い日の yyyy/MM/dd に */
 function fcMd(md){
   var m = /^(\d{1,2})\/(\d{1,2})$/.exec(String(md || '')), now = new Date();
@@ -2358,7 +2359,7 @@ function fcForecastTab(d, v){
   // 本番の計画では、過去の売上だけの予測とこれまでの実行の中心は旧来の計算の年度合計（記録の値）なので、そう言う
   var runInfo = '過去の売上だけの予測（' + (lv ? '旧来の計算の年度合計' : '年度合計') + '）: ' + qName('p10') + ' ' + yen(obj.p10) + '・' + qName('p50') + ' ' + yen(obj.p50) + '・' + qName('p90') + ' ' + yenU(obj.p90)
     + (d.runs && d.runs.length > 1 ? '\nこれまでの実行' + (lv ? '（旧来の計算の中心）' : '') + ': ' + d.runs.map(function(r){ return fcDate(r.finishedAt, true).slice(5) + ' ' + qName('p50') + ' ' + yenShort(r.p50); }).join('、') : '');
-  var meta = '<span class="meta" data-tip="' + esc(runInfo + (canPlan ? '' : '\n予測の実行は予算策定担当ができます')) + '">' + (l ? '最新 ' + esc(fcDate(l.finished_at, true)) + '・' + esc(fcWho(l.actor_email)) : '予測の記録なし') + '</span>';
+  var meta = '<span class="meta" data-tip="' + esc(runInfo + (canPlan ? '' : '\n予測の実行は予算策定担当ができます')) + '">' + (l ? '最新 ' + esc(fcDate(l.finished_at, true)) + (l.actor_email ? '・' + esc(fcWho(l.actor_email)) : '') : '予測の記録なし') + '</span>';
   // 予測の実行は予算策定担当だけ（見るだけの人には、中身の無いカードを出さない。最新の日時は下の表の見出しの右に）
   var runCard = canPlan ? '<div class="card fc-run"><div class="card-head"><h2>予測の実行</h2>' + meta + '</div><div class="btngrid">'
     + actBtn('<button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="fcForecastRun()">予測を実行</button>', 'データ本体の内容で予測を計算し、結果を残します（4〜6 分ほど。続けて実行するときは速くなります）') + '</div></div>' : '';
@@ -3943,6 +3944,8 @@ function lrWords(s){
 function lrSrc(type, label){ return LR_SRC[type] || lrWords(label || type || ''); }
 /** 人や話題の名前（AI の予測は 1 つだけなので出さない） */
 function lrKeyName(type, key){ key = String(key == null ? '' : key); return !key || type === 'vertex_forecast' ? '' : LR_TOPIC[key] || lrWords(key); }
+/** 人の名前・人ごとの当たりを見せる計画か（サーバーの見せ方 d.detail: full = どれも・partial = d.namedPlans の計画だけ（メーカーに限った予算策定担当）・summary = どれも見せない） */
+function lrNamed(d, planId){ return !!d && (d.detail === 'full' || (d.detail === 'partial' && (d.namedPlans || []).indexOf(planId) >= 0)); }
 function lrPct(v){ return isNum(v) ? Math.round(v * 100) + '%' : '-'; }
 /** 符号つきの割合（目盛り用。整数で足りれば小数を付けない: +20%・-2.5%） */
 function lrSPct(v){ if (!isNum(v)) return '-'; var x = Math.round(v * 1000) / 10; return (x > 0 ? '+' : '') + (Math.abs(x - Math.round(x)) < 1e-9 ? String(Math.round(x)) : x.toFixed(1)) + '%'; }
@@ -3985,7 +3988,7 @@ function lrOpen(planId, tipText){ return actBtn('<button type="button" class="bt
 
 // ---- 人の学び ----
 function lrPeopleView(d){
-  var full = d.detail === 'full';
+  var full = d.detail === 'full' || d.detail === 'partial';   // 人ごとの中身がある（partial は担当のメーカーの計画だけ。行ごとに lrNamed で決める）
   // 何も無いときは、よみの案内 1 つだけ（空の注記を並べない）。中身の無いカードは出さない
   if (!((d.lessons || []).length || (d.openActions || []).length || (d.causes || []).length || (d.scoreboard || []).length || (d.decisions || []).length || (d.uplift || []).length || lrHitAny(d.hits)))
     return guide('guide', '実績が締まって、' + runWhen(['EVAL.REPORT', 'EVAL.INSIGHTS']) + '、大きく外れた月の振り返りと、読みの当たりがここに並びます。');
@@ -4031,7 +4034,7 @@ function lrLessonCard(d, full){
   var pills = '<div class="tabs sub mini" role="tablist" aria-label="並べ方">' + (big.length ? lrPill(v, 'big', '外れの大きい順', 'lrLessonView') : '')
     + (open.length ? lrPill(v, 'open', '残っている対応 ' + open.length, 'lrLessonView') : '') + '</div>';
   return lrCard('大きく外れた月', '締まった月で、予測が実績から 10% 以上外れたか、見通しの幅（下振れ〜上振れ）の外に出た月です。「開く」で、その計画の振り返りに仮説・対応・担当を書けます',
-    pills + '<div class="lr-lessons">' + shown.map(function(x){ return lrLesson(x, full, rep); }).join('') + '</div>' + (list.length > max ? lrMoreBtn('lessons', list.length - max) : ''));
+    pills + '<div class="lr-lessons">' + shown.map(function(x){ return lrLesson(x, full && lrNamed(d, x.planId), rep); }).join('') + '</div>' + (list.length > max ? lrMoreBtn('lessons', list.length - max) : ''));
 }
 function lrLesson(x, full, rep){
   var dir = LR_DIR[x.direction], st = lrStatus(x), r = rep[x.clientName + '\u0001' + String(x.ym || '').slice(5, 7)];
@@ -4085,13 +4088,15 @@ function lrScoreCard(d, full){
   var label = function(r){ var k = full ? lrKeyName(r.type, r.key) : ''; return lrSrc(r.type, r.label) + (k ? '・' + k : ''); };
   // スマホのグラフの名前は短く（種類の名前を縮める。正確な名前はカーソルと 表で見る に）
   var narrow = chW() < 480, short = function(r){ var k = full ? lrKeyName(r.type, r.key) : ''; return (LR_SRC_SHORT[r.type] || lrSrc(r.type, r.label)) + (k ? '・' + k : ''); };
-  var wTxt = function(r){ return isNum(r.appliedR) ? r.appliedR.toFixed(2) : '1.00'; };
+  // 種類ごとにまとめた行（閲覧の人・担当のメーカーでない計画の分）。今の重みは出さない（サーバーも渡さない）
+  var typeRow = function(r){ return r.sources !== undefined; };
+  var wTxt = function(r){ return typeRow(r) ? '-' : isNum(r.appliedR) ? r.appliedR.toFixed(2) : '1.00'; };
   var tipOf = function(r){
     var t = label(r) + '\n当たり ' + r.hit + ' / ' + r.n + ' 回（' + lrPct(r.hitRate) + '）'
       + '\nいつも同じ向きなら ' + lrPct(lrBase(r)) + (isNum(r.expected) ? '（当たるはずの数 ' + r.expected.toFixed(1) + '）' : '')
       + '\n当たりの確かさ ' + lrPct(r.postMean) + '（80% の幅 ' + lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1]) + '）\n' + LR_VS_BASE[lrVsBase(r)]
-      + (full ? '\n今の重み ' + wTxt(r) + (isNum(r.appliedR) ? '' : '（まだ変えていません）') : '');   // 今の重みは予算策定担当以上だけ（種類ごとの平均でも、1 人だけの種類ではその人の重みになる）
-    if (!full && r.sources) t += '\nまとめた人や話題 ' + r.sources;
+      + (full && !typeRow(r) ? '\n今の重み ' + wTxt(r) + (isNum(r.appliedR) ? '' : '（まだ変えていません）') : '');   // 今の重みは予算策定担当以上だけ（種類ごとの平均でも、1 人だけの種類ではその人の重みになる）
+    if (typeRow(r) && r.sources) t += '\nまとめた人や話題 ' + r.sources;
     if (full && r.plans && r.plans.length) t += '\n' + r.plans.slice(0, 6).map(function(p){ return p.clientName + ' FY' + p.fy + ' ' + p.hit + ' / ' + p.n; }).join('\n') + (r.plans.length > 6 ? '\nほか ' + (r.plans.length - 6) + ' 計画' : '');
     return t;
   };
@@ -4107,7 +4112,8 @@ function lrScoreCard(d, full){
     ['基準', 'num', 96, 'いつも同じ向きと言った場合に当たる割合（同じ計画で、実績がその向きに外れた月の割合）'], ['確かさ', 'num', 96, '今の見立ての当たる割合'],
     ['80% の幅', 'num', 128, '10 回に 8 回はこの間に入る見込み。左の端が基準より上なら、いつも同じ向きと言うよりも当たっています']].concat(full ? [['今の重み', 'num', 96, '予測に効かせている重み（1.00 = 変えていない）']] : []),
     sc.map(function(r){ return [{ h: esc(label(r)) + mark(r), tip: tipOf(r) }, r.hit + ' / ' + r.n, lrPct(lrBase(r)), lrPct(r.postMean), lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1])].concat(full ? [wTxt(r)] : []); }));
-  var right = (full ? '' : '<span class="chip" tabindex="0" data-tip="閲覧の人には、情報源の種類ごとにまとめて出しています。人や話題ごとの当たりは、予算策定担当以上の人に出します">種類ごと</span>')
+  var right = (d.detail === 'partial' ? '<span class="chip" tabindex="0" data-tip="担当のメーカーの計画の当たりは人や話題ごと、ほかのメーカーの計画の当たりは情報源の種類ごとにまとめて出しています">一部は種類ごと</span>'
+    : full ? '' : '<span class="chip" tabindex="0" data-tip="閲覧の人には、情報源の種類ごとにまとめて出しています。人や話題ごとの当たりは、予算策定担当以上の人に出します">種類ごと</span>')
     + lrMore('当たり = 押した向き（上げる・下げる）が、過去の売上だけの予測から見た実績の動きと同じだった月。基準 = 押した月ごとに、その向きへ実績が外れた月の割合'
       + '（同じ計画の比べられた月から。月が少なければ全計画の割合に寄せる）の平均。過去の売上だけの予測が低めなら、いつも上げると言うだけで半分より多く当たるので、半々ではなく基準と比べます。'
       + '確かさはベータ分布の事後分布（事前分布の中心は、基準に全計画から作った見立ての上乗せを足した所。無ければ基準）で、点は平均、線は 10%〜90% 点です');
@@ -4144,10 +4150,11 @@ function lrDecisionCard(d, full){
   // スマホは メーカー（対象と作った日はその下）・判断 だけ（案と判断した人は、判断の札のカーソルに）。対象・値の言い方は振り返りと同じ
   var cols = [['作った日', 'lr-hm', 112, '見直し案を作った日（判断した日は、判断の札にカーソルを合わせると出ます）'], ['メーカー', 'lr-wr', 160], ['対象', 'lr-wr lr-kw lr-hm'], ['案', 'num lr-wr lr-hm', 184, '今 → 案'], ['判断', 'ctr', 136, '承認・却下・保留。反映済みは、承認して設定に反映した案です']].concat(who ? [['判断した人', 'lr-hm', 128]] : []);
   var rows = shown.map(function(x){
-    var dec = lrDecision(x, saved[x.planId + '\u0001' + x.reviewId + '\u0001' + x.proposalId]), why = qrWhy(x.rationale, x.target, !full), by = who && x.decidedBy ? String(x.decidedBy) : '';
-    var hidVal = !full && /^reliability:/.test(String(x.target || ''));   // 閲覧の人には信頼度の値を出さない（サーバーも空で渡す）
+    var nm = full && lrNamed(d, x.planId);   // この計画の人や話題の名前・信頼度の値を見せるか（担当のメーカーでない計画は閲覧の人と同じ）
+    var dec = lrDecision(x, saved[x.planId + '\u0001' + x.reviewId + '\u0001' + x.proposalId]), why = qrWhy(x.rationale, x.target, !nm), by = who && x.decidedBy ? String(x.decidedBy) : '';
+    var hidVal = !nm && /^reliability:/.test(String(x.target || ''));   // 閲覧の人には信頼度の値を出さない（サーバーも空で渡す）
     var change = hidVal ? '-' : qrValue(x.target, x.current) + ' → ' + qrValue(x.target, x.proposed), conf = x.confidence ? '確度 ' + qrConf(x.confidence) : '';
-    var tgt = x.target ? qrTarget(x.target, !full) : lrWords(x.targetLabel || ''), tgtTip = (x.quarter ? qrQuarter(x.quarter) : '') + (why ? '\n理由: ' + why : '');
+    var tgt = x.target ? qrTarget(x.target, !nm) : lrWords(x.targetLabel || ''), tgtTip = (x.quarter ? qrQuarter(x.quarter) : '') + (why ? '\n理由: ' + why : '');
     var r = [lrDate(x.at), esc(x.clientName) + ' <span class="meta">FY' + esc(x.fy) + '</span><span class="lr-so"' + (tgtTip ? ' data-tip="' + esc(tgtTip) + '"' : '') + '>' + esc(tgt) + '</span><span class="lr-so meta">' + esc(lrDate(x.at)) + '</span>',
       { h: esc(tgt), tip: tgtTip },
       { h: esc(change), tip: '今 ' + qrValue(x.target, x.current) + ' → 案 ' + qrValue(x.target, x.proposed) + (conf ? '（' + conf + '）' : '') },
@@ -4349,8 +4356,8 @@ function lrAiHero(d){
 /** 承認待ちの見直し案（承認は、開いた計画の振り返りで） */
 function lrPendingCard(pend){
   if (!pend.length) return '';
-  var hide = !(S.lr.ai && S.lr.ai.detail === 'full');
   var rows = pend.map(function(p){
+    var hide = !lrNamed(S.lr.ai, p.planId);   // 人や話題の名前を見せない計画（閲覧の人・担当のメーカーでない計画）
     var ps = p.proposals || [], dec = ps.filter(function(q){ return q.decision; }).length;
     var list = ps.map(function(q){ var hv = hide && /^reliability:/.test(String(q.target || ''));   // 閲覧の人には信頼度の値を出さない
       return (q.target ? qrTarget(q.target, hide) : lrWords(q.targetLabel || '')) + (hv ? '' : ' ' + qrValue(q.target, q.current) + ' → ' + qrValue(q.target, q.proposed)) + (q.confidence ? '（確度 ' + qrConf(q.confidence) + '）' : '') + (q.decision ? '・' + q.decision : ''); }).join('\n');
@@ -4462,7 +4469,7 @@ function lrCalCard(cal, health){
   if (!pts.length && isNum(cur.factorNow)) pts.push({ x: 'いま', y: cur.factorNow, tip: '今 ' + fx(cur.factorNow) + raw(cur.factorNow) });
   var chart = chartStep(pts, { ref: 1, refLabel: '補正なし', yFmt: yPct, label: '補正の履歴', empty: 'この計画の補正は、まだ変わっていません' });
   var table = path.length ? lrTable([['日付', '', 112], ['対象', 'wrap colmin'], ['前', 'num', 112], ['後', 'num', 112], ['きっかけ', '', 160]],
-    path.map(function(p){ var s = src(p), t = p.factor || ''; return [lrDate(p.at), esc(t ? qrTarget(t, !(S.lr.ai && S.lr.ai.detail === 'full')) : lrWords(p.factorLabel || '')), { h: esc(qrValue(t, p.old)), tip: String(p.old == null ? '' : p.old), cls: 'num' }, { h: esc(qrValue(t, p.new)), tip: String(p.new == null ? '' : p.new), cls: 'num' }, { h: esc(s.full), tip: p.quarter ? qrQuarter(p.quarter) : '' }]; }))
+    path.map(function(p){ var s = src(p), t = p.factor || ''; return [lrDate(p.at), esc(t ? qrTarget(t, !lrNamed(S.lr.ai, cur.planId)) : lrWords(p.factorLabel || '')), { h: esc(qrValue(t, p.old)), tip: String(p.old == null ? '' : p.old), cls: 'num' }, { h: esc(qrValue(t, p.new)), tip: String(p.new == null ? '' : p.new), cls: 'num' }, { h: esc(s.full), tip: p.quarter ? qrQuarter(p.quarter) : '' }]; }))
     : '<p class="note">この計画の補正は、まだ変わっていません</p>';
   var sel = '<select class="inp md" id="lr_cal" aria-label="メーカー" onchange="S.lr.calPlan=this.value;render()">' + cal.map(function(c){ return '<option value="' + esc(c.planId) + '"' + (c === cur ? ' selected' : '') + '>' + esc(lrName(c, multi)) + '</option>'; }).join('') + '</select>';
   var now = isNum(cur.factorNow) ? '<span class="chip" data-tip="' + esc('今の補正（予測に掛けている倍率 ' + cur.factorNow.toFixed(3) + '。1 = 補正なし）') + '">今 ' + esc(fx(cur.factorNow)) + '</span>' : '';

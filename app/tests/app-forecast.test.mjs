@@ -88,10 +88,10 @@ const sheetMeta = (env, planId) => Object.fromEntries(env.table('ENG_SHEETS').fi
   env.data().deleteSheet(env.data().getSheetByName('FORECAST_MONTHLY'));
   env.props.APP_TABLES_VERSION = '2';
   env.as('someone@gmail.com');
-  env.call('apiBootstrap()');
+  env.boot();
   assert.equal(env.data().getSheetByName('FORECAST_MONTHLY'), null);
   env.as(OWNER);
-  env.call('apiBootstrap()');
+  env.boot();
   assert.ok(env.data().getSheetByName('FORECAST_MONTHLY'));
 }
 
@@ -226,10 +226,10 @@ const sheetMeta = (env, planId) => Object.fromEntries(env.table('ENG_SHEETS').fi
 {
   const { env, planId } = imported();
   const clientId = env.table('PLANS')[0].client_id;
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiSaveMember({ email: '${OTHER}', displayName: 'O' })`);
-  const other = env.call(`apiSaveClient({ clientName: '別の製薬' })`).client;
-  env.call('apiGrantRole(__in)', { __in: { email: OTHER, role: 'PLANNER', scopeType: 'CLIENT', clientId: other.client_id } });
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`saveMember({ email: '${OTHER}', displayName: 'O' })`);
+  const other = env.task(`saveClient({ clientName: '別の製薬' })`).client;
+  env.task('grantRole(__in)', { __in: { email: OTHER, role: 'PLANNER', scopeType: 'CLIENT', clientId: other.client_id } });
   env.as(MEMBER);
   assert.equal(env.call('apiForecastLatest(__in)', { __in: { planId } }).plan.planId, planId, '見るのは社内全員');
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'FORECAST.RUN', payload: { planId } } }), /権限がありません/, '閲覧だけの人は実行できない');
@@ -238,7 +238,7 @@ const sheetMeta = (env, planId) => Object.fromEntries(env.table('ENG_SHEETS').fi
   const denied = env.audit().filter((a) => a.action === 'JOB.START' && a.result === 'DENIED').slice(-1)[0];
   assert.equal(denied.client_id, clientId, '拒否の記録に計画のクライアントを残す');
   env.as(OWNER);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
   env.as(MEMBER);
   const st = env.runJob('FORECAST.RUN', { planId, confirms: ['extreme'] });
   assert.equal(st.status, 'DONE', st.error);

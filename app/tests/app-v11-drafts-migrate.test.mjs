@@ -86,13 +86,13 @@ function oldEnv(from, { closePast = false } = {}) {
     measure: env.seedPlan(book(env, '測る製薬', fy, edited(fy))),
     past: env.seedPlan(book(env, '前の製薬', fy - 1, edited(fy - 1))),
   };
-  if (from === 10) env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${ids.measure}' }, { purpose: 'MEASURE' }, undefined, '${OWNER}'))`);   // 版 9 には印の列が無い
+  if (from === 10) env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${ids.measure}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, '${OWNER}'))`);   // 版 9 には印の列が無い
   // 前の版の公式版（版 11 の列が無い）
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: ids.edit, note: '前の版' } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: ids.edit, note: '前の版' } });
   if (closePast) {
-    const s = env.call('apiVersionSubmit(__in)', { __in: { planId: ids.past } });
-    env.call('apiVersionDecide(__in)', { __in: { versionId: s.version.versionId, decision: 'APPROVED', rowVersion: s.version.rowVersion } });
-    const pv = env.call('apiYearPreview(__in)', { __in: { fy: fy - 1 } });
+    const s = env.call('appTestVersionSubmit_(__in)', { __in: { planId: ids.past } });
+    env.call('appTestVersionDecide_(__in)', { __in: { versionId: s.version.versionId, decision: 'APPROVED', rowVersion: s.version.rowVersion } });
+    const pv = env.task('yearPreview(__in)', { __in: { fy: fy - 1 } });
     assert.equal(pv.canClose, true, JSON.stringify(pv));
     const st = env.runJob('YEAR.CLOSE', { fy: fy - 1, inputHash: pv.inputHash });
     assert.equal(st.status, 'DONE', JSON.stringify(st));
@@ -133,7 +133,7 @@ function checkMigrated(env, before, moved) {
   }
   const pv = env.data().getSheetByName('PLAN_VERSIONS');
   pv.rows.slice(1).forEach((row) => (row || []).slice(V10_VERSIONS.length).forEach((v) => assert.ok(v === '' || v === null || v === undefined, '前の版の新しい列は空')));
-  const health = env.call('apiHealth()');
+  const health = env.task('health()');
   assert.deepEqual(health.tables.filter((t) => !t.ok).map((t) => t.name + ' ' + t.note), [], '状態の点検が通る');
   return health;
 }
@@ -148,7 +148,7 @@ function checkMigrated(env, before, moved) {
   toV11(env, 10);
   // 列を足す前の表も読める（足した列は空）。書くと止まる
   assert.equal(env.call(`appVersionRows_('${ids.edit}')`).length, 1);
-  assert.throws(() => env.run(`appWithLock_(() => appUpdateByKey_('PLAN_VERSIONS', { version_id: '${oldVersionId}' }, { note: 'x' }, undefined, 'test'))`), /移行がまだ/);
+  assert.throws(() => env.run(`appWithLock_(() => appUpdateByKey_('PLAN_VERSIONS', { version_id: '${oldVersionId}' }, { note: 'x' }, APP_ROW_UNCHECKED, 'test'))`), /移行がまだ/);
   env.call('apiListPlans()');   // 版を上げた後の最初の操作
   const health = checkMigrated(env, before, ['PLAN_VERSIONS']);
   assert.equal(env.backups().length, backups0 + 1, '移行の前にその日のバックアップを取った');
@@ -175,7 +175,7 @@ function checkMigrated(env, before, moved) {
   // 前の版（列が空）は読めて、届く見込みは無い（後から作らない）。新しく出した版には入る
   const list = env.call('apiVersionList(__in)', { __in: { planId: ids.edit } });
   assert.equal(list.versions.find((v) => v.versionId === oldVersionId).reach, null);
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: ids.edit } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: ids.edit } });
   assert.equal(sub.version.reach.mode, 'SHADOW');
   assert.equal(env.table('PLAN_VERSIONS').find((v) => v.version_id === sub.version.versionId).prob_mode, 'SHADOW');
   // 締めた年度: 控えのファイルは締めたときのまま。下書きは書けない
@@ -232,7 +232,7 @@ function checkMigrated(env, before, moved) {
   env.call('apiListPlans()');
   assert.deepEqual(sheetsOf(env), before, 'データ本体は 1 つも変えない（表も作らない）');
   assert.equal(env.props.APP_TABLES_VERSION, '10');
-  const h = env.call('apiHealth()');
+  const h = env.task('health()');
   assert.deepEqual(h.tables.filter((t) => t.pending).map((t) => t.name), ['PLAN_VERSIONS']);
   assert.deepEqual(h.tables.filter((t) => t.missing).map((t) => t.name), ['BUDGET_DRAFTS']);
   // そのあいだ: 予算の保存は通る（下書きはまだ足さない）・公式版は書くところで止まる・予測は長い計算の前に断る
@@ -242,7 +242,7 @@ function checkMigrated(env, before, moved) {
   assert.equal(st.status, 'DONE', st.error);
   assert.equal(st.result.draft, null);
   assert.equal(nums(env, ids.plain).monthly[0].adopted, 1234);
-  assert.throws(() => env.call('apiVersionSubmit(__in)', { __in: { planId: ids.plain } }), /表の列を足す移行がまだです（PLAN_VERSIONS）/);
+  assert.throws(() => env.call('appTestVersionSubmit_(__in)', { __in: { planId: ids.plain } }), /表の列を足す移行がまだです（PLAN_VERSIONS）/);
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'FORECAST.RUN', payload: { planId: ids.plain } } }), /表の版 11 の移行（列を足す）がまだ済んでいないので、予測の実行は始めません/);
   // 取れるようになったら移す。_SCHEMA を書く前に止まっても、次の操作が続きから終わる
   env.props.APP_ARCHIVE_FOLDER_ID = archiveId;
@@ -256,7 +256,7 @@ function checkMigrated(env, before, moved) {
   assert.equal(env.props.APP_TABLES_VERSION, '11');
   const ma = migrateAudits(env);
   assert.deepEqual(JSON.parse(ma[ma.length - 2].detail_json).tables.map((t) => [t.table, t.resume]), [['PLAN_VERSIONS', true]], '続きは _SCHEMA だけ');
-  assert.deepEqual(env.call('apiHealth()').tables.filter((t) => !t.ok).map((t) => t.name), []);
+  assert.deepEqual(env.task('health()').tables.filter((t) => !t.ok).map((t) => t.name), []);
   // 保存した予算（1234）は、写しで BASELINE になる（手で直した跡）
   assert.equal(env.table('BUDGET_DRAFTS').filter((r) => r.plan_id === ids.plain && r.ym === fyYms(env.run('appFy_(new Date())'))[0])[0].adopted, '1234');
 }
@@ -287,7 +287,7 @@ function checkMigrated(env, before, moved) {
   assert.equal(env.table('BUDGET_DRAFTS').length, 12, '直した跡の無い計画は写さない');
   // 測る専用の計画は予算を立てないので、直した跡があっても写さない（旧来のとおり真ん中に戻る）
   const measure = env.seedPlan(book(env, '測る専用製薬', fy, edited(fy)));
-  env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${measure}' }, { purpose: 'MEASURE' }, undefined, '${OWNER}'))`);
+  env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${measure}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, '${OWNER}'))`);
   assert.equal(env.runJob('FORECAST.RUN', { planId: measure }).status, 'DONE');
   assert.equal(env.table('BUDGET_DRAFTS').length, 12, '測る専用の計画は写さない');
   assert.deepEqual(nums(env, measure).monthly.map((m) => [m.adopted, m.uplift]), nums(env, measure).monthly.map((m) => [m.p50, null]));

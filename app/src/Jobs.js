@@ -286,6 +286,8 @@ function appStartJob_(ctx, input, opts) {
     // 表の版 10 の移行がバックアップを待っている間は、列を足す前の表に書く処理（予測の実行・計画を作る・担当者の保存）を始めない（V10.js）
     const waiting = appV10WaitRefusal_(kind, payload);
     if (waiting) throw new Error(waiting);
+    // 計画への保存は、画面を開いたときの指紋（inputHash）が要る（2026-10-13。省くと後から保存した方が勝つ）。裏の処理を入れる前に断る
+    if (kind === 'PLAN.EDIT' && !/^[a-f0-9]{64}$/.test(String(payload && payload.inputHash || ''))) throw new Error(APP_STALE_MSG);
     const count = appAiManualCheck_(kind, payload, opts);   // 手で始める A-4 は計画ごとに 1 日 3 回まで（超えていれば断る。Ai.js）
     const job = appEnqueueJob_(kind, appJobStashArgs_(appJobClientPayload_(input && input.payload)), ctx.actor, '');
     if (count) { try { count(); } catch (e) { Logger.log('手で始めた回数を控えられません: ' + (e && e.message ? e.message : e)); } }

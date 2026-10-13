@@ -158,7 +158,7 @@ part('F2 見せる年度の値', () => {
   // ---- 公式版を出す: 表の center = 出したときの見せる中心（年度の途中は着地の推定・締まった月なしは月の合計） ----
   for (const id of [idMid, idNext]) {
     const sh = env.call('apiForecastLatest(__in)', { __in: { planId: id } }).shadow.annual;
-    const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: id } });
+    const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: id } });
     assert.equal(sub.version.reach.mode, 'LIVE');
     near(sub.version.reach.center, sh.p50, 1e-9, '公式版の center は出したときの見せる中心: ' + sh.basis);
     near(Number(env.table('PLAN_VERSIONS').find((v) => v.version_id === sub.version.versionId).center), sh.p50, 1e-6, '表の center');
@@ -175,20 +175,20 @@ part('F4 公式版と見直しの流れ', () => {
     const before = env.call('apiVersionList(__in)', { __in: { planId: id } });
     assert.deepEqual(before.current.shown, { p50: sh.p50, basis, live: true }, '今の中心は予測の画面と同じ: ' + basis);
     assert.equal(before.current.annual.p50, 11500, '旧来の年度合計の項目はそのまま');
-    const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: id } });
+    const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: id } });
     near(sub.version.shownCenter, sub.version.reach.center, 1e-9, '本番の版の中心（年度）は、出したときの見せる中心（reach.center）');
     near(sub.version.shownCenter, sh.p50, 1e-9);
     const after = env.call('apiVersionList(__in)', { __in: { planId: id } });
     near(after.versions.find((v) => v.versionId === sub.version.versionId).shownCenter, sh.p50, 1e-9, '一覧の版の中心（年度）');
   }
   // 着地見込みの無い本番の版（計算待ち）: center は空、見せる中心は出したときの月の合計
-  const sw = env.call('apiVersionSubmit(__in)', { __in: { planId: idWait } });
+  const sw = env.call('appTestVersionSubmit_(__in)', { __in: { planId: idWait } });
   assert.deepEqual([sw.version.reach.mode, sw.version.reach.center, sw.version.shownCenter], ['LIVE', null, 12000]);
   assert.deepEqual(env.call('apiVersionList(__in)', { __in: { planId: idWait } }).current.shown, { p50: 12000, basis: 'monthsum', live: true });
   // 本番でない計画: 旧来の年度合計
   const lt = env.call('apiVersionList(__in)', { __in: { planId: idTrial } });
   assert.deepEqual(lt.current.shown, { p50: 11500, basis: 'legacy', live: false });
-  const st = env.call('apiVersionSubmit(__in)', { __in: { planId: idTrial } });
+  const st = env.call('appTestVersionSubmit_(__in)', { __in: { planId: idTrial } });
   assert.deepEqual([st.version.reach.mode, st.version.shownCenter], ['SHADOW', 11500], '試しの版の中心（年度）は旧来の年度合計');
   // 版 11 より前の版（列が空）も旧来の年度合計
   env.run(`appWithLock_(() => appInsertRows_('PLAN_VERSIONS', [{ version_id: 'VER-OLD', plan_id: __p, version_no: 0, state: 'SUPERSEDED', annual_p50: 11111, budget_final: 900,

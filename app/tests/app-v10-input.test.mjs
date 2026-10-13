@@ -44,7 +44,7 @@ for (let m = 1; m <= 12; m++) {
   zacRows.push(rec(CLIENT, '製品A', D(FY - 1, m, 15), 1000000), rec(CLIENT, '製品B', D(FY - 1, m, 15), 400000), rec('テスト薬品', '製品X', D(FY - 1, m, 15), 300000));
 }
 const zac = env.makeBook('売上の元', { ['*' + (FY - 1) + '_actual_value']: { cols: 70, values: zacRows } });
-env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
 
 // ==== 1. 計画を作る ====
 let planId;
@@ -194,8 +194,8 @@ let planId;
 // ==== 6. 見られる人 ====
 {
   const clientId = env.table('PLANS').find((p) => p.plan_id === planId).client_id;
-  for (const email of [MEMBER, OTHER, PLANNER_HERE]) env.call(`apiSaveMember({ email: '${email}', displayName: 'T' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: PLANNER_HERE, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  for (const email of [MEMBER, OTHER, PLANNER_HERE]) env.task(`saveMember({ email: '${email}', displayName: 'T' })`);
+  env.task('grantRole(__in)', { __in: { email: PLANNER_HERE, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
   env.call('appWithLock_(() => appInsertRows_("PERSON_LINKS", __r))', { __r: [{ link_id: 'PLK-T1', person_name: '鷹野', email: OTHER, client_id: '', valid_from: '', valid_to: '',
     is_active: true, note: '', created_at: 'now', created_by: OWNER, updated_at: 'now', updated_by: OWNER, row_version: 1 }] });
   const total = logOf(planId).length;
@@ -249,9 +249,9 @@ let planId;
   // 写しは止めておき、前の年度を締めてから動かす（締めた年度の計画は飛ばす）
   e2.props.APP_BACKFILLS = JSON.stringify({ done: { appV10BackfillInputLog_: { at: 'x', v: 10, rows: 0 } }, failed: {} });
   const past = e2.seedPlan(book('前の製薬', fy - 1));
-  const sub = e2.call('apiVersionSubmit(__in)', { __in: { planId: past } });
-  e2.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
-  const pv = e2.call('apiYearPreview(__in)', { __in: { fy: fy - 1 } });
+  const sub = e2.call('appTestVersionSubmit_(__in)', { __in: { planId: past } });
+  e2.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const pv = e2.task('yearPreview(__in)', { __in: { fy: fy - 1 } });
   assert.equal(e2.runJob('YEAR.CLOSE', { fy: fy - 1, inputHash: pv.inputHash }).status, 'DONE');
   const cur = e2.seedPlan(book('今の製薬', fy));
   assert.equal(e2.table('INPUT_LOG').length, 0);

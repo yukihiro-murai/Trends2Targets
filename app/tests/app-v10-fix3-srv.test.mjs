@@ -278,7 +278,7 @@ const tAt = (i) => (i === 0 ? T : T + '#' + (i + 1));
     const P = E.seedPlan(inputBook(E, '乱数製薬' + seed0, { client: TEMPLATE(8) }));
     E.call('apiListPlans()');
     // 見る人（閲覧）: 鷹野 につながる人
-    E.call(`apiSaveMember({ email: '${OTHER}', displayName: 'ビー' })`);
+    E.task(`saveMember({ email: '${OTHER}', displayName: 'ビー' })`);
     E.call('appWithLock_(() => appInsertRows_("PERSON_LINKS", __r))', { __r: [{ link_id: 'PLK-T1', person_name: '鷹野', email: OTHER, client_id: '', valid_from: '', valid_to: '',
       is_active: true, note: '', created_at: 'now', created_by: OWNER, updated_at: 'now', updated_by: OWNER, row_version: 1 }] });
     let model = view(E, P).boot.input.client.map(() => ({ conf: '', hist: ['BASELINE'] }));

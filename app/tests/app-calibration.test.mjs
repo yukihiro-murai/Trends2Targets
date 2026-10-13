@@ -90,6 +90,8 @@ function editLegacy(env, planId, sheets, edit, extra) {
 }
 /** 止めている操作を、待ち行列に直接入れて動かす（始める前の断りだけを飛ばす。旧来の C-1 で承認待ちの見直し案を作るため） */
 function runQueued(env, kind, payload, by) {
+  // 画面と同じく、計画への保存には今の指紋を添える（2026-10-13 から必須）
+  if (kind === 'PLAN.EDIT' && payload.inputHash === undefined) payload = Object.assign({}, payload, { inputHash: env.run('appTestPlanHash_(__p)', { __p: payload.planId }) });
   let id = env.run(`appWithLock_(() => appEnqueueJob_(__k, __p, __by, '').id)`, { __k: kind, __p: payload, __by: by || OWNER });
   for (let i = 0; i < 60; i++) {
     env.fireTriggers('triggerRunJob');
@@ -182,7 +184,7 @@ let planId;
     sheets['*' + y + '_actual_value'] = { cols: 70, values: rows };
   }
   const zac = env.makeBook('売上の元', sheets);
-  env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+  env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
   let st = env.runJob('PLAN.CREATE', { clientName: CLIENT, fy: currentFy, peopleCsv: '鷹野' });
   assert.equal(st.status, 'DONE', st.error);
   planId = st.result.planId;
@@ -276,8 +278,8 @@ const histBefore = () => engRows(env, 'CALIBRATION_HISTORY', planId).map((r) => 
 
 // ==== 2. 所有者だけ: 管理者の役割があっても、ほかの人は断る ====
 {
-  env.call('apiSaveMember(__in)', { __in: { email: MEMBER, displayName: 'メンバー' } });
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'ADMIN', scopeType: 'ALL' } });
+  env.task('saveMember(__in)', { __in: { email: MEMBER, displayName: 'メンバー' } });
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'ADMIN', scopeType: 'ALL' } });
   const cal0 = JSON.stringify(engRows(env, 'CALIBRATION_STATE', planId));
   const jobs0 = jobProps(env);
   const runs0 = audits(env, 'PLAN.CALIBRATION.SET').length;
@@ -620,9 +622,9 @@ let readmeTask;
     CALIBRATION_STATE: { values: [H, H.map((h) => ({ client: 'テスト薬品', bias_correction_factor: 0.8, auto_update_enabled: 1, ai_topic_disable_json: '[]' })[h] ?? '')] },
     CALIBRATION_HISTORY: { values: [HH] }
   }));
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: pastPlan } });
-  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
-  const yp = env.call('apiYearPreview(__in)', { __in: { fy: past } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: pastPlan } });
+  env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const yp = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(yp.canClose, true, JSON.stringify(yp));
   const closed = env.runJob('YEAR.CLOSE', { fy: past, inputHash: yp.inputHash });
   assert.equal(closed.status, 'DONE', closed.error);

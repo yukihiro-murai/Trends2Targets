@@ -111,6 +111,7 @@ const jobProps = (env) => Object.keys(env.props).filter((k) => /^APP_JOB_(?!RESU
 }
 
 const env = setUpEnv();
+env.boot();   // 初期設定の後の最初の操作で動く一度だけの写し（写しごとに監査に SCHEMA.BACKFILL が残る）を、先に済ませておく
 const currentFy = env.run('appFy_(new Date())');
 const past = currentFy - 1;
 
@@ -168,7 +169,7 @@ let memberRole;
 
 // ==== 4. 所有者だけ: 管理者の役割があっても、ほかの人は断る（何もせず、結果も書かず、断ったことを記録する） ====
 {
-  env.call('apiListDirectory()');   // 準備: MEMBER は全体の管理者
+  // 準備: MEMBER は全体の管理者（3 で付けた）
   const settings0 = JSON.stringify(env.table('SETTINGS'));
   const prevResult = env.props.OWNER_TASK_RESULT;
   const raw = JSON.stringify({ action: 'saveSetting', key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + 'x'.repeat(30) + '/edit' });
@@ -180,7 +181,8 @@ let memberRole;
     assert.equal(env.props.OWNER_TASK_RESULT, prevResult, '結果も書かない');
   }
   env.as(MEMBER);
-  assert.ok(env.call('apiListDirectory()').members.length >= 2, 'MEMBER は管理者（画面の入口は使える）');
+  assert.equal(env.boot().user.isAdmin, true, 'MEMBER は管理者（役割は効いている）。管理の操作の入口は画面にも無い（2026-10-13）');
+  assert.equal(typeof env.ctx.apiListDirectory, 'undefined');
   env.as(OWNER);
   assert.equal(JSON.stringify(env.table('SETTINGS')), settings0, '何も書かない');
   const denied = env.audit().filter((a) => a.phase === 'DENIED' && a.action === 'OWNER.TASK');
@@ -196,7 +198,7 @@ let memberRole;
   assert.equal(row.is_active, 'FALSE');
   fails(env, { action: 'revokeRole', roleId: memberRole.roleId, rowVersion: 2 }, /すでに外れています/);
   env.as(MEMBER);
-  assert.throws(() => env.call('apiListDirectory()'), /権限がありません/, '外した役割はすぐ効く');
+  assert.equal(env.boot().user.isAdmin, false, '外した役割はすぐ効く');
   env.as(OWNER);
 }
 
@@ -330,8 +332,8 @@ let planId;
   };
   for (const c of ['過去製薬', '過去薬品']) {
     const id = env.seedPlan(planBook(c, past));
-    const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: id } });
-    env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+    const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: id } });
+    env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   }
   const pv = ok(env, { action: 'yearPreview', fy: past });
   assert.equal(pv.rec.result.canClose, true, JSON.stringify(pv.rec.result));
@@ -519,7 +521,7 @@ function during(env, name, fn, body) {
   assert.equal(health().ok, true, '元に戻せば ok');
 }
 
-// ==== 16. メーカーを足す・直す（saveClient。画面の入口 apiSaveClient と同じ CLIENT.SAVE で記録する） ====
+// ==== 16. メーカーを足す・直す（saveClient。前の画面の入口と同じ CLIENT.SAVE で記録する） ====
 {
   const added = ok(env, { action: 'saveClient', clientName: '新規製薬', zacCode: 'Z-1' });
   assert.equal(added.full.auditAction, 'CLIENT.SAVE');

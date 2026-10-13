@@ -46,10 +46,10 @@ const runLogs = (env, kind) => env.runLog().filter((r) => r.kind === kind);
 {
   const env = setUpEnv();
   env.run('doGet({})');   // バックアップと自動の調べのトリガーを確かめる（控えを書く）
-  env.call('apiSaveClient(__in)', { __in: { clientName: 'テスト製薬' } });
+  env.task('saveClient(__in)', { __in: { clientName: 'テスト製薬' } });
   assert.equal(env.runJob('SYSTEM.RECOVER', {}).status, 'DONE');
-  env.call('apiRunBackup()');
-  env.call('apiRunHousekeeping()');
+  env.task('runBackup()');
+  env.task('runHousekeeping()');
   env.run(`appNotifyMaintenance_({ user: appCurrentUser_(), roles: [], actor: 'test', requestId: 'P1' }, ['ERRORS'])`);
   env.props.OWNER_TASK = JSON.stringify({ action: 'health' });
   assert.equal(env.call('apiOwnerTask()').ok, true);
@@ -90,7 +90,7 @@ function toOldLayout(env) {
 }
 {
   const env = setUpEnv();
-  env.call('apiSaveClient(__in)', { __in: { clientName: 'テスト製薬' } });
+  env.task('saveClient(__in)', { __in: { clientName: 'テスト製薬' } });
   assert.equal(env.runJob('SYSTEM.RECOVER', {}).status, 'DONE');
   const before = Object.assign({}, env.userProps);
   delete before.APP_PROPS_MOVED;
@@ -99,7 +99,7 @@ function toOldLayout(env) {
   // 移し替えの途中で止まる（UserProperties に書けない）: Script Properties からは何も消さない
   const realUser = env.ctx.PropertiesService.getUserProperties;
   env.ctx.PropertiesService.getUserProperties = () => Object.assign(realUser(), { setProperties: () => { throw new Error('書けません（テスト）'); } });
-  assert.throws(() => env.call('apiSaveClient(__in)', { __in: { clientName: 'ほか製薬' } }), /書けません/);
+  assert.throws(() => env.task('saveClient(__in)', { __in: { clientName: 'ほか製薬' } }), /書けません/);
   env.ctx.PropertiesService.getUserProperties = realUser;
   assert.equal(env.state.lockHeld, false);
   for (const k of Object.keys(before)) assert.equal(env.scriptProps[k], before[k], '止まっても Script Properties に残る: ' + k);
@@ -107,7 +107,7 @@ function toOldLayout(env) {
   // 次の操作で移す（ロックの中で）。監査の鎖は切れずに続く
   const locks = env.state.locks;
   env.run(`__orig = appPropsMove_; appPropsMove_ = function () { __depth = APP_LOCK_DEPTH_; return __orig(); }`);
-  env.call('apiSaveClient(__in)', { __in: { clientName: 'ほか製薬' } });
+  env.task('saveClient(__in)', { __in: { clientName: 'ほか製薬' } });
   assert.equal(env.run('__depth'), 1, '移し替えはロックの中');
   assert.ok(env.state.locks > locks);
   placed(env, '移し替えの後');
@@ -116,7 +116,7 @@ function toOldLayout(env) {
     else assert.equal(env.userProps[k], before[k], '同じ値を写す: ' + k);
   }
   for (const k of SCRIPT_IDS) assert.ok(env.scriptProps[k], 'ID は Script Properties に残す: ' + k);
-  const v = env.call('apiVerifyAudit()');
+  const v = env.task('verifyAudit()');
   assert.deepEqual([v.ok, v.matchesLatest], [true, true], '監査の鎖は切れない: ' + JSON.stringify(v.months));
   const mv = runLogs(env, 'PROPS.MOVE');
   assert.equal(mv.length, 1, '移し替えを実行ログに残す（1 回だけ）');
@@ -126,9 +126,9 @@ function toOldLayout(env) {
   // もう一度動かしても何もしない（印がある）。後から Script Properties に置かれた古い値は見ない
   env.run('APP_PROPS_MOVED_ = false');
   env.scriptProps.APP_AUDIT_LAST_HASH = 'f'.repeat(64);
-  env.call('apiSaveClient(__in)', { __in: { clientName: '三つ目製薬' } });
+  env.task('saveClient(__in)', { __in: { clientName: '三つ目製薬' } });
   assert.equal(runLogs(env, 'PROPS.MOVE').length, 1, '移し替えは一度だけ');
-  assert.equal(env.call('apiVerifyAudit()').matchesLatest, true, 'Script Properties の古いハッシュは使わない');
+  assert.equal(env.task('verifyAudit()').matchesLatest, true, 'Script Properties の古いハッシュは使わない');
   delete env.scriptProps.APP_AUDIT_LAST_HASH;
 }
 {
@@ -138,9 +138,9 @@ function toOldLayout(env) {
   toOldLayout(env);
   env.userProps.APP_AUDIT_LAST_HASH = hash;
   env.scriptProps.APP_AUDIT_LAST_HASH = 'stale';
-  env.call('apiSaveClient(__in)', { __in: { clientName: 'テスト製薬' } });
+  env.task('saveClient(__in)', { __in: { clientName: 'テスト製薬' } });
   assert.equal(env.scriptProps.APP_AUDIT_LAST_HASH, undefined);
-  assert.equal(env.call('apiVerifyAudit()').matchesLatest, true);
+  assert.equal(env.task('verifyAudit()').matchesLatest, true);
   placed(env, '両方にあったキー');
 }
 {
@@ -163,23 +163,26 @@ function toOldLayout(env) {
 {
   // 初期設定をしたのと別のアカウントで動いた（UserProperties が空で、写すものも無い）: 空の状態で進まず、何も書かずに止める
   const env = setUpEnv();
-  env.call('apiSaveClient(__in)', { __in: { clientName: 'テスト製薬' } });
+  env.task('saveClient(__in)', { __in: { clientName: 'テスト製薬' } });
   const userBefore = Object.assign({}, env.userProps);
   const scriptBefore = Object.assign({}, env.scriptProps);
   const sheets = Object.keys(env.sheetsById).length;
   const audits = env.audit().length;
   for (const k of Object.keys(env.userProps)) delete env.userProps[k];   // 別のアカウントの置き場（空）
   env.run('APP_PROPS_MOVED_ = false');
-  assert.throws(() => env.call('apiSaveClient(__in)', { __in: { clientName: 'ほか製薬' } }), /この実行のアカウントには、アプリの状態.*がありません/);
+  assert.throws(() => env.task('saveClient(__in)', { __in: { clientName: 'ほか製薬' } }), /この実行のアカウントには、アプリの状態.*がありません/);
   assert.deepEqual(env.userProps, {}, '印も付けない（空の状態で始めない）');
-  assert.deepEqual(env.scriptProps, scriptBefore, 'Script Properties は変えない');
+  // 所有者の操作の頼みと結果（OWNER_TASK・OWNER_TASK_RESULT）は、所有者の操作の経路が書く（断ったことを結果に残す）。それ以外は変えない
+  const appKeys = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => !/^OWNER_TASK/.test(k)));
+  assert.deepEqual(appKeys(env.scriptProps), appKeys(scriptBefore), 'Script Properties（アプリの値）は変えない');
+  assert.match(env.scriptProps.OWNER_TASK_RESULT || '', /"ok":false/, '断ったことを所有者の操作の結果に残す');
   assert.equal(Object.keys(env.sheetsById).length, sheets, 'ログのファイルをもう 1 つ作らない');
   // 元のアカウントに戻れば、そのまま続く（鎖も切れない）
   Object.assign(env.userProps, userBefore);
   env.run('APP_PROPS_MOVED_ = false');
-  env.call('apiSaveClient(__in)', { __in: { clientName: 'ほか製薬' } });
+  env.task('saveClient(__in)', { __in: { clientName: 'ほか製薬' } });
   assert.ok(env.audit().length > audits);
-  assert.deepEqual([env.call('apiVerifyAudit()').ok, env.call('apiVerifyAudit()').matchesLatest], [true, true]);
+  assert.deepEqual([env.task('verifyAudit()').ok, env.task('verifyAudit()').matchesLatest], [true, true]);
 }
 {
   // 初期設定の前の新しい環境: 何も写さずに印だけ付ける。初期設定もそのまま動く

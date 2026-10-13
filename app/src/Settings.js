@@ -5,8 +5,10 @@
  */
 const APP_SETTING_DEFS = {
   // 売上・検証用実績の取り込み（A-2・B-1）の元（ZAC の実績のスプレッドシート）。
-  // 2026-10-04: 使っていなかった設定（検証の上限・空模様の判定・操作の記録）を外した。数・整数・する/しないの型は、足すときのために残す
-  'source.zac_spreadsheet': { label: 'ZAC の実績のスプレッドシート', type: 'sheet', def: '', unit: 'スプレッドシートの URL（売上・実績の取り込みの元）' },
+  // 2026-10-04: 使っていなかった設定（検証の上限・空模様の判定・操作の記録）を外した。数・整数・する/しないの型は、足すときのために残す。
+  // 書けるのは所有者だけ（owner。2026-10-13）: 取り込みは所有者の権限でこのブックを読むので、所有者でない管理者が「所有者が開ける任意のブック」に
+  // 向けられないようにする。スプレッドシートを指す設定（type: 'sheet'）は、どれも owner にする（app/tests が確かめる）
+  'source.zac_spreadsheet': { label: 'ZAC の実績のスプレッドシート', type: 'sheet', def: '', unit: 'スプレッドシートの URL（売上・実績の取り込みの元）', owner: true },
   // 着地見込みの年の水準のぶれ（τ）と幅の倍率（w）。2026-10-08 村井さん承認の判断 29・11: 全計画から学んだ値（学びの画面に「試し」で出す）は、
   // 所有者が承認してここに書くまで使わない（書いていなければ 0.15 と 1）。書けるのは所有者だけ（owner）。
   // 範囲は Landing.js の APP_LANDING（TAU_MIN〜TAU_MAX・1〜W_MAX）と同じ数を書く（ファイルの読み込みの順に頼らない。app/tests が照合する）
@@ -95,7 +97,7 @@ function appLandingApproved_() {
 function appSaveSetting_(ctx, input) {
   const key = String(input && input.key || '');
   const def = APP_SETTING_DEFS[key];
-  // 所有者だけの設定（着地見込みの τ・w = 学んだ値の承認）。管理者の役割があっても、ほかの人は書けない（setCalibration と同じ）
+  // 所有者だけの設定（ZAC の実績のスプレッドシート・着地見込みの τ・w = 学んだ値の承認）。管理者の役割があっても、ほかの人は書けない（setCalibration と同じ）
   if (def && def.owner && !(ctx && ctx.user && ctx.user.isOwner)) throw new Error(def.label + ' は、所有者だけが変えられます。');
   const value = appParseSettingValue_(key, input && input.value);
   const eff = String(input && input.effectiveFrom || '').trim() || appToday_();

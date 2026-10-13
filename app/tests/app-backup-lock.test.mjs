@@ -40,10 +40,10 @@ const copiedEmails = (env, file) => env.sheetsById[file.id].getSheetByName('MEMB
   const flushes = [];
   const origFlush = env.ctx.SpreadsheetApp.flush;
   env.ctx.SpreadsheetApp.flush = () => { flushes.push(env.state.lockHeld); return origFlush(); };
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   assert.deepEqual(seen.map((s) => s.lock), [true], '写しはロックの中で取る');
   assert.ok(flushes.length >= 1 && flushes.every(Boolean), '反映もロックの中');
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   const uid = env.triggers.find((t) => t.handler === 'triggerDailyBackup').uid;
   env.as('');
   env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`);
@@ -59,7 +59,7 @@ const copiedEmails = (env, file) => env.sheetsById[file.id].getSheetByName('MEMB
   const env = setUpEnv();
   const seen = watchCopies(env);
   const jnl = pendingSave(env, 'pending@bigm2y.com');
-  const r = env.call('apiRunBackup()');
+  const r = env.task('runBackup()');
   assert.deepEqual(r.recovered, { journalId: 'JNL-T', label: 'テストの保存' }, '書き終えた保存を返す');
   assert.deepEqual(seen.map((s) => [s.lock, s.journal]), [[true, null]], '写す時には書きかけの印が無い');
   assert.equal(env.run('appJournalPending_()'), null);
@@ -72,17 +72,17 @@ const copiedEmails = (env, file) => env.sheetsById[file.id].getSheetByName('MEMB
 // ==== 3. 書き終えられない（控えが読めない）ときは写さない。前の世代はそのまま・印も残る・直れば取れる ====
 {
   const env = setUpEnv();
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   const before = filesOf(env, isBackup).map((f) => [f.id, f.parent]);
   const seen = watchCopies(env);
   pendingSave(env, 'x@bigm2y.com', 'missing');
-  assert.throws(() => env.call('apiRunBackup()'), /保存が途中で止まっていて（テストの保存）、続きを書けません。.*写しを取りませんでした/);
+  assert.throws(() => env.task('runBackup()'), /保存が途中で止まっていて（テストの保存）、続きを書けません。.*写しを取りませんでした/);
   assert.equal(seen.length, 0, '写しを作らない');
   assert.deepEqual(filesOf(env, isBackup).map((f) => [f.id, f.parent]), before, '前の世代はそのまま（移しも消しもしない）');
   assert.ok(env.run('appJournalPending_()'), '書きかけの印は残す');
   assert.equal(env.state.lockHeld, false);
   // 毎日のトリガーでも同じ: バックアップの失敗として残り、異常を知らせる
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   const uid = env.triggers.find((t) => t.handler === 'triggerDailyBackup').uid;
   env.as('');
   assert.throws(() => env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`), /写しを取りませんでした/);
@@ -95,7 +95,7 @@ const copiedEmails = (env, file) => env.sheetsById[file.id].getSheetByName('MEMB
   assert.deepEqual(m.journalPending, { id: 'JNL-T', label: 'テストの保存', planId: '', at: '2026-10-13T03:00:00+0900' }, '書きかけのまま写したことを返す');
   // 控えを片づければ、ふつうに取れる
   env.run('appProps_().deleteProperty(APP_JOURNAL_PROP)');
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   assert.equal(seen.length, 2);
 }
 
@@ -104,17 +104,17 @@ const copiedEmails = (env, file) => env.sheetsById[file.id].getSheetByName('MEMB
   const env = setUpEnv();
   const seen = watchCopies(env);
   pendingSave(env, 'y@bigm2y.com', 'missing');
-  const hk = env.call('apiRunHousekeeping()');
+  const hk = env.task('runHousekeeping()');
   assert.match(hk.steps.monthly.error, /写しを取りませんでした/);
   assert.ok(hk.problems.some((p) => /^monthly: /.test(p)), '手入れの要確認に出す');
   assert.equal(filesOf(env, isMonthly).length, 0, '月次の写しを作らない');
   env.run('appProps_().deleteProperty(APP_JOURNAL_PROP)');
-  const hk2 = env.call('apiRunHousekeeping()');
+  const hk2 = env.task('runHousekeeping()');
   assert.ok(hk2.steps.monthly.created, '直れば作る');
   assert.deepEqual(seen.map((s) => s.lock), [true], '月次の写しもロックの中');
   const jnl = pendingSave(env, 'z@bigm2y.com');
   void jnl;
-  assert.equal(env.call('apiRunHousekeeping()').steps.monthly.created, '', '同じ月に 2 つ目は作らない（書きかけがあっても写さない）');
+  assert.equal(env.task('runHousekeeping()').steps.monthly.created, '', '同じ月に 2 つ目は作らない（書きかけがあっても写さない）');
   env.run('appWithLock_(() => appJournalRecover_({ requestId: "t" }))');
 }
 

@@ -49,7 +49,7 @@ function appLinkPerson_(ctx, input) {
   });
 }
 
-/** 外す: { linkId, rowVersion? }（行は残して無効にする） */
+/** 外す: { linkId, rowVersion }（行は残して無効にする。rowVersion は 2026-10-13 から必須。所有者の操作は省けば今の版を読んで渡す） */
 function appUnlinkPerson_(ctx, input) {
   appPersonOwnerOnly_(ctx);
   const id = String(input && input.linkId || '').trim();

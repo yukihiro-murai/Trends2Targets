@@ -8,12 +8,14 @@
  * 裏の処理を始めたら {"action":"jobStatus","jobId":"…"} に置き換える（プロパティを触らずに、もう一度実行すると結果を確かめられる）。
  * 実行中に書き換えられた頼みは触らない。失敗したら残す（直してもう一度実行する）。
  *
- * どの操作も、画面の入口（Api.js）と同じ中の関数・同じ役割の判定・同じ監査の項目で動かす。
- * 書く操作は、入口と同じ操作の名前（SETTING.SAVE など）で監査に開始と終了が残る（理由の欄に OWNER_TASK と残す）。
+ * どの操作も、前に画面の入口（Api.js）があったときと同じ中の関数・同じ役割の判定・同じ監査の項目で動かす（2026-10-13 に入口を外し、ここだけにした）。
+ * 書く操作は、前の入口と同じ操作の名前（SETTING.SAVE など）で監査に開始と終了が残る（理由の欄に OWNER_TASK と残す）。
  * 時間のかかる処理（計画の作成・担当者の保存・年度の締め・事前分布の書き込み・補正の値の書き込み）は、画面と同じく裏の処理として始め、
  * 記録はその処理が残す。結果は jobStatus で見る。年度の締めは、画面と同じく yearPreview の指紋（inputHash）が要る。
  * 補正の値（setCalibration）は、所有者が承認した値を計画の旧来の CALIBRATION_STATE に書く（2026-10-07 村井さん決定。Calibration.js）。
  * AI 調査の問い合わせ先（setVertexConfig）は、全計画の CONFIG の Vertex の行をまとめて書き換える（2026-10-13 村井さん承認。Ai.js。計画ごとにロックと保存の控え）。
+ * 今ある行・計画を書き換える操作は、楽観ロックの印（行の版 rowVersion・計画の指紋 inputHash）が要る（2026-10-13 から中の関数で必須）。
+ * エディタからは所有者が 1 人で動かすので、頼みに無ければ実行したときの今の値を読んで渡す（current。頼みに入れたときは、その値で確かめる）。
  */
 // 頼みと結果は Script Properties に置く（所有者がエディタで書いて読む。APP_ で始まらないキー）。アプリの状態は所有者の UserProperties（Store.js の appProps_）
 const APP_OWNER_TASK_PROP = 'OWNER_TASK';
@@ -28,9 +30,9 @@ const APP_OWNER_AUDIT_LIMIT = 200;   // listAudit の既定の行数（limit が
 const APP_OWNER_BACKUP_STALE_HOURS = 26;   // 状態の要約: 最新のバックアップがこれより古ければ要確認（画面の「記録と状態」と同じ）
 
 /**
- * 操作の一覧。name・opts・run は Api.js の入口と同じ（操作の名前・権限と監査の項目・中の関数）。
+ * 操作の一覧。name・opts・run は操作の名前・権限と監査の項目・中の関数（前に Api.js に入口があった操作は、その入口と同じ）。
  * job は裏の処理の種類（apiStartJob と同じ判定で始める）。args は使える項目（ほかの項目は打ち間違いとして断る）。
- * check は動かす前の確かめ（足りない・形の違う項目なら、何もせずに止める）。
+ * check は動かす前の確かめ（足りない・形の違う項目なら、何もせずに止める）。current は頼みに無ければ足す今の値（行の版・計画の指紋。appOwnerFillCurrent_）。
  * brief は OWNER_TASK_RESULT に置く短い形（always なら常に。そうでなければ大きいときだけ）。全部は実行ログに出す
  */
 const APP_OWNER_ACTIONS = {
@@ -38,15 +40,17 @@ const APP_OWNER_ACTIONS = {
   listDirectory: { name: 'DIRECTORY.LIST', opts: () => ({ minRole: 'ADMIN', audit: false }),
     run: ctx => appCachedRead_('DIRECTORY', () => appListDirectory_(ctx)), brief: r => appOwnerDirectoryBrief_(r), always: true },
   saveMember: { name: 'MEMBER.SAVE', args: ['email', 'displayName', 'department', 'note', 'isActive', 'rowVersion'],
+    current: i => ({ rowVersion: appOwnerRowVersion_('MEMBERS', r => r.email === appNormalizeEmail_(i.email)) }),
     opts: i => ({ minRole: 'ADMIN', entityType: 'MEMBER', entityId: i.email, detail: i, after: res => res.member }),
     run: (ctx, i) => appSaveMember_(ctx, i) },
   grantRole: { name: 'ROLE.GRANT', args: ['email', 'role', 'scopeType', 'clientId', 'validFrom', 'validTo', 'note'],
     opts: i => ({ minRole: 'ADMIN', entityType: 'ROLE', detail: i, after: res => res.role }),
     run: (ctx, i) => appGrantRole_(ctx, i) },
-  revokeRole: { name: 'ROLE.REVOKE', args: ['roleId', 'rowVersion'],
+  revokeRole: { name: 'ROLE.REVOKE', args: ['roleId', 'rowVersion'], current: i => ({ rowVersion: appOwnerRowVersion_('ROLES', r => r.role_id === String(i.roleId || '')) }),
     opts: i => ({ minRole: 'ADMIN', entityType: 'ROLE', entityId: i.roleId, detail: i, after: res => res.role }),
     run: (ctx, i) => appRevokeRole_(ctx, i) },
   saveClientName: { name: 'CLIENT.NAME', args: ['clientId', 'displayName', 'rowVersion'],
+    current: i => ({ rowVersion: appOwnerRowVersion_('CLIENT_NAMES', r => r.client_id === String(i.clientId || '')) }),
     opts: i => ({ minRole: 'ADMIN', entityType: 'CLIENT', entityId: i.clientId, detail: i, after: res => ({ displayName: res.displayName, auto: res.auto }) }),
     run: (ctx, i) => appSaveClientName_(ctx, i) },
   saveClient: { name: 'CLIENT.SAVE', args: ['clientId', 'clientName', 'zacCode', 'isActive', 'note', 'rowVersion'], check: t => appOwnerCheckClient_(t),
@@ -64,7 +68,7 @@ const APP_OWNER_ACTIONS = {
   // purpose: 省くか "" = 予算を立てる計画・"MEASURE" = 測る専用（5 計画まで。PlanPurpose.js）
   createPlan: { job: 'PLAN.CREATE', args: ['clientName', 'fy', 'peopleCsv', 'purpose'], check: t => { appOwnerCheckFy_(t); appPlanPurposeCheck_(t); },
     payload: i => ({ clientName: i.clientName, fy: Number(i.fy), peopleCsv: i.peopleCsv, purpose: i.purpose }) },
-  setPeople: { job: 'PLAN.EDIT', args: ['planId', 'peopleCsv', 'inputHash'],
+  setPeople: { job: 'PLAN.EDIT', args: ['planId', 'peopleCsv', 'inputHash'], current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
     payload: i => ({ planId: i.planId, action: 'SETUP.PEOPLE', args: { peopleCsv: i.peopleCsv }, inputHash: i.inputHash }) },
   // 計画の印（測る専用）を付ける・外す（所有者だけ。監査に前と後の値。PlanPurpose.js）
   setPlanPurpose: { name: 'PLAN.PURPOSE', args: ['planId', 'purpose'], check: t => { appOwnerCheckPlanId_(t); appOwnerCheckPurpose_(t); },
@@ -92,7 +96,7 @@ const APP_OWNER_ACTIONS = {
     run: (ctx, i) => appCalibrationPreview_(i.planId) },
   // 計画への保存（PLAN.EDIT の CALIBRATION.SET。所有者だけ）。項目と値は始める前に確かめる（裏の処理の中でも確かめ直す）
   setCalibration: { job: 'PLAN.EDIT', args: ['planId', 'set', 'withdrawPendingReview', 'reason', 'inputHash'],
-    check: t => { appOwnerCheckPlanId_(t); appCalibrationCheck_(t); appOwnerCheckHash_(t); },
+    check: t => { appOwnerCheckPlanId_(t); appCalibrationCheck_(t); appOwnerCheckHash_(t); }, current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
     payload: i => ({ planId: i.planId, action: 'CALIBRATION.SET', args: { set: i.set || {}, withdrawPendingReview: i.withdrawPendingReview === true, reason: i.reason },
       inputHash: i.inputHash }) },
   // ---- AI 調査の問い合わせ先（Vertex のモデル名・リージョン・プロジェクト。Ai.js。2026-10-13 村井さん承認）: 全計画の今の値を見る・まとめて替える ----
@@ -111,7 +115,7 @@ const APP_OWNER_ACTIONS = {
   linkPerson: { name: 'PERSON.LINK', args: ['personName', 'email', 'clientId', 'validFrom', 'validTo', 'note'],
     opts: i => ({ minRole: 'ADMIN', entityType: 'PERSON_LINK', detail: i, after: res => res.link }),
     run: (ctx, i) => appLinkPerson_(ctx, i) },
-  unlinkPerson: { name: 'PERSON.UNLINK', args: ['linkId', 'rowVersion'],
+  unlinkPerson: { name: 'PERSON.UNLINK', args: ['linkId', 'rowVersion'], current: i => ({ rowVersion: appOwnerRowVersion_('PERSON_LINKS', r => r.link_id === String(i.linkId || '').trim()) }),
     opts: i => ({ minRole: 'ADMIN', entityType: 'PERSON_LINK', entityId: i.linkId, detail: i, after: res => res.link }),
     run: (ctx, i) => appUnlinkPerson_(ctx, i) },
   // ---- 裏の処理の状態（jobId を省くと、自分が最後に始めた処理） ----
@@ -237,7 +241,7 @@ function appOwnerCheckCutoffFy_(t) {
 
 /** 指紋（inputHash）は省ける。入れるなら calibrationPreview などで受け取った 64 桁のまま */
 function appOwnerCheckHash_(t) {
-  if (t.inputHash !== undefined && !/^[a-f0-9]{64}$/.test(String(t.inputHash))) throw new Error('inputHash は calibrationPreview の inputHash（64 桁）をそのまま入れてください（省くと確かめずに書きます）。');
+  if (t.inputHash !== undefined && !/^[a-f0-9]{64}$/.test(String(t.inputHash))) throw new Error('inputHash は calibrationPreview の inputHash（64 桁）をそのまま入れてください（省くと、実行したときの今の指紋で書きます）。');
 }
 
 /**
@@ -259,6 +263,7 @@ function appOwnerRunAction_(ctx, task) {
   const spec = APP_OWNER_ACTIONS[task.action];
   const input = {};
   (spec.args || []).forEach(k => { if (task[k] !== undefined) input[k] = task[k]; });
+  if (spec.current && appIsSetUp_()) appOwnerFillCurrent_(input, spec.current(input));
   if (spec.job) {
     // apiStartJob と同じ: 種類ごとの役割（計画ごとの処理はその計画のクライアントも）を確かめてから、待ち行列に入れる
     const req = { kind: spec.job, payload: spec.payload(input) };
@@ -266,6 +271,27 @@ function appOwnerRunAction_(ctx, task) {
   }
   const opts = spec.opts(input);
   return { name: spec.name, kind: opts.audit === false ? 'read' : 'write', result: appOwnerRun_(ctx, spec.name, opts, c => spec.run(c, input)) };
+}
+
+/** 頼みに無い（空の）印だけを、今の値で足す（今の値が無い = 行が無い・新しく作るときは足さない。中の関数が決める） */
+function appOwnerFillCurrent_(input, cur) {
+  const empty = v => v === undefined || v === null || v === '';
+  Object.keys(cur || {}).forEach(k => { if (empty(input[k]) && !empty(cur[k])) input[k] = cur[k]; });
+  return input;
+}
+
+/** 表の、条件に合う行の今の版（無ければ undefined。表がまだ無ければ undefined） */
+function appOwnerRowVersion_(table, pred) {
+  let rows;
+  try { rows = appReadTable_(table); } catch (e) { if (/表がありません/.test(String(e && e.message))) return undefined; throw e; }
+  const r = rows.filter(pred)[0];
+  return r ? r.row_version : undefined;
+}
+
+/** 計画の今の指紋（計画が無ければ undefined。始める前の判定が「計画が見つかりません」で止める） */
+function appOwnerPlanHash_(planId) {
+  const id = String(planId || '');
+  return id && appReadTable_('PLANS').some(p => p.plan_id === id) ? appPlanInputHash_(id) : undefined;
 }
 
 /**
@@ -362,7 +388,7 @@ function appOwnerShrink_(v, maxItems, maxChars, depth) {
 
 // ---- 操作ごとの中身・短い形 ----
 
-/** 業務の設定の一覧（Api.js の apiListSettings と同じ。スプレッドシートの設定は名前と URL も） */
+/** 業務の設定の一覧（スプレッドシートの設定は名前と URL も） */
 function appOwnerSettingsList_() {
   return appCachedRead_('SETTINGS', () => ({ settings: appSettingsCurrent_().map(x => {
     if (x.type !== 'sheet' || !x.value) return x;
@@ -451,7 +477,7 @@ function appOwnerHealthBrief_(h) {
   };
 }
 
-/** ログの一覧（apiListAudit と同じ中身）。エディタからは、limit が無ければ新しい 200 行まで（画面は 1000 行。最大 2000 行） */
+/** ログの一覧（appLogList_）。エディタからは、limit が無ければ新しい 200 行まで（最大 2000 行） */
 function appOwnerAuditList_(i) {
   const limit = Math.max(1, Math.min(2000, Math.floor(Number(i.limit)) || APP_OWNER_AUDIT_LIMIT));
   return Object.assign(appLogList_(Object.assign({}, i, { limit: limit })), { limit: limit });

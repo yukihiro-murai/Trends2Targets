@@ -25,19 +25,20 @@ const dropBackupTriggers = (env) => { for (let i = env.triggers.length - 1; i >=
 // ==== 1. 所有者が開くと 1 つ作る（appEnableBackup_ と同じ作り方）。バックアップそのものは取らない。記録は実行ログだけ ====
 {
   const env = setUpEnv();
+  env.boot();   // 初期設定の後の最初の操作で動く一度だけの写し（監査に残る）を先に済ませる
   const audits = env.audit().length;
   const { out, boot } = open(env);
   assert.equal(out.title, 'Trends2Targets');
   assert.equal(backupTriggers(env).length, 1, '所有者が開くとトリガーを作る');
   const t = backupTriggers(env)[0];
-  assert.deepEqual([t.everyDays, t.atHour, t.nearMinute], [1, 3, undefined], '毎日 3 時ごろ（apiEnableBackup と同じ）');
+  assert.deepEqual([t.everyDays, t.atHour, t.nearMinute], [1, 3, undefined], '毎日 3 時ごろ（所有者の enableBackup と同じ）');
   assert.deepEqual(ensureRuns(env).map((x) => [x[0], x[1].hour, x[1].by]), [['CREATED', 3, OWNER]], '作ったことを実行ログ（BACKUP.ENSURE）に残す');
   assert.deepEqual(checked(env), { date: jstDay(0), installed: true, reason: '' }, '確かめた日を控える');
   assert.equal(env.audit().length, audits, '画面を開くだけでは監査の記録を増やさない');
   assert.equal(env.backups().length, 0, '画面を開いたときはバックアップを取らない（3 時ごろのトリガーが取る）');
   assert.equal(env.runLog().filter((r) => r.kind === 'BACKUP').length, 0);
   assert.deepEqual([boot.home.system.backup.enabled, boot.home.system.backupAuto], [true, null], '最初の画面のホームでも、すぐに有効と出す');
-  // 作ったトリガーは毎日のバックアップの入口に所有者として受け付けられる（apiEnableBackup で作ったものと同じ）
+  // 作ったトリガーは毎日のバックアップの入口に所有者として受け付けられる（所有者の enableBackup で作ったものと同じ）
   env.as('');
   const daily = env.call(`triggerDailyBackup({ triggerUid: '${t.uid}' })`);
   env.as(OWNER);
@@ -81,7 +82,7 @@ const dropBackupTriggers = (env) => { for (let i = env.triggers.length - 1; i >=
 // ==== 3. あるトリガーには触らない（作り直さない・消さない・ロックも取らない・実行ログにも残さない） ====
 {
   const env = setUpEnv();
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   const uid = backupTriggers(env)[0].uid;
   const locks = env.state.locks;
   const r = ensure(env);
@@ -111,7 +112,7 @@ const dropBackupTriggers = (env) => { for (let i = env.triggers.length - 1; i >=
   assert.equal(ensureRuns(env).length, 0);
   assert.deepEqual(env.call('apiHome()').system.backupAuto, { off: true, checkedOn: '', checkedToday: false, reason: '' }, 'ホームに止めてあることを渡す');
   // 止めてあっても、あるトリガーは消さない
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   open(env);
   assert.equal(backupTriggers(env).length, 1);
   assert.equal(env.call('apiHome()').system.backupAuto, null, 'トリガーがあれば渡さない');
@@ -132,8 +133,8 @@ const dropBackupTriggers = (env) => { for (let i = env.triggers.length - 1; i >=
 // ==== 5. 所有者でなければ何もしない（社内の閲覧・所有者でない管理者・社外の人）。初期設定の前も何もしない ====
 {
   const env = setUpEnv();
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
   const audits = env.audit().length;
   env.as(MEMBER);
   const { boot } = open(env);

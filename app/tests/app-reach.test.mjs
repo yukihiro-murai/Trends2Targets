@@ -238,19 +238,21 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   const C = J(env.run('APP_LANDING'));
   assert.deepEqual([defs['landing.tau'].min, defs['landing.tau'].max, defs['landing.tau'].def, defs['landing.w'].min, defs['landing.w'].max, defs['landing.w'].def],
     [C.TAU_MIN, C.TAU_MAX, C.TAU0, 1, C.W_MAX, 1], '設定の範囲と既定値は着地の計算の決まりと同じ');
-  assert.deepEqual([defs['landing.tau'].owner, defs['landing.w'].owner, defs['source.zac_spreadsheet'].owner], [true, true, undefined]);
+  assert.deepEqual([defs['landing.tau'].owner, defs['landing.w'].owner, defs['source.zac_spreadsheet'].owner], [true, true, true], 'どれも所有者だけ（ZAC の実績のスプレッドシートも。2026-10-13）');
   const used0 = env.call('apiAiLearning()').landing.used;
   assert.deepEqual([used0.tau, used0.w, used0.tauSet, used0.wSet, used0.tauFrom], [0.15, 1, false, false, '']);
   const before = port()[idCur];
   // 管理者の役割だけの人は書けない（記録は残る）
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN', scopeType: 'ALL' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN', scopeType: 'ALL' })`);
   env.as(MEMBER);
-  assert.throws(() => env.call(`apiSaveSetting({ key: 'landing.tau', value: 0.3 })`), /所有者だけ/);
+  assert.throws(() => env.task(`saveSetting({ key: 'landing.tau', value: 0.3 })`), /権限がありません/, '所有者の操作そのものを断る（2026-10-13 から管理の入口は無い）');
+  // 中の関数も、所有者でなければ断る（二重の守り）
+  assert.throws(() => env.run(`appSaveSetting_({ actor: '${MEMBER}', user: { email: '${MEMBER}', isOwner: false }, roles: [] }, { key: 'landing.tau', value: 0.3 })`), /所有者だけ/);
   env.as(OWNER);
   // 範囲の外・数でない値は書かない
   for (const [key, value, re] of [['landing.tau', 0.36, /0\.05〜0\.35 の範囲/], ['landing.tau', 0.04, /0\.05〜0\.35 の範囲/], ['landing.w', 0.9, /1〜3 の範囲/], ['landing.w', 3.5, /1〜3 の範囲/], ['landing.tau', 'abc', /数値で入力/]]) {
-    assert.throws(() => env.call('apiSaveSetting(__in)', { __in: { key, value } }), re, `${key}=${value}`);
+    assert.throws(() => env.task('saveSetting(__in)', { __in: { key, value } }), re, `${key}=${value}`);
   }
   assert.equal(env.table('SETTINGS').length, 0, 'だめな値・所有者でない人の値は保存しない');
   // 明日から効く値は、今日はまだ使わない
@@ -265,14 +267,14 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   near(before.landing, J(pure.run('appLandingSky_(__in)', { __in: inp })).landing, 1e-9, '書く前は τ=0.15・w=1 の着地');
   assert.ok(Math.abs(t1.landing - before.landing) > 1e-6, 'τ を変えると着地が動く');
   assert.deepEqual([t1.reach.tau, t1.reach.w, t1.reach.tauSet, t1.reach.wSet, t1.aligned.tau], [0.3, 1, true, false, 0.3], '試しの数も同じ値を使う');
-  env.call(`apiSaveSetting({ key: 'landing.w', value: '1.5' })`);
+  env.task(`saveSetting({ key: 'landing.w', value: '1.5' })`);
   const t2 = port()[idCur];
   near(t2.landingSd, J(pure.run('appLandingSky_(__in)', { __in: Object.assign({}, inp, { tau: 0.3, w: 1.5 }) })).landingSd, 1e-9, '書いた w を使う');
   const u = env.call('apiAiLearning()').landing.used;
   assert.deepEqual([u.tau, u.w, u.tauSet, u.wSet, u.tauFrom, u.wFrom], [0.3, 1.5, true, true, '2026-10-07', '2026-10-07']);
   assert.deepEqual(env.call('apiHome()').totals.reach.tauSet, true);
   // 書いた行は消さずに足す（戻すときは 0.15 を書く）
-  env.call(`apiSaveSetting({ key: 'landing.tau', value: 0.15 })`);
+  env.task(`saveSetting({ key: 'landing.tau', value: 0.15 })`);
   assert.equal(env.table('SETTINGS').filter((r) => r.key === 'landing.tau').length, 2);
   near(port()[idCur].landing, J(pure.run('appLandingSky_(__in)', { __in: Object.assign({}, inp, { w: 1.5 }) })).landing, 1e-9, '0.15 に戻すと戻る');
 }

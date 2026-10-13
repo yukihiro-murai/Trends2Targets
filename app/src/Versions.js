@@ -115,11 +115,13 @@ function appVersionReachCols_(plan, nums, run) {
 /**
  * 画面: 計画の版の一覧と、今の数字（出す前に見比べる）。測る専用の計画（measure）は出せない（can.submit が false）。
  * current = 今の数字（appPlanNumbers_。annual は旧来の計算の年度合計のまま）+ shown（見せる年度の中心 { p50, basis, live }: appVersionShownNow_）。
- * versions[].shownCenter = 版の中心（年度）として見せる値（appVersionShownCenter_）
+ * versions[].shownCenter = 版の中心（年度）として見せる値（appVersionShownCenter_）。versions[].submittedBy・decidedBy は、閲覧の人には空
  */
 function appVersionList_(ctx, input) {
   const plan = appPlanOf_(input && input.planId);
-  const versions = appVersionRows_(plan.plan_id).map(appVersionOut_);
+  // 出した人・判断した人のメールは、その計画のメーカーで予算策定担当以上の人だけ（閲覧の人には空。画面は「-」。2026-10-13）。控えは見る人ごと
+  const seesActors = appHasRole_(ctx.roles, 'PLANNER', plan.client_id);
+  const versions = appVersionRows_(plan.plan_id).map(appVersionOut_).map(v => (seesActors ? v : Object.assign(v, { submittedBy: '', decidedBy: '' })));
   const official = versions.filter(v => v.state === 'APPROVED')[0] || null;
   const pending = versions.filter(v => v.state === 'SUBMITTED')[0] || null;
   const inputHash = appPlanInputHash_(plan.plan_id);
@@ -143,7 +145,8 @@ function appVersionSubmit_(ctx, input) {
     const nums = appPlanNumbers_(plan.plan_id);
     if (!nums || nums.annual.p50 === null) throw new Error('予測がまだありません。予測を実行してから出してください。');
     const inputHash = appPlanInputHash_(plan.plan_id);
-    if (input && input.inputHash && input.inputHash !== inputHash) throw new Error('画面を開いた後に計画が変わりました。読み直してから出してください。');
+    if (!input || !input.inputHash) throw new Error(APP_STALE_MSG);   // 出す数字が開いたときと同じかを確かめる印（2026-10-13 から必須。前の承認待ちも取り下げるため）
+    if (input.inputHash !== inputHash) throw new Error('画面を開いた後に計画が変わりました。読み直してから出してください。');
     const versions = appVersionRows_(plan.plan_id);
     const now = appNowIso_();
     const run = appReadTable_('FORECAST_RUNS').filter(r => r.plan_id === plan.plan_id && r.status === 'DONE')
@@ -182,7 +185,8 @@ function appVersionDecide_(ctx, input) {
     if (v.state !== 'SUBMITTED') throw new Error('この版は承認待ちではありません（' + v.state + '）。画面を読み直してください。');
     if (v.submitted_by === ctx.actor && !ctx.user.isOwner) throw new Error('自分で出した版は承認・却下できません。ほかの承認者に頼んでください。');
     // 前の公式版を置き換える前に確かめる（置き換えた後に止まると、公式版が無くなる）
-    if (input && input.rowVersion !== undefined && input.rowVersion !== null && input.rowVersion !== '' && Number(input.rowVersion) !== Number(v.row_version)) {
+    if (!input || input.rowVersion === undefined || input.rowVersion === null || input.rowVersion === '') throw new Error(APP_STALE_MSG);   // 2026-10-13 から必須
+    if (Number(input.rowVersion) !== Number(v.row_version)) {
       throw new Error('ほかの人が先に更新しました。画面を読み直してから、もう一度選んでください。');
     }
     const plan = appRequireOpenPlan_(v.plan_id);   // 締めた年度の版は承認・却下できない

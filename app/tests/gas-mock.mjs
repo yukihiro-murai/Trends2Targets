@@ -285,6 +285,9 @@ export function extractFunction(src, name) {
  * テストだけで使う関数（アプリには無い）。vm の中で、アプリのコードの後に読む。
  * appEngCompare_: 2 つのシートの読み取り（appSheetSnapshot_ / appEngDecodeSheet_ の形）が同じか。違うセルの A1 を返す
  * appTestSeedPlan_: 見本のブックの CONFIG（B2 クライアント・B3 年度・B4 担当者）とシートから、計画 1 つ分をデータ本体に書く
+ * appTestPlanHash_: 計画の今の指紋（画面を開いたときの inputHash と同じ）
+ * appTestVersionSubmit_ / appTestVersionDecide_: 画面と同じく、開いたときの指紋（inputHash）・行の版（rowVersion）を添えて公式版を出す・判断する
+ *   （画面は必ず渡す。2026-10-13 から必須。省いたときを確かめるテストは apiVersionSubmit / apiVersionDecide を直接呼ぶ）
  */
 const TEST_SUPPORT = `
 function appEngCompare_(snap, dec) {
@@ -302,6 +305,24 @@ function appEngCompare_(snap, dec) {
     }
   }
   return bad;
+}
+function appTestPlanHash_(planId) {
+  APP_STORE_CACHE_ = {};
+  return appPlanInputHash_(planId);
+}
+function appTestVersionSubmit_(input) {
+  const i = Object.assign({}, input || {});
+  if (i.inputHash === undefined && i.planId) { try { i.inputHash = appTestPlanHash_(i.planId); } catch (e) { /* 計画が無い: 入口が断る */ } }
+  return apiVersionSubmit(i);
+}
+function appTestVersionDecide_(input) {
+  const i = Object.assign({}, input || {});
+  if (i.rowVersion === undefined) {
+    APP_STORE_CACHE_ = {};
+    const v = appVersionTable_().filter(x => x.version_id === String(i.versionId || ''))[0];
+    if (v) i.rowVersion = v.row_version;
+  }
+  return apiVersionDecide(i);
 }
 function appTestSeedPlan_(book) {
   const ctx = { actor: Session.getActiveUser().getEmail() || 'test', requestId: 'TEST' };
@@ -576,6 +597,8 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
   };
   /** 処理を始めて、トリガーで動かし、結果を受け取る（続きの処理があればそれも動かす） */
   const runJob = (kind, payload, opts) => {
+    // 画面と同じく、計画への保存には開いたときの指紋（inputHash）を添える（画面は必ず渡す。2026-10-13 から必須。省いたときを確かめるテストは apiStartJob を直接呼ぶ）
+    if (kind === 'PLAN.EDIT' && payload && payload.inputHash === undefined && payload.planId) payload = Object.assign({}, payload, { inputHash: run('appTestPlanHash_(__pid)', { __pid: payload.planId }) });
     let id = call('apiStartJob(__in)', { __in: { kind, payload } }).jobId;
     for (let i = 0; i < 60; i++) {   // 組み立てが何回かに分かれても最後まで
       fireTriggers('triggerRunJob', opts);
@@ -588,8 +611,22 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
   };
   /** テスト用の計画を、見本のブック（makeBook）の中身で作る（データ本体に直接。計画の ID を返す） */
   const seedPlan = (book) => run('appTestSeedPlan_(__book)', { __book: book });
+  /**
+   * 所有者の操作（apiOwnerTask。エディタからの実行と同じ経路）を、今の人のまま動かし、結果（result）を返す。
+   * expr は 'saveMember({ email: … })' の形（OwnerTask.js の操作の名前と項目。項目は vm の中で読むので、extra で値を差し込める）。
+   * 管理の入口（apiSaveMember など）は画面の入口から外した（2026-10-13）ので、テストの管理の操作はこの経路で動かす。失敗は投げる
+   */
+  const task = (expr, extra) => {
+    const m = /^\s*([A-Za-z]+)\(([\s\S]*)\)\s*$/.exec(expr);
+    if (!m) throw new Error('task: 形が読めない: ' + expr);
+    const input = m[2].trim() ? J(run('(' + m[2] + ')', extra)) : {};
+    props.OWNER_TASK = JSON.stringify(Object.assign({ action: m[1] }, input || {}));
+    return call('apiOwnerTask()').result;
+  };
+  /** 画面の初期データ（doGet と同じ判定・同じ中身。開いたときのトリガーの確かめはしない） */
+  const boot = () => call("api_('APP.BOOTSTRAP', { minRole: 'VIEWER', audit: false, allowAnonymousView: true }, ctx => appBootstrap_(ctx))");
   return {
-    ctx, state, props, scriptProps, userProps, cache, files, sheetsById, triggers, logs, run, call, as, data, log, makeBook, fireTriggers, runJob, seedPlan,
+    ctx, state, props, scriptProps, userProps, cache, files, sheetsById, triggers, logs, run, call, as, data, log, makeBook, fireTriggers, runJob, seedPlan, task, boot,
     table: (name) => objects(data().getSheetByName(name)),
     auditSheet: () => log().getSheetByName('AUDIT_' + MONTH),
     audit: () => objects(log() && log().getSheetByName('AUDIT_' + MONTH)),

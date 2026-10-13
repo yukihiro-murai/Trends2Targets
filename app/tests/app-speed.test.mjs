@@ -225,7 +225,7 @@ assert.deepEqual([expectNumbers(1200).budget.uplift, expectNumbers(1200).monthly
   assert.equal(reads('ENG_EVAL_LOG'), 0, '精度は控えから（検証の記録は読まない）');
   env.ctx.CacheService.getScriptCache = orig;
   // 保存したら読み直す
-  env.call(`apiSaveClient({ clientName: '別の製薬' })`);
+  env.task(`saveClient({ clientName: '別の製薬' })`);
   reset();
   env.call('apiLearningView(__in)', { __in: { planId: ids[1] } });
   assert.ok(STATS.reads > 0, '書いた後は読み直す');
@@ -348,7 +348,7 @@ assert.deepEqual([expectNumbers(1200).budget.uplift, expectNumbers(1200).monthly
   // 要点がまだ無い（この版の前のバックアップだけ）: 今までどおり数え、5 分控える
   clearCache();
   delete env.props.APP_BACKUP_STATUS;
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   delete env.props.APP_BACKUP_STATUS;
   listed = 0;
   assert.deepEqual(fast(), slow());
@@ -356,13 +356,13 @@ assert.deepEqual([expectNumbers(1200).budget.uplift, expectNumbers(1200).monthly
   fast();
   assert.equal(listed, 2, '数えた結果は 5 分控える');
   // 控えている間も「有効」は毎回トリガーを見る（数え直さない）
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   assert.deepEqual([fast().enabled, listed], [true, 2], '有効にしたらすぐに有効と出す（控えから）');
   dropTrigger();
   assert.deepEqual([fast().enabled, listed], [false, 2], 'トリガーを消したらすぐに無効と出す（控えから）');
   // バックアップすると要点を残す。ホームは数えない
   clearCache();
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   assert.ok(env.props.APP_BACKUP_STATUS, '要点を残す');
   assert.deepEqual(Object.keys(stored()).sort(), ['at', 'count', 'latest', 'latestAt'], '要点に「有効」は残さない');
   listed = 0;
@@ -374,11 +374,11 @@ assert.deepEqual([expectNumbers(1200).budget.uplift, expectNumbers(1200).monthly
   assert.deepEqual(home.system.backup, slow());
   assert.equal(listed, 1, 'ホームはドライブを数えない');
   // 毎日のバックアップを有効にすると、すぐに有効と出す
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   assert.deepEqual(fast(), slow());
   assert.equal(fast().enabled, true);
   // 毎日のトリガーがあるときにバックアップしても有効と出す。その後でアプリの外でトリガーを消すと、すぐに無効と出す（ドライブは数えない）
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   listed = 0;
   assert.equal(fast().enabled, true, 'トリガーがあるときのバックアップの後も有効');
   dropTrigger();
@@ -386,35 +386,35 @@ assert.deepEqual([expectNumbers(1200).budget.uplift, expectNumbers(1200).monthly
   assert.equal(env.call('apiHome()').system.backup.enabled, false, 'ホームもすぐに無効');
   assert.equal(listed, 0, '有効かを見るのにドライブは数えない');
   assert.deepEqual(fast(), slow());
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   assert.equal(fast().enabled, true);
   // 古い世代を移せずに止まっても、作った複製と残っている数を残す
-  for (let i = 0; i < 12; i++) env.call('apiRunBackup()');
+  for (let i = 0; i < 12; i++) env.task('runBackup()');
   assert.equal(fast().count, 14);
   const oldest = env.backups().filter((f) => !f.trashed).sort((a, b) => a.created - b.created)[0];
   const move = oldest.moveTo;
   oldest.moveTo = () => { throw new Error('move failed'); };
-  assert.throws(() => env.call('apiRunBackup()'), /move failed/);
+  assert.throws(() => env.task('runBackup()'), /move failed/);
   assert.deepEqual(fast(), slow());
   assert.equal(fast().count, 15);
   oldest.moveTo = move;
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   assert.deepEqual(fast(), slow());
   assert.equal(fast().count, 14);
   // 作った直後の複製が一覧にまだ出なくても、最新はその複製（名前と作った時刻）。数にも足す（一覧に出ていない分、古い世代は次の回に移す）
   shown = new Set(env.backups().filter((f) => !f.trashed).map((f) => f.id));
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   const newest = env.backups().filter((f) => !f.trashed).sort((a, b) => b.created - a.created)[0];
   assert.ok(!shown.has(newest.id), '一覧に出ていない複製');
   assert.deepEqual([stored().latest, stored().latestAt, stored().count], [newest.name, newest.created.getTime(), 15], '最新は作った複製');
   shown = null;
   assert.deepEqual(fast(), slow(), '一覧に出るようになった後に数えたものと同じ');
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   assert.deepEqual(fast(), slow());
   assert.equal(fast().count, 14, '次の回で 14 世代に戻る');
-  // 状態の点検（apiHealth）は今までどおりドライブを数える
+  // 状態の点検（health）は今までどおりドライブを数える
   listed = 0;
-  const health = env.call('apiHealth()');
+  const health = env.task('health()');
   assert.deepEqual(health.backup, slow());
   assert.equal(listed, 2, '状態の点検は数える');
   // 要点が壊れていれば数える

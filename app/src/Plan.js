@@ -238,7 +238,9 @@ function appPlanView_(ctx, planId) {
     try { appJobPutResult_(key, view); } catch (e) { Logger.log('画面の中身を覚えておけません: ' + (e && e.message ? e.message : e)); }
     if (view.builtMs > 20000) appRunLog_({ requestId: ctx.requestId, kind: 'PLAN.VIEW', status: 'SLOW', durationMs: view.builtMs, detail: { planId: plan.plan_id } });
   }
-  const shown = appPlanViewFor_(ctx, view);
+  const shown = appPlanViewFor_(ctx, view, plan);
+  // 操作した人のメールは、その計画のメーカーで予算策定担当以上の人だけ（閲覧の人には空。画面は「-」。2026-10-13）
+  const seesActors = appInsightDetailFor_(ctx, plan.client_id) === 'full';
   return Object.assign({
     plan: { planId: plan.plan_id, clientName: clients[plan.client_id] || plan.client_label, fy: plan.fy, frozen: frozen, measure: appPlanIsMeasure_(plan) },
     inputHash: inputHash,
@@ -253,7 +255,7 @@ function appPlanView_(ctx, planId) {
       minRole: APP_PLAN_ACTIONS[k].minRole, paused: APP_PLAN_ACTIONS[k].paused || appMeasureActionRefusal_(plan, k) })),
     recent: appReadTable_('PLAN_ACTIONS').filter(r => r.plan_id === plan.plan_id).map(appStripRow_)
       .sort((a, b) => (a.finished_at < b.finished_at ? 1 : -1)).slice(0, 10)
-      .map(r => ({ action: r.action, label: (APP_PLAN_ACTIONS[r.action] || {}).label || r.action, finishedAt: r.finished_at, actor: r.actor_email,
+      .map(r => ({ action: r.action, label: (APP_PLAN_ACTIONS[r.action] || {}).label || r.action, finishedAt: r.finished_at, actor: seesActors ? r.actor_email : '',
         changed: appParseJsonList_(r.changed_sheets_json) }))
   }, shown, { boot: appPlanViewBudgetDraft_(shown && shown.boot, plan) },
   { inputLog: appInputLogView_(ctx, plan) });   // 入力の記録は見る人ごと（InputLog.js。覚えておく中身には入れない）
@@ -389,18 +391,20 @@ function appPlanOwnerNote_(c) {
 }
 
 /**
- * 見る人に合わせた画面の中身。人ごとの当たりと外れた月の担当は、予算策定担当以上の人だけに出す（学びと同じ決まり: appInsightDetail_）。
+ * 見る人に合わせた画面の中身。人ごとの当たりと外れた月の担当は、その計画のメーカーで予算策定担当以上の人だけに出す
+ * （appInsightDetailFor_。メーカーに限った担当は、そのメーカーの計画だけ。2026-10-13 まではほかのメーカーの計画でも出していた）。
  * ほかの人（閲覧・情報提供）には:
  *   - 四半期レビューの提案: 信頼度の対象は種類まで（reliability:<種類>）。その根拠（その人や話題の的中率）と、効かせたときの見込み
  *     （旧来の C-1 は、その人や話題の名前を書く）と、信頼度の今と案の値は空。どちらも学びと同じ appInsightTarget_・appInsightRationale_ で決める
  *   - 検証の記入（boot.eval.insights）: 担当は空
  *   - 予測の注記（OUTPUT!A6 の写し: boot.output.policyLines・engineNote）: 信頼度の行（旧来の buildReliabilityText_）のうち、
  *     効かせている人や話題ごとの一覧（「 / 適用中=opinion:<名前>=1.10, …」）だけ除く。ON/OFF・数・SPOT上限基準とほかの行はそのまま
+ *   - 操作した人（旧来の実行の記録 boot.runLog[].by・手順の進み boot.steps[].by）: 空（2026-10-13。旧来の計算は変えず、ここで空にする）
  * 入力の行・担当者の一覧は、これまでどおり出す（入力の画面に出すもの）。
  * 覚えておいた中身は見る人によらず同じものを使うので、写しを直す（覚えておいたものは変えない）
  */
-function appPlanViewFor_(ctx, view) {
-  if (appInsightDetail_(ctx) === 'full' || !view || !view.boot) return view;
+function appPlanViewFor_(ctx, view, plan) {
+  if (appInsightDetailFor_(ctx, plan && plan.client_id) === 'full' || !view || !view.boot) return view;
   const out = appSerialize_(view);
   const q = out.boot.quarterly;
   ((q && q.proposals) || []).forEach(p => {
@@ -411,6 +415,8 @@ function appPlanViewFor_(ctx, view) {
     p.target = appInsightTarget_(p.target, true).target;
   });
   ((out.boot.eval && out.boot.eval.insights) || []).forEach(r => { r.owner = ''; });
+  (out.boot.runLog || []).forEach(r => { r.by = ''; });
+  (out.boot.steps || []).forEach(s => { s.by = ''; });
   // 一覧の終わりは「 / SPOT上限基準=」。見つからなければ、その行の終わりまで除く（出さない側）
   const o = out.boot.output;
   const strip = t => String(t || '').replace(/ \/ 適用中=.*?(?= \/ SPOT上限基準=|\n|$)/g, '');
@@ -475,7 +481,8 @@ const APP_EDIT_WRITE_DEADLINE_MS = 4 * 60 * 1000;
 function appPlanEdit_(ctx, p) {
   const act = appPlanAction_(p.action, 'edit');
   const plan = appPlanOf_(p.planId);
-  // hashChecked: 画面が開いたときの入力のハッシュを渡した保存（下で一致を確かめる）。行の出どころ（fromRow）は、そのときだけ使う
+  // hashChecked: 画面が開いたときの入力のハッシュを渡した保存（下で一致を確かめる）。行の出どころ（fromRow）は、そのときだけ使う。
+  // 2026-10-13 からハッシュは必須（無ければ下で止める。始める前にも appStartJob_ が断る）なので、いつも true
   const inLog = { action: p.action, hashChecked: !!p.inputHash };
   const args = appInputLogTake_(appPlanCheckArgs_(appJobArgs_(p)), inLog);   // 自信・行の出どころ・保存の理由は入力の記録にだけ使う（旧来の表に渡さない。InputLog.js）
   // 予算の決め方・確率・割り振り（版 11 の下書きにだけ使う。旧来の webSaveBudget には rows だけを渡す）。だめな値なら何も書かずに止める
@@ -486,7 +493,8 @@ function appPlanEdit_(ctx, p) {
     appJournalRecover_(ctx);   // 前の保存が途中で止まっていれば、先に書き終える
     const stored = appStoredHashes_(plan.plan_id);
     const inputHash = appPlanInputHash_(plan.plan_id);
-    if (p.inputHash && p.inputHash !== inputHash) {
+    if (!p.inputHash) throw new Error(APP_STALE_MSG);   // 省くと後から保存した方が勝つ（画面は必ず渡す。所有者の操作は今の指紋を読んで渡す）
+    if (p.inputHash !== inputHash) {
       throw new Error('画面を開いた後に、ほかの人の操作でデータが変わりました。画面を開き直して、もう一度入力してください。');
     }
     const scratch = appWorkScratch_(plan);

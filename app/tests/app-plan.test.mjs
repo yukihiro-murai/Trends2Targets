@@ -181,13 +181,13 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
 {
   const { env, planId } = imported();
   const clientId = env.table('PLANS')[0].client_id;
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
   env.as(MEMBER);
   const view = env.call('apiPlanView(__in)', { __in: { planId } });
   assert.equal(view.can.plan, false, '見るのは社内全員');
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.EDIT', payload: { planId, action: 'INPUT.SAVE', args: { kind: 'product', rows: [] } } } }), /権限がありません/);
   env.as(OWNER);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
   env.as(MEMBER);
   const v = env.call('apiPlanView(__in)', { __in: { planId } });
   assert.deepEqual([v.can.plan, v.can.approve], [true, false]);
@@ -197,7 +197,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.RUN', payload: { planId, action: 'FORECAST.RUN' } } }), /未定義の操作です/);
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.RUN_SAVE', payload: { planId, action: 'EVAL.REPORT' } } }), /画面から始められません/);
   env.as(OWNER);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'APPROVER', scopeType: 'ALL' } });
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'APPROVER', scopeType: 'ALL' } });
   env.as(MEMBER);
   const st = env.runJob('PLAN.EDIT', { planId, action: 'REVIEW.DECIDE', args: { rows: [{ row: 8, decision: '承認' }, { row: 9, decision: '保留' }] }, inputHash: v.inputHash });
   assert.equal(st.status, 'DONE', st.error);
@@ -221,7 +221,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.equal(noSource.status, 'FAILED');
   assert.match(noSource.error, /ZAC の実績のスプレッドシート/, '元を決めていなければ取り込まない（旧来の既定に頼らない）');
   assert.equal(env.call('apiPlanView(__in)', { __in: { planId } }).sourceReady, false);
-  env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+  env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
   const st = env.runJob('PLAN.RUN', { planId, action: 'IMPORT.SALES' });
   assert.equal(st.status, 'DONE', st.error);
   assert.ok(st.result.changed.includes('SALES_INPUT'));
@@ -246,8 +246,8 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.equal(env.table('PLANS')[0].people_csv, '鷹野,佐藤,田中', '計画の表にも残す');
   const empty = env.runJob('PLAN.EDIT', { planId, action: 'SETUP.PEOPLE', args: { peopleCsv: ' , ' } });
   assert.match(empty.error, /1 人以上/);
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call('apiGrantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'ALL' } });
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'ALL' } });
   env.as(MEMBER);
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.RUN', payload: { planId, action: 'IMPORT.SALES' } } }), /権限がありません/, '取り込みは管理者');
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.EDIT', payload: { planId, action: 'SETUP.PEOPLE', args: { peopleCsv: 'x' } } } }), /権限がありません/);
@@ -374,7 +374,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } });
   const verHtml = vm.runInContext(`S.fc.ver = __ver; S.fc.tab = 'version'; viewForecast()`, ui);
   assert.match(verHtml, /公式版の最終予算[\s\S]*今の内容を公式版として出す[\s\S]*まだ版がありません/);
-  env.call('apiVersionSubmit(__in)', { __in: { planId, note: 'テスト' } });
+  env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'テスト' } });
   ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } });
   const verHtml2 = vm.runInContext(`S.fc.ver = __ver; S.fc.verCmp = __ver.versions[0].versionId; viewForecast()`, ui);
   assert.match(verHtml2, /承認待ち（v1）[\s\S]*v1 と今の比べ/);

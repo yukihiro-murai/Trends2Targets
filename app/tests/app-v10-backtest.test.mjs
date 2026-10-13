@@ -60,7 +60,7 @@ const total = (client, y, m) => records(client, y, m).reduce((s, r) => s + r[2],
     sheets['*' + y + '_actual_value'] = { cols: 70, values: rows };
   }
   const zac = env.makeBook('売上の元', sheets);
-  env.call('apiSaveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
+  env.task('saveSetting(__in)', { __in: { key: 'source.zac_spreadsheet', value: 'https://docs.google.com/spreadsheets/d/' + zac.getId() + '/edit' } });
 }
 /** 本物の A-1 → A-2 → A-3 → B-1 で計画を作る（人の入力は無い） */
 function makePlan(client) {
@@ -347,8 +347,8 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
     assert.match(st.st.error, /区切りの年度は、計画の年度（FY\d{4}）から 3 年前まで/);
   }
   // 所有者でない管理者は断る（画面から始められない）。中の段は画面から始められない
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
   env.as(MEMBER);
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'MEASURE.BACKTEST', payload: { planId: planA } } }), /権限がありません/);
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'MEASURE.BACKTEST_CALC', payload: { planId: planA } } }), /画面から始められません/);
@@ -450,7 +450,7 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   walk(b);
   for (const k of ['actual', 'p10', 'p50', 'p90', 'plan_id', 'bt_id', 'seed']) assert.ok(!keys.has(k), '金額・中の印は送らない: ' + k);
   // 閲覧の人にも同じ（計画の数字と同じ範囲。割合だけ）
-  env.call(`apiSaveMember({ email: 'viewer@bigm2y.com', displayName: 'V' })`);
+  env.task(`saveMember({ email: 'viewer@bigm2y.com', displayName: 'V' })`);
   env.as('viewer@bigm2y.com');
   assert.deepEqual(env.call('apiCrossMaker(__in)', { __in: { fy: FY } }).backtest, b);
   env.as(OWNER);

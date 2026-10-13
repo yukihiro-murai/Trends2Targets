@@ -53,14 +53,14 @@ assert.equal(env.call('apiPlanView(__in)', { __in: { planId: kana.result.planId 
 assert.ok(env.call('apiPortfolio()').plans.some((p) => p.clientName === 'サンプル製薬'));
 // 管理者が名前を決める → 一覧に出る。空にすると自動に戻る
 const cid = env.table('CLIENTS').filter((c) => c.client_name === 'ｻﾝﾌﾟﾙ製薬(株)')[0].client_id;
-assert.equal(env.call('apiSaveClientName(__in)', { __in: { clientId: cid, displayName: 'サンプル' } }).displayName, 'サンプル');
+assert.equal(env.task('saveClientName(__in)', { __in: { clientId: cid, displayName: 'サンプル' } }).displayName, 'サンプル');
 assert.ok(env.call('apiPortfolio()').plans.some((p) => p.clientName === 'サンプル'));
-const dir = env.call('apiListDirectory()').clients.filter((c) => c.client_id === cid)[0];
+const dir = env.task('listDirectory()').clients.filter((c) => c.client_id === cid)[0];
 assert.equal(dir.display_auto, false);
-assert.equal(env.call('apiSaveClientName(__in)', { __in: { clientId: cid, displayName: '', rowVersion: dir.display_row_version } }).auto, true);
+assert.equal(env.task('saveClientName(__in)', { __in: { clientId: cid, displayName: '', rowVersion: dir.display_row_version } }).auto, true);
 assert.ok(env.call('apiPortfolio()').plans.some((p) => p.clientName === 'サンプル製薬'));
-assert.equal(env.call('apiSaveClientName(__in)', { __in: { clientId: cid, displayName: 'サンプル２' } }).displayName, 'サンプル2', '自動に戻した後も、また決められる');
-assert.equal(env.call('apiSaveClientName(__in)', { __in: { clientId: cid, displayName: '' } }).auto, true);
+assert.equal(env.task('saveClientName(__in)', { __in: { clientId: cid, displayName: 'サンプル２' } }).displayName, 'サンプル2', '自動に戻した後も、また決められる');
+assert.equal(env.task('saveClientName(__in)', { __in: { clientId: cid, displayName: '' } }).auto, true);
 // 同じ会社の別の書き方は、同じクライアントとして扱う（二重に作らない）
 assert.match(env.runJob('PLAN.CREATE', { clientName: 'サンプル製薬株式会社', fy: 2027, peopleCsv: '鷹野' }).error, /すでにあります/);
 

@@ -75,9 +75,9 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
 {
   const env = setUpEnv();
   assert.deepEqual(recipients(env), [OWNER], '最初は所有者だけ');
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiSaveMember({ email: '${OTHER}', displayName: 'O' })`);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`saveMember({ email: '${OTHER}', displayName: 'O' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
   assert.deepEqual(recipients(env), [OWNER, MEMBER], '全体の管理者を足す');
   // 社外・クライアント単位・期限外・無効・管理者以外は除く
   grant(env, { email: OUTSIDER, role: 'ADMIN' });
@@ -184,8 +184,8 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
 {
   // 送った後に控えを書けなければ FAILED（SENT とは言わない）・次の宛先へは進まない
   const env = setUpEnv();
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
   const props = env.state;
   let n = 0;
   const real = env.ctx.PropertiesService;
@@ -256,8 +256,8 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
 }
 {
   const env = setUpEnv();
-  env.call(`apiSaveMember({ email: '${MEMBER}', displayName: 'M' })`);
-  env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
   env.state.mailFail = (to) => to === MEMBER;
   const r = notify(env, ['ERRORS']);
   assert.equal(r.status, 'FAILED');
@@ -323,16 +323,16 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   const env = setUpEnv();
   const n0 = Object.keys(env.files).length;
   delete env.props.APP_ARCHIVE_FOLDER_ID;
-  assert.throws(() => env.call('apiRunBackup()'), /アーカイブ/);
+  assert.throws(() => env.task('runBackup()'), /アーカイブ/);
   assert.equal(Object.keys(env.files).length, n0, '複製も移動もしない');
 }
 {
   const env = setUpEnv();
-  env.run('apiRunBackup()');
+  env.task('runBackup()');
   const archiveId = env.props.APP_ARCHIVE_FOLDER_ID;
   delete env.files[archiveId];   // フォルダが消えている
   const n0 = Object.keys(env.files).length;
-  assert.throws(() => env.call('apiRunBackup()'), /folder|アーカイブ|no folder/);
+  assert.throws(() => env.task('runBackup()'), /folder|アーカイブ|no folder/);
   assert.equal(Object.keys(env.files).length, n0, '複製を作る前に止める');
   assert.equal(all(env)[0].parent, env.props.APP_BACKUP_FOLDER_ID, '前のバックアップはそのまま');
 }
@@ -342,9 +342,9 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   const env = setUpEnv();
   const backupFolder = env.run(`DriveApp.getFolderById(appProps_().getProperty(APP_PROP.backupFolderId))`);
   env.run(`__bf.createFile('メモ.txt', '中身')`, { __bf: backupFolder });
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   all(env)[0].trashed = true;   // ゴミ箱にある同じ名まえの古いもの
-  for (let i = 0; i < 15; i++) env.call('apiRunBackup()');
+  for (let i = 0; i < 15; i++) env.task('runBackup()');
   assert.equal(all(env).filter((f) => f.parent === env.props.APP_BACKUP_FOLDER_ID && !f.trashed).length, 14, '新しい 14 世代を残す');
   const memo = Object.values(env.files).find((f) => f.name === 'メモ.txt');
   assert.deepEqual([memo.parent, memo.trashed], [env.props.APP_BACKUP_FOLDER_ID, false], '関係ないファイルはそのまま');
@@ -354,22 +354,22 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
 }
 {
   const env = setUpEnv();
-  for (let i = 0; i < 14; i++) env.call('apiRunBackup()');   // ちょうど上限。次の 1 回で最古がアーカイブへ移る
+  for (let i = 0; i < 14; i++) env.task('runBackup()');   // ちょうど上限。次の 1 回で最古がアーカイブへ移る
   const oldest = all(env)[0];
   const orig = oldest.moveTo;
   oldest.moveTo = () => { throw new Error('move failed'); };
-  assert.throws(() => env.call('apiRunBackup()'), /move failed/);
+  assert.throws(() => env.task('runBackup()'), /move failed/);
   assert.equal(oldest.trashed, false, '移せなくてもゴミ箱には送らない');
   assert.equal(oldest.parent, env.props.APP_BACKUP_FOLDER_ID, '元の場所のまま');
   oldest.moveTo = orig;
-  env.call('apiRunBackup()');
+  env.task('runBackup()');
   assert.equal(env.files[oldest.id].parent, env.props.APP_ARCHIVE_FOLDER_ID, 'やり直せば、同じものが同じ ID でアーカイブへ移る');
 }
 
 // ==== 8. 毎日の処理: バックアップが失敗しても手入れ（別の実行）と知らせは動き、最後に失敗を投げ直す ====
 {
   const env = setUpEnv();
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   const uid = env.triggers[0].uid;
   delete env.sheetsById[env.props.APP_DATA_SPREADSHEET_ID];   // データ本体が開けない → バックアップは失敗
   env.as('');

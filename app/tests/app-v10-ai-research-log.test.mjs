@@ -200,9 +200,9 @@ let firstAction;
   const pClosed = seed(env3, '締め製薬', fy3 - 1);
   for (const p of [pOpen, pClosed]) assert.equal(research(env3, p).status, 'DONE');
   // 締めた年度（前の年度）: 公式版を出して承認 → 年度を締める
-  const sub = env3.call('apiVersionSubmit(__in)', { __in: { planId: pClosed } });
-  env3.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
-  const pv = env3.call('apiYearPreview(__in)', { __in: { fy: fy3 - 1 } });
+  const sub = env3.call('appTestVersionSubmit_(__in)', { __in: { planId: pClosed } });
+  env3.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const pv = env3.task('yearPreview(__in)', { __in: { fy: fy3 - 1 } });
   assert.equal(env3.runJob('YEAR.CLOSE', { fy: fy3 - 1, inputHash: pv.inputHash }).status, 'DONE');
   const live = env3.table('AI_RESEARCH_LOG').length;
   // 移行の直後と同じ: 写しはまだ（APP_BACKFILLS を消す）。版 10 の移行の後の最初の操作で動く

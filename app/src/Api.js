@@ -2,6 +2,8 @@
  * Api.js — 画面から呼ぶ入口。公開する関数はこのファイルの doGet・api*・trigger* だけ。
  * どれも api_ を通し、本人確認 → 役割の判定 → （書き込みなら）記録つきで実行 → エラーの記録 を必ず行う。
  * 新しい入口を足したら app/tests/app-contract.test.mjs の一覧にも足す（足さないとテストが止める）。
+ * 管理の操作（メンバー・役割・メーカー・設定・記録と状態・バックアップ・手入れ・事前分布・計画の候補・年度の確認）は、画面から呼ばないので
+ * 入口を置かない（2026-10-13。所有者でない管理者もブラウザから呼べたため）。所有者が apiOwnerTask で、同じ中の関数・同じ操作の名前で動かす（OwnerTask.js）。
  */
 function doGet(e) {
   const t = HtmlService.createTemplateFromFile('UI');
@@ -12,11 +14,6 @@ function doGet(e) {
   const out = t.evaluate().setTitle(APP_NAME).addMetaTag('viewport', 'width=device-width, initial-scale=1');
   try { out.setFaviconUrl(APP_FAVICON_URL); } catch (err) { Logger.log('favicon: ' + (err && err.message ? err.message : err)); }
   return out;
-}
-
-/** 画面の初期データ。役割に応じて出す情報を変える */
-function apiBootstrap() {
-  return api_('APP.BOOTSTRAP', { minRole: 'VIEWER', audit: false, allowAnonymousView: true }, ctx => appBootstrap_(ctx));
 }
 
 function apiSetup() {
@@ -34,82 +31,11 @@ function apiAuthorizeAi() {
 /**
  * 所有者が Apps Script のエディタから管理の操作をする（管理の画面は画面から外す。2026-10-06 村井さん決定）。
  * エディタからは引数を渡せないので、頼む中身はスクリプト プロパティ OWNER_TASK に JSON で置く。結果は OWNER_TASK_RESULT と実行ログ（OwnerTask.js）。
- * 操作ごとに、画面の入口と同じ役割の判定・同じ操作の名前で監査に残すので、この入口そのものは記録しない（断ったことは記録する）
+ * 操作ごとに、その操作の役割の判定・操作の名前（MEMBER.SAVE など。前に画面の入口があったものは同じ名前）で監査に残すので、
+ * この入口そのものは記録しない（断ったことは記録する）
  */
 function apiOwnerTask() {
   return api_('OWNER.TASK', { ownerOnly: true, audit: false }, ctx => appOwnerTask_(ctx));
-}
-
-function apiListDirectory() {
-  return api_('DIRECTORY.LIST', { minRole: 'ADMIN', audit: false }, ctx => appCachedRead_('DIRECTORY', () => appListDirectory_(ctx)));
-}
-
-function apiSaveMember(input) {
-  return api_('MEMBER.SAVE', { minRole: 'ADMIN', entityType: 'MEMBER', entityId: input && input.email, detail: input,
-    after: res => res.member }, ctx => appSaveMember_(ctx, input));
-}
-
-function apiGrantRole(input) {
-  return api_('ROLE.GRANT', { minRole: 'ADMIN', entityType: 'ROLE', detail: input, after: res => res.role },
-    ctx => appGrantRole_(ctx, input));
-}
-
-function apiRevokeRole(input) {
-  return api_('ROLE.REVOKE', { minRole: 'ADMIN', entityType: 'ROLE', entityId: input && input.roleId, detail: input,
-    after: res => res.role }, ctx => appRevokeRole_(ctx, input));
-}
-
-/** 画面に出すクライアントの名前を決める（管理者） */
-function apiSaveClientName(input) {
-  return api_('CLIENT.NAME', { minRole: 'ADMIN', entityType: 'CLIENT', entityId: input && input.clientId, detail: input,
-    after: res => ({ displayName: res.displayName, auto: res.auto }) }, ctx => appSaveClientName_(ctx, input));
-}
-
-function apiSaveClient(input) {
-  return api_('CLIENT.SAVE', { minRole: 'ADMIN', entityType: 'CLIENT', entityId: input && input.clientId, detail: input,
-    after: res => res.client }, ctx => appSaveClient_(ctx, input));
-}
-
-function apiListSettings() {
-  return api_('SETTINGS.LIST', { minRole: 'ADMIN', audit: false }, () => appCachedRead_('SETTINGS', () => ({ settings: appSettingsCurrent_().map(x => {
-    if (x.type !== 'sheet' || !x.value) return x;
-    let name = '';
-    try { name = DriveApp.getFileById(x.value).getName(); } catch (e) { name = '（開けません）'; }
-    return Object.assign({}, x, { display: name, url: 'https://docs.google.com/spreadsheets/d/' + x.value + '/edit' });
-  }) })));
-}
-
-function apiSaveSetting(input) {
-  return api_('SETTING.SAVE', { minRole: 'ADMIN', entityType: 'SETTING', entityId: input && input.key, detail: input,
-    after: res => res.saved }, ctx => appSaveSetting_(ctx, input));
-}
-
-/** ログ（操作の記録 AUDIT・実行 RUN・エラー ERROR）の、選んだ月の行。月の一覧つき */
-function apiListAudit(input) {
-  return api_('AUDIT.LIST', { minRole: 'ADMIN', audit: false }, () => appLogList_(input));
-}
-
-/** 監査の鎖を全部の月で確かめ、締まった月のハッシュを控える */
-function apiVerifyAudit() {
-  return api_('AUDIT.VERIFY', { minRole: 'ADMIN', entityType: 'SYSTEM', after: res => ({ ok: res.ok, months: res.months.length, rows: res.rows, anchored: res.anchored }) },
-    ctx => { const v = appVerifyAuditAll_(); v.anchored = v.ok ? appWithLock_(() => appAnchorClosedMonths_(ctx, v)) : []; return v; });
-}
-
-/** 毎日の手入れを、今すぐ動かす */
-function apiRunHousekeeping() {
-  return api_('HOUSEKEEPING.RUN', { minRole: 'ADMIN', entityType: 'SYSTEM', after: res => ({ ok: res.ok, problems: res.problems }) }, ctx => appHousekeeping_(ctx));
-}
-
-function apiHealth() {
-  return api_('HEALTH.CHECK', { minRole: 'ADMIN', audit: false }, () => appHealth_());
-}
-
-function apiEnableBackup() {
-  return api_('BACKUP.ENABLE', { minRole: 'ADMIN', entityType: 'SYSTEM', after: res => res }, () => appEnableBackup_());
-}
-
-function apiRunBackup() {
-  return api_('BACKUP.RUN', { minRole: 'ADMIN', entityType: 'SYSTEM', after: res => res }, ctx => appBackup_(ctx));
 }
 
 /** 計画の一覧（取り込み・計算の一致の確認の対象） */
@@ -124,7 +50,7 @@ function apiPortfolio() {
 
 /**
  * 予測の根拠（月ごとの内訳・入力と AI の押し・補正・AI 調査の根拠・前回からの変化）。閲覧は社内全員。
- * 押したものの人や話題ごとの内訳（名前と信頼度）は予算策定担当以上だけ（ほかの人には情報源の種類ごと。appBasisFor_）
+ * 押したものの人や話題ごとの内訳（名前と信頼度）は、その計画のメーカーで予算策定担当以上の人だけ（ほかの人には情報源の種類ごと。appBasisFor_）
  */
 function apiForecastBasis(input) {
   return api_('FORECAST.BASIS', { minRole: 'VIEWER', audit: false }, ctx => appForecastBasis_(ctx, input && input.planId));
@@ -135,11 +61,6 @@ function apiLearningView(input) {
   return api_('LEARNING.VIEW', { minRole: 'VIEWER', audit: false }, () => appLearningView_(input && input.planId));
 }
 
-/** 全計画で作る、情報源の信頼度の事前分布（書かずに見比べる） */
-function apiPoolPreview() {
-  return api_('POOL.PREVIEW', { minRole: 'ADMIN', audit: false }, () => appPoolPreview_());
-}
-
 /** 分析: 年度のメーカーを横に並べる（予測と予算・予測の改訂・精度・AI の話題と市場のまとめ）。閲覧は社内全員。読むだけ。中身は「今日」でも変わる（既定の年度）ので、控えの鍵に日付も入れる */
 function apiCrossMaker(input) {
   return api_('INSIGHT.CROSS', { minRole: 'VIEWER', audit: false }, () => appCachedRead_('CROSS\u0001' + String(input && input.fy || '') + '\u0001' + appToday_(), () => appCrossMaker_(input && input.fy)));
@@ -147,7 +68,8 @@ function apiCrossMaker(input) {
 
 /**
  * 学び: 人の学び（外れた月の振り返り・人と話題ごとの当たり・四半期レビューの判断・予算の上乗せの実績）。閲覧は社内全員。読むだけ。
- * 人ごとの当たりと判断した人の名前は予算策定担当以上だけ（ほかの人には情報源の種類ごとのまとめ）。見せ方が違う人に同じ控えを返さないよう、控えの鍵に見せ方も入れる。
+ * 人ごとの当たりと判断した人の名前は予算策定担当以上だけ（メーカーに限った担当は、そのメーカーの計画の分だけ。ほかの人・ほかの計画は情報源の種類ごとのまとめ）。
+ * 見せ方が違う人に同じ控えを返さないよう、控えの鍵に見せ方（appInsightDetail_。メーカーに限った担当はメーカーの組み合わせ）も入れる。
  * hits は当たりの記録の人ごとの当たり（版 10 の 3-4。本人の分は人ごとに違うので、控えの外で見る人に合わせて絞る。HitRecords.js）
  */
 function apiPeopleLearning() {
@@ -157,7 +79,7 @@ function apiPeopleLearning() {
 
 /**
  * 学び: AI の学び（信頼度の学び・全計画で縮めた偏り・精度の推移・補正の変化・承認待ちの提案・気になる点）。閲覧は社内全員。読むだけ。
- * 承認待ちの提案と補正の変化の、人や話題の名前と信頼度の提案の根拠は予算策定担当以上だけ。人の学びと同じく、控えの鍵に見せ方も入れる。
+ * 承認待ちの提案と補正の変化の、人や話題の名前と信頼度の提案の根拠は予算策定担当以上だけ（メーカーに限った担当は、そのメーカーの計画の分だけ）。人の学びと同じく、控えの鍵に見せ方も入れる。
  * landing は着地見込みの τ・w（全計画から学んだ試しの値と、承認して使っている値。appLandingPriorView_。計画の一覧の控えから）。
  * research は AI 調査 1 回ごとの当たり（版 10 の 3-4。当たりの記録の見せ方で絞る。HitRecords.js）
  */
@@ -197,11 +119,6 @@ function apiVersionDecide(input) {
     after: res => ({ versionNo: res.version.no, state: res.version.state, superseded: res.superseded, selfApproved: res.selfApproved }) }, ctx => appVersionDecide_(ctx, input));
 }
 
-/** 新しい計画のクライアントの候補（ZAC の実績から） */
-function apiPlanCandidates(input) {
-  return api_('PLAN.CANDIDATES', { minRole: 'ADMIN', audit: false }, ctx => appPlanCandidates_(ctx, input));
-}
-
 /** ホーム（最重要のことだけ。よみのセリフの材料）。閲覧は社内全員 */
 function apiHome() {
   return api_('HOME', { minRole: 'VIEWER', audit: false }, ctx => appHome_(ctx));
@@ -212,13 +129,13 @@ function apiHome() {
  * 今日の日付でも変わるので、予測の控えとは別に足す。読めなければ null）
  */
 function apiForecastLatest(input) {
-  return api_('FORECAST.LATEST', { minRole: 'VIEWER', audit: false }, () => Object.assign(
-    appCachedRead_('LATEST\u0001' + (input && input.planId), () => appForecastLatest_(input && input.planId)), { shadow: appPlanShadow_(input && input.planId) }));
+  return api_('FORECAST.LATEST', { minRole: 'VIEWER', audit: false }, ctx => appForecastLatestFor_(ctx, Object.assign(
+    appCachedRead_('LATEST\u0001' + (input && input.planId), () => appForecastLatest_(input && input.planId)), { shadow: appPlanShadow_(input && input.planId) })));
 }
 
 /**
  * 計画の画面（入力・予測と予算・検証・四半期レビュー・進み。閲覧は社内全員）。中身は「今日」でも変わる（既定の年度など）ので、控えの鍵に日付も入れる。
- * 人ごとの当たりと外れた月の担当は予算策定担当以上だけ（appPlanViewFor_）。控えの鍵は見る人ごと
+ * 人ごとの当たりと外れた月の担当は、その計画のメーカーで予算策定担当以上の人だけ（appPlanViewFor_）。控えの鍵は見る人ごと
  */
 function apiPlanView(input) {
   return api_('PLAN.VIEW', { minRole: 'VIEWER', audit: false }, ctx => appCachedRead_('VIEW\u0001' + ctx.actor + '\u0001' + (input && input.planId) + '\u0001' + appToday_(), () => appPlanView_(ctx, input && input.planId)));
@@ -229,17 +146,12 @@ function apiStartJob(input) {
   return api_('JOB.START', appJobStartOpts_(input), ctx => appStartJobNow_(ctx, input));
 }
 
-/** 年度を締める前の確認（管理者。締められるなら控えの指紋だけ返す。まだ何も書かない・記録もしない） */
-function apiYearPreview(input) {
-  return api_('YEAR.PREVIEW', { minRole: 'ADMIN', audit: false }, ctx => appYearPreview_(ctx, input));
-}
-
 /** 処理の状態（終わっていれば結果）。頼んだ人と所有者だけ */
 function apiJobStatus(input) {
   return api_('JOB.STATUS', { minRole: 'VIEWER', audit: false }, ctx => appJobStatus_(ctx, input && input.jobId));
 }
 
-/** 処理を裏で動かす（apiStartJob が作った 1 回だけのトリガーから） */
+/** 処理を裏で動かす（apiStartJob が作った 1 回だけのトリガーから。待ち行列の処理のトリガーの UID のときだけ。appTriggerUser_） */
 function triggerRunJob(e) {
   return api_('JOB.RUN', { minRole: 'ADMIN', audit: false, trigger: { event: e, handler: 'triggerRunJob', alsoAccept: appIsJobTrigger_ } },
     ctx => appRunJobs_(ctx, e));
@@ -247,8 +159,8 @@ function triggerRunJob(e) {
 
 /**
  * 毎日のバックアップ（時間主導のトリガーから）。トリガーは所有者として動く。
- * トリガーの中では操作者のメールが空になることがあるので、そのときはイベントの triggerUid が
- * このプロジェクトのバックアップ用トリガーと一致する場合に限り、所有者として扱う（ブラウザからは UID が分からず偽装できない）。
+ * イベントの triggerUid がこのプロジェクトのバックアップ用トリガーと一致するときだけ受け付け、所有者として扱う（appTriggerUser_。
+ * 2026-10-13 から、役割が管理者でも UID の合わない呼び出しは断る。前は管理者がブラウザから呼ぶと、そのたびに管理者への知らせのメールを送れた）。
  */
 function triggerDailyBackup(e) {
   return api_('BACKUP.DAILY', { minRole: 'ADMIN', entityType: 'SYSTEM', trigger: { event: e, handler: 'triggerDailyBackup' },
@@ -257,7 +169,8 @@ function triggerDailyBackup(e) {
 
 /**
  * 市場の動き（A-4 AI 調査）を、計画ごとに週 1 回ずつ自動で集める（毎日 4 時半ごろ、毎日の手入れの後の時間主導のトリガーから。AutoResearch.js）。
- * 本人確認は triggerDailyBackup と同じ（このプロジェクトの、この入口のトリガーの UID のときだけ所有者として扱う）。
+ * 本人確認は triggerDailyBackup と同じ（このプロジェクトの、この入口のトリガーの UID のときだけ受け付け、所有者として扱う。
+ * 2026-10-13 から、管理者がブラウザから呼んでも断る。前は 4〜7 時なら費用のかかる AI 調査を始められた）。
  * 始める A-4 は画面から始めるのと同じ処理（頼んだ人の役割と年度の締めは、裏の処理が段ごとに確かめ直す）
  */
 function triggerAutoResearch(e) {
@@ -271,21 +184,23 @@ function triggerAutoResearch(e) {
  *   ownerOnly          … 所有者だけ（初期設定）
  *   audit              … false なら記録しない（読むだけの入口）。既定は記録する
  *   allowAnonymousView … 役割が足りないときも画面の初期データだけは返す（「権限がありません」を画面で出すため）
+ *   trigger            … { event, handler, alsoAccept }。トリガーからの実行だけを受け付ける入口（appTriggerUser_。合わなければ役割があっても断る）
  *   entityType / entityId / detail / reason / before() / after(res) … 監査の項目
  */
 function api_(action, opts, fn) {
   opts = opts || {};
   APP_STORE_CACHE_ = {};
   let user = appCurrentUser_();
-  const trigUid = opts.trigger && opts.trigger.event && opts.trigger.event.triggerUid ? String(opts.trigger.event.triggerUid) : '';
-  if (opts.trigger && !user.email && (appIsOwnTrigger_(opts.trigger.event, opts.trigger.handler) ||
-      (opts.trigger.alsoAccept && trigUid && appIsSetUp_() && opts.trigger.alsoAccept(trigUid)))) {
-    user = Object.assign({}, user, { email: user.owner, isOwner: !!user.owner });
+  let fromTrigger = true;
+  if (opts.trigger) {
+    const t = appTriggerUser_(user, opts.trigger);
+    user = t.user;
+    fromTrigger = t.ok;
   }
   const roles = appRolesOf_(user);
   const ctx = { user: user, roles: roles, actor: user.email || '(unknown)', requestId: Utilities.getUuid() };
   if (roles.length) appAutoEnsureTables_(ctx);   // 社内の人の最初の操作で、版を上げて足した表を作る
-  const allowed = opts.ownerOnly ? user.isOwner : appHasRole_(roles, opts.minRole || 'ADMIN', opts.clientId);
+  const allowed = fromTrigger && (opts.ownerOnly ? user.isOwner : appHasRole_(roles, opts.minRole || 'ADMIN', opts.clientId));
   try {
     if (!allowed) {
       if (opts.allowAnonymousView) return appSerialize_(appDeniedBootstrap_(ctx));
@@ -304,6 +219,21 @@ function api_(action, opts, fn) {
     appLogError_(action, err, ctx);
     throw new Error(String(err && err.message ? err.message : err));
   }
+}
+
+/**
+ * trigger* の本人確認。イベントの triggerUid が、このプロジェクトのその入口のトリガー（appIsOwnTrigger_）か、alsoAccept が受け付ける UID
+ * （triggerRunJob は待ち行列の処理のトリガー: appIsJobTrigger_。トリガーの一覧から先に消えていても確かめられる）のときだけ受け付ける。
+ * 受け付けたら所有者として動かす（トリガーは所有者が作り、所有者として動く。中では操作者のメールが空のこともある）。
+ * メールがあって所有者でない人は、UID が合っても断る（ブラウザから呼んだ管理者など。トリガーの中のメールは空か所有者）。
+ * 返り値 { ok: 受け付けたか, user: 受け付けたら所有者・断ったら呼んだ人のまま（断ったことの記録に残す） }
+ */
+function appTriggerUser_(user, trigger) {
+  const e = trigger && trigger.event;
+  const uid = e && e.triggerUid ? String(e.triggerUid) : '';
+  const known = !!uid && (appIsOwnTrigger_(e, trigger.handler) || (!!trigger.alsoAccept && appIsSetUp_() && !!trigger.alsoAccept(uid)));
+  if (!known || !user.owner || (user.email && !user.isOwner)) return { ok: false, user: user };
+  return { ok: true, user: Object.assign({}, user, { email: user.owner, isOwner: true }) };
 }
 
 /** e.triggerUid が、このプロジェクトの handler 用のトリガーのものか */

@@ -30,7 +30,7 @@ const shiftMark = (env, minutes, patch) => {
 // ==== 1. 毎日のトリガーはバックアップだけ。手入れは数分後の裏の処理（所有者が頼んだ形）で動き、印と結果を残す ====
 {
   const env = setUpEnv();
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   const uid = env.triggers.find((t) => t.handler === 'triggerDailyBackup').uid;
   env.as('');
   const r = env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`);
@@ -63,7 +63,7 @@ const shiftMark = (env, minutes, patch) => {
   const a = env.audit().filter((x) => x.action === 'HOUSEKEEPING.DAILY');
   assert.deepEqual(a.map((x) => [x.phase, x.result, x.actor_email]), [['START', '', OWNER], ['END', 'OK', OWNER]], '監査にも残す');
   // 次の手入れの「始めた」の印には、前に終わった時刻を残す
-  env.call('apiRunHousekeeping()');
+  env.task('runHousekeeping()');
   const mid2 = J(env.run('__mid'));
   assert.deepEqual([mid2.state, mid2.via, mid2.lastDoneAt], ['RUNNING', 'MANUAL', done.finishedAt]);
   assert.equal(env.state.lockHeld, false);
@@ -106,8 +106,8 @@ const shiftMark = (env, minutes, patch) => {
 // ==== 3. 打ち切られた手入れ（始めたまま）は、ホーム・状態の点検・次の手入れで気づける ====
 {
   const env = setUpEnv();
-  env.call('apiEnableBackup()');
-  env.call('apiRunHousekeeping()');
+  env.task('enableBackup()');
+  env.task('runHousekeeping()');
   const prevDone = hkMark(env).finishedAt;
   // 時間切れで打ち切られた（結果の上書きの前に実行が止まった）
   env.run(`__fin = appHousekeepingFinish_; appHousekeepingFinish_ = function () { throw new Error('Exceeded maximum execution time'); }`);
@@ -141,7 +141,7 @@ const shiftMark = (env, minutes, patch) => {
 // ==== 4. 自動の調べは、新しい印で「今日の手入れが済んだか」を見る（済んで 5 分・始めたまま止まったら待たない・まだ・前の日） ====
 {
   const env = setUpEnv();
-  env.call('apiEnableBackup()');
+  env.task('enableBackup()');
   const at = (hh, mm) => `${jstDay(0)}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00+0900`;
   const ms = (hh, mm) => new Date(at(hh, mm)).getTime();
   const pending = (hh, mm) => env.run(`appAutoResearchMaintenancePending_(new Date(${ms(hh, mm)}))`);
@@ -193,7 +193,7 @@ const shiftMark = (env, minutes, patch) => {
     appProps_().setProperty(APP_PROP.auditLastHash, prev);
     return months;
   })()`));
-  const v = env.call('apiVerifyAudit()');
+  const v = env.task('verifyAudit()');
   assert.equal(v.ok, true, JSON.stringify(v.months.filter((m) => !m.ok)));
   assert.ok(months.every((m) => v.anchored.includes(m)), '締まった月を控える');
   // 7 日ぶんの番: どの月も 1 回だけ全部の行で確かめる
@@ -222,10 +222,10 @@ const shiftMark = (env, minutes, patch) => {
   assert.equal(bad.ok, false, 'その月の番の日に見つかる');
   const flagged = bad.months.find((m) => m.month === target);
   assert.deepEqual([flagged.ok, flagged.brokenAt], [false, 3], '3 行目で切れている（注記は締めの控えとの違いが上書きする）: ' + flagged.note);
-  const hk = env.call('apiRunHousekeeping()');
+  const hk = env.task('runHousekeeping()');
   assert.equal(hk.ok, false);
   assert.ok(hk.problems.some((p) => p.includes(target)), '手入れの要確認に出す');
-  assert.equal(env.call('apiVerifyAudit()').ok, false, '手で全部を確かめる入口は、いつも全部の行');
+  assert.equal(env.task('verifyAudit()').ok, false, '手で全部を確かめる入口は、いつも全部の行');
   sh.rows[2] = keep;
   // 時間の上限を過ぎたら、その日の番の月も端だけにして、見送ったことを要確認に出す
   env.run(`appAuditFullBudgetMs_ = () => -1`);
@@ -233,7 +233,7 @@ const shiftMark = (env, minutes, patch) => {
   assert.equal(late.ok, true);
   assert.deepEqual(late.fullMonths, []);
   assert.ok(late.deferred.includes(target), '見送った月を返す');
-  const hk2 = env.call('apiRunHousekeeping()');
+  const hk2 = env.task('runHousekeeping()');
   assert.ok(hk2.problems.some((p) => /全部の行の確認を \d+ か月見送りました/.test(p)), JSON.stringify(hk2.problems));
   assert.deepEqual(hkMark(env).audit.deferred, late.deferred, '手入れの結果にも残す');
 }
