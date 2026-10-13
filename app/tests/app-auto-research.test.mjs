@@ -4,6 +4,7 @@
  * トリガーの作成（1 日 1 回だけ確かめる・二重にしない・上限・止めるスイッチ・前の版の時刻から作り直す）、入口の本人確認、
  * 4 時から 7 時より前だけ・毎日の手入れの後に始める、いちばん古い計画を選ぶ・ほかの処理が動いていれば何もしない・
  * 準備ができていない・権限が足りない計画は 3 日あけて次へ・締めた年度には書かない、状態を約 8000 バイトより小さく保つ。
+ * 一時的な失敗で話題が欠けた A-4 は失敗として数えて次の晩に試し直す・1 晩に使ってよい時間（60 分）を過ぎたら見送る（2026-10-13〜）。
  * Vertex AI の答えはテストの決まった形（app-ai.test.mjs と同じ）。
  * 日付は今日から動かすが、年度をまたがないように基準の日（B）を選ぶ（3 月末に流しても落ちない）。
  *
@@ -608,6 +609,84 @@ assert.equal(autoTriggers(env).length, 1);
   assert.deepEqual(missing, [], '画面の名前の無い印');
   assert.equal(g.run(`appAutoResearchLabel_('BEFORE_HOURS')`), '4 時より前（毎日の手入れの時間）');
   assert.equal(g.run(`appAutoResearchLabel_('')`), '');
+}
+
+// ==== 11. 一時的な失敗で話題が欠けた A-4 は失敗として数え、次の晩に試し直す。1 晩に使ってよい時間（60 分）を過ぎたら見送る ====
+{
+  const tm = setUpEnv();
+  stubVertex(tm);
+  // DX を形にする問い合わせだけ、Google 側のエラーが続く（2 回し直しても失敗）
+  tm.run(`(() => { const ok = UrlFetchApp.fetch; UrlFetchApp = { fetch: (u, o) => {
+    const b = JSON.parse(o.payload);
+    if (globalThis.__dxDown && b.generationConfig && b.generationConfig.responseMimeType && /topic: DX/.test(JSON.stringify(b.contents))) return { getResponseCode: () => 503, getContentText: () => 'unavailable' };
+    return ok(u, o);
+  } }; globalThis.__dxDown = true; appAiWait_ = () => {}; })()`);
+  setNow(tm, jst(B, 4, 35));
+  const y = tm.run('appFy_(appAutoResearchNow_())');
+  const pDx = seed(tm, '甲製薬', y);
+  tm.run('doGet({})');
+  const r = tick(tm);
+  assert.deepEqual([r.status, r.planId], ['STARTED', pDx], r.reason);
+  drain(tm);
+  const st = state(tm);
+  assert.equal(st.lastResult.status, 'FAILED');
+  assert.deepEqual([st.tried[pDx].status, st.tried[pDx].reason], ['FAILED', 'TOPICS_MISSING'], '話題が欠けて保存しなかった印');
+  assert.match(st.lastResult.error, /503/, '最後の結果には失敗の要点');
+  assert.equal(researched(tm, pDx), 0, '保存していない（前の結果を残す）');
+  const s = status(tm);
+  assert.equal(s.failures7d, 1, '失敗として数える');
+  assert.deepEqual([s.stalePlans[0].lastTry.statusLabel, s.stalePlans[0].lastTry.reasonLabel], ['失敗した', '調べられなかった話題があった（次の晩に試し直す）']);
+  const fin = autoRuns(tm).filter((x) => x.event === 'FINISHED').slice(-1)[0];
+  assert.match(fin.error, /^（DX）を調べられませんでした。前の結果を残しました。/, '実行ログには失敗の文をそのまま');
+  // 同じ晩には繰り返さない
+  setNow(tm, jst(B, 5, 30));
+  assert.equal(tick(tm).reason, 'NO_STALE_PLAN', '同じ晩には試し直さない');
+  // 次の晩に試し直す（3 日あけない）
+  tm.run('globalThis.__dxDown = false');
+  setNow(tm, jst(B + 1, 4, 35));
+  const r2 = tick(tm);
+  assert.deepEqual([r2.status, r2.planId], ['STARTED', pDx], '次の晩に試し直す: ' + r2.reason);
+  drain(tm);
+  assert.equal(researched(tm, pDx), 1, '試し直して保存した');
+  assert.equal(state(tm).tried[pDx].status, 'DONE');
+
+  // その晩に使った時間を控え、状態に出す（自動の A-4 の段の時間と、毎日の回・続きの回の時間）
+  const n1 = status(tm).night;
+  assert.equal(n1.date, jstDay(B + 1));
+  assert.equal(n1.count, 1, 'この晩に始めた計画');
+  assert.ok(n1.usedMs > 0, '使った時間を足す: ' + n1.usedMs);
+  assert.ok(n1.today && n1.limitMs === 60 * 60 * 1000 && n1.maxPlans === 12);
+  assert.match(n1.label, new RegExp('^' + jstDay(B + 1) + ' の晩: 使った時間 \\d+ 分（上限 60 分）・始めた計画 1（上限 12）$'));
+  // 段の時間の合計: 終わった段は始めから終わりまで、終わりの無い段は 6 分まで
+  const chainMs = tm.run(`(() => {
+    const t = Date.now();
+    const iso = (ms) => new Date(ms).toISOString();
+    appJobSave_({ id: 'JOB-T1', kind: 'PLAN.RUN', payload: {}, status: 'DONE', requestedBy: 'x', parentId: '', createdAt: iso(t - 9e5), startedAt: iso(t - 9e5), finishedAt: iso(t - 9e5 + 60000), nextJobId: 'JOB-T2' });
+    appJobSave_({ id: 'JOB-T2', kind: 'PLAN.RUN_CALC', payload: {}, status: 'RUNNING', requestedBy: 'x', parentId: 'JOB-T1', createdAt: iso(t - 8e5), startedAt: iso(t - 8e5), finishedAt: '' });
+    appJobSave_({ id: 'JOB-T9', kind: 'PLAN.RUN', payload: {}, status: 'DONE', requestedBy: 'x', parentId: '', createdAt: iso(t - 9e5), startedAt: iso(t - 9e5), finishedAt: iso(t) });
+    const ms = appAutoResearchChainMs_('JOB-T1');
+    ['JOB-T1', 'JOB-T2', 'JOB-T9'].forEach(id => appProps_().deleteProperty('APP_JOB_' + id));
+    return ms;
+  })()`);
+  assert.equal(chainMs, 60000 + 6 * 60000, '1 分の段 + 止まった段（6 分まで）。ほかの処理は数えない');
+
+  // 1 晩の時間の上限（60 分）を過ぎたら、その晩は次の計画を始めない（始めた計画の数が上限の 12 より少なくても）
+  const pNext = seed(tm, '乙製薬', y);
+  tm.run(`appAutoResearchUpdate_(s => { s.night = { date: __d, count: 3, usedMs: 60 * 60 * 1000 }; })`, { __d: jstDay(B + 1) });
+  setNow(tm, jst(B + 1, 5, 0));
+  const lim = tick(tm);
+  assert.deepEqual([lim.status, lim.reason, lim.usedMs >= 3600000], ['SKIPPED', 'NIGHT_TIME_LIMIT', true], '1 晩の時間の上限');
+  assert.equal(tm.run(`appAutoResearchLabel_('NIGHT_TIME_LIMIT')`), '1 晩の時間の上限（60 分）');
+  assert.equal(researched(tm, pNext), 0);
+  assert.match(status(tm).night.label, /使った時間 60 分（上限 60 分）・始めた計画 3（上限 12）$/);
+  // 次の晩は 0 から数え直す
+  setNow(tm, jst(B + 2, 4, 35));
+  const r3 = tick(tm);
+  assert.deepEqual([r3.status, r3.planId], ['STARTED', pNext], r3.reason);
+  assert.equal(state(tm).night.date, jstDay(B + 2));
+  assert.equal(state(tm).night.count, 1);
+  assert.ok(state(tm).night.usedMs < 60 * 60 * 1000, '前の晩の時間は持ち越さない');
+  drain(tm);
 }
 
 console.log('app-auto-research: all tests passed');
