@@ -129,8 +129,11 @@ function appArchiveOldLogs_() {
   return moved;
 }
 
-/** その月の月次のバックアップが無ければ、データ本体の写しをアーカイブのフォルダに作る（消さない） */
-function appMonthlyBackup_() {
+/**
+ * その月の月次のバックアップが無ければ、データ本体の写しをアーカイブのフォルダに作る（消さない）。
+ * 写しは毎日のバックアップと同じく、ロックの中で書きかけの保存を書き終えてから取る（書き終えられなければ取らずに止め、次の日にもう一度試す。Backup.js の appCopyDataBook_）
+ */
+function appMonthlyBackup_(ctx) {
   const props = appProps_();
   const archiveId = props.getProperty(APP_PROP.archiveFolderId);
   const dataId = props.getProperty(APP_PROP.dataId);
@@ -143,7 +146,7 @@ function appMonthlyBackup_() {
     const it = folder.getFilesByName(n);
     while (it.hasNext()) { if (!it.next().isTrashed()) return ''; }
   }
-  DriveApp.getFileById(dataId).makeCopy(name, folder);
+  appCopyDataBook_(ctx, name, folder);
   return name;
 }
 
@@ -173,7 +176,7 @@ function appHousekeeping_(ctx) {
   step('errors', () => ({ last24h: appRecentLogRows_('ERROR', 24 * 3600 * 1000).length }));
   step('archive', () => ({ moved: appArchiveOldLogs_() }));
   step('dataBook', () => appWithLock_(() => appOrganizeDataBook_()));
-  step('monthly', () => ({ created: appMonthlyBackup_() }));
+  step('monthly', () => ({ created: appMonthlyBackup_(ctx) }));
   step('journal', () => ({ pending: appJournalPending_() }));
   res.durationMs = new Date().getTime() - t0;
   res.ok = !res.problems.length;

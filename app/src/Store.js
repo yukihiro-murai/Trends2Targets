@@ -133,6 +133,11 @@ function appJson_(v) {
   return JSON.stringify({ truncated: true, length: s.length, sha256: appSha256Hex_(s), head: s.slice(0, 2000) });
 }
 
+/** 書いたセルを、すぐにシートへ反映する（まとめて送るのを待たない） */
+function appFlush_() {
+  SpreadsheetApp.flush();
+}
+
 /** スクリプト全体のロック。入れ子で呼ばれても 1 回だけ取る */
 function appWithLock_(fn) {
   if (APP_LOCK_DEPTH_ > 0) {

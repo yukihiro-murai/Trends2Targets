@@ -167,7 +167,8 @@ function appMigrateBackup_(ctx) {
     throw new Error('移行の前のバックアップが取れていないので、表の列を足す移行はまだしません（少したってから、もう一度試します）。');
   }
   try {
-    const r = appBackup_(ctx);
+    // 書きかけの保存は先に書き終える。書き終えられなくても写す（列を足す前の表に書く控えは、移行の後でないと書けないため。Backup.js の appCopyDataBook_）
+    const r = appBackup_(ctx, { allowPending: true });
     props.deleteProperty(APP_MIGRATE_BACKUP_FAILED_PROP);
     return { name: r.backup, taken: true };
   } catch (e) {
