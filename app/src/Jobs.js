@@ -454,6 +454,8 @@ function appRunJob_(id) {
     error = String(err && err.message ? err.message : err).slice(0, 1000);
     appLogError_(job.kind, err, { requestId: id, actor: job.requestedBy });
   }
+  const ranMs = new Date().getTime() - t0;
+  if (status === 'DONE' && !nextJobId) appJobWarm_(job, ranMs);
   const done = appJobGet_(id) || job;
   done.status = status;
   done.error = error;
@@ -461,9 +463,9 @@ function appRunJob_(id) {
   done.finishedAt = new Date().toISOString();
   done.payload = appJobClientPayload_(done.payload);   // 終わった処理は、画面に要る項目だけ残す（UserProperties の全体の上限 500KB）
   appJobSave_(done);
-  appRunLog_({ requestId: id, kind: 'JOB:' + job.kind, startedAt: job.startedAt, durationMs: new Date().getTime() - t0, status: status,
+  appRunLog_({ requestId: id, kind: 'JOB:' + job.kind, startedAt: job.startedAt, durationMs: ranMs, status: status,
     detail: { jobId: id, requestedBy: job.requestedBy, attempts: done.attempts }, error: error });
-  try { if (status === 'DONE') appJobRecordStage_(job, new Date().getTime() - t0); } catch (e) { /* 見積もりの記録は処理の結果に関係しない */ }
+  try { if (status === 'DONE') appJobRecordStage_(job, ranMs); } catch (e) { /* 見積もりの記録は処理の結果に関係しない */ }
   // 自動で始めた A-4 の終わりなら、次の計画へ（AutoResearch.js）。処理の結果には関係しない
   try { if (!nextJobId) appAutoResearchAfterJob_(done, status); } catch (e) { Logger.log('自動の AI 調査の続き: ' + (e && e.message ? e.message : e)); }
   return { id: id, status: status, nextJobId: nextJobId };
@@ -498,4 +500,20 @@ function appJobStatus_(ctx, id) {
     if (r.found) out.result = r.value; else { out.status = 'LOST'; out.error = '結果の保存期間が過ぎました。もう一度始めてください。'; }
   }
   return out;
+}
+
+/**
+ * 計画に書く処理が終わったら、終わったと記録する前に、その計画の予測の画面の中身を作って控えておく（読んだ結果の控え。appCachedRead_ など）。
+ * 画面は処理が終わるとすぐ読み直すので、そのときに待たない（2026-10-13 村井さん「予測など読み込みが遅すぎる」）。控えを作るだけで、データ本体は変えない。
+ * 処理に時間がかかった（3 分を超えた）ときは作らない（1 回の実行の上限 6 分）。失敗しても処理の結果には関係しない
+ */
+const APP_JOB_WARM_MAX_MS = 3 * 60 * 1000;
+function appJobWarm_(job, ranMs) {
+  try {
+    const spec = appJobSpec_(job.kind);
+    const planId = job.payload && job.payload.planId;
+    if (!spec.planScoped || !planId || ranMs > APP_JOB_WARM_MAX_MS) return;
+    APP_STORE_CACHE_ = {};   // 書いた後の表を読む
+    appForecastPage_(appJobContext_(job), { planId: planId });
+  } catch (e) { Logger.log('画面の中身の控え: ' + (e && e.message ? e.message : e)); }
 }

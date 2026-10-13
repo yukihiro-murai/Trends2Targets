@@ -280,6 +280,21 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .loading .bubble small,.ldfail .bubble small{display:block;font-size:var(--fs-s);color:var(--muted);margin-top:var(--s1)}
 .loading .waitlist{margin-top:var(--s3)}
 .ldfail .say-act{margin-top:var(--s3)}
+/* 読み込み中の形（中身と同じ場所・近い高さの灰色の帯。読めたら中身に置き換わる。2026-10-13 村井さん「カードは固定で出しておく」） */
+.skel{display:flex;flex-direction:column;justify-content:flex-start;gap:var(--s4);padding:var(--s2) 0;overflow:hidden}
+.skel i{display:block;height:20px;flex:0 0 20px;border-radius:var(--s2);background:linear-gradient(90deg,var(--gray) 0%,var(--line-soft) 40%,var(--gray) 80%);background-size:300% 100%;animation:skel 1.6s ease-in-out infinite}
+@keyframes skel{0%{background-position:100% 0}100%{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){.skel i{animation:none}}
+.card.loading.wait-home{min-height:193px}.card.loading.wait-an{min-height:293px}.card.loading.wait-lr{min-height:168px}
+.card.loading.wait-home,.card.loading.wait-an,.card.loading.wait-lr{display:flex;align-items:center}
+.card.loading.wait-home > .hero,.card.loading.wait-an > .hero,.card.loading.wait-lr > .hero{flex:1 1 auto}
+@media (max-width:760px){.card.loading.wait-home{min-height:280px}.card.loading.wait-an{min-height:560px}.card.loading.wait-lr{min-height:329px}}
+.skel-h{display:block;width:220px;max-width:60%;height:24px;margin:6px 0;border-radius:var(--s2);background:var(--gray)}
+.fcsec > .card-head{min-height:57px}   /* 見出しの右のボタン（予測を実行）が後から出ても、見出しの高さは変わらない */
+.fc-wait{min-height:44px;margin-top:var(--s3);display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.ld-in{display:flex;align-items:center}
+.ld-in .bubble small{display:block;font-size:var(--fs-s);color:var(--muted);margin-top:var(--s1)}
+.ld-in .say-act{margin-top:var(--s3)}
 .waitlist{list-style:none;display:grid;gap:var(--s2)}
 .waitlist li{display:flex;gap:var(--s2);align-items:center;font-size:var(--fs-m)}
 .ws{white-space:normal}
@@ -348,7 +363,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .hm-lrt .t1 .u{font-size:var(--fs-s);color:var(--muted)}
 .hm-lrt .t2{font-size:var(--fs-s);color:var(--muted)}
 .hm-lrbox .btn{flex:0 0 auto}
-.hm-wait{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2) var(--s3);min-height:96px;font-size:var(--fs-m);color:var(--navy)}
+.hm-wait{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2) var(--s3);min-height:204px;font-size:var(--fs-m);color:var(--navy)}
 .hm-yomi{width:48px;height:48px;flex:0 0 48px}.hm-yomi svg{width:100%;height:100%;display:block}
 @media (max-width:760px){
   .todo li{flex-wrap:wrap}.todo li .t{flex:1 1 calc(100% - 40px)}.todo li .btn{margin-left:auto}
@@ -368,7 +383,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .tbl.mk th:first-child,.tbl.mk td:first-child{position:sticky;left:0;z-index:1;background:var(--card);box-shadow:inset -1px 0 0 var(--line)}
   .tbl.mk th:first-child,.tbl.mk tr.total td:first-child{background:var(--head)}
   .tbl.mk td.wrap{min-width:104px}
-  .tbl .mk-fill{display:none}
 }
 
 /* ==== CSS: FORECAST ==== */
@@ -701,7 +715,7 @@ function busy(delta){
   S.pending = Math.max(0, S.pending + delta);
 }
 /** 読むだけの入口（同時に呼んでよい。load() に渡せるのもこれだけ）。それ以外は書き込みで、終わるまで次の書き込みを受け付けない */
-var READS = { apiHome: 1, apiPortfolio: 1, apiListPlans: 1, apiForecastLatest: 1, apiPlanView: 1, apiForecastBasis: 1, apiVersionList: 1, apiLearningView: 1, apiJobStatus: 1, apiCrossMaker: 1, apiPeopleLearning: 1, apiAiLearning: 1, apiBudgetProposal: 1 };
+var READS = { apiHome: 1, apiPortfolio: 1, apiListPlans: 1, apiForecastLatest: 1, apiPlanView: 1, apiForecastBasis: 1, apiVersionList: 1, apiLearningView: 1, apiJobStatus: 1, apiCrossMaker: 1, apiPeopleLearning: 1, apiAiLearning: 1, apiBudgetProposal: 1, apiForecastPage: 1 };
 /**
  * サーバーの api* を呼ぶ。失敗は通知に出す（入力は消さない）。
  * fail が false を返したときは通知を出さない（読み込みの失敗は、その場所に理由と「もう一度読み込む」を出す: load()）
@@ -740,12 +754,23 @@ function load(key, fn, args, onOk, tag){
   if (typeof fn === 'function') fn(ok, fail); else call(fn, args || [], ok, fail);
 }
 /** 読み込みの表示: 読み込み中・まだ始めていない → よみの「観測中…」（label）、失敗 → 理由と「もう一度読み込む」（retryJs を実行）、読めた → ''（呼び出し側が中身を描く） */
-function slot(key, label, retryJs){
+function slot(key, label, retryJs, h){
   var x = S.ld[key];
   if (x && x.error) return '<div class="card ldfail" role="alert"><div class="hero"><div class="charbox">' + YOMI_POSE.discover + '</div><div class="bubble">読み込めませんでした<small>' + esc(x.error) + '</small>'
     + (retryJs ? '<div class="say-act"><button class="btn btn-ghost" onclick="' + esc(retryJs) + '">もう一度読み込む</button></div>' : '') + '</div></div></div>';
   if (x && !x.loading) return '';
-  return loading(label);
+  return skel(label, h);
+}
+/**
+ * 読み込み中の形: 中身が入る場所に、中身とほぼ同じ高さの灰色の帯（光がゆっくり流れる。動きを減らす設定では止める）。
+ * 読めたら同じ場所に中身が入るので、画面が動かない（2026-10-13 村井さん）。label は読み上げ用（画面には出さない）
+ */
+function skel(label, h){
+  h = h || 200;
+  var n = Math.max(2, Math.min(12, Math.floor((h - 8) / 40)));
+  var bars = '';
+  for (var i = 0; i < n; i++) bars += '<i style="width:' + [100, 92, 84, 96, 72, 88][i % 6] + '%"></i>';
+  return '<div class="skel" role="status" aria-live="polite" aria-label="' + esc(label || '読み込んでいます') + '" style="height:' + h + 'px">' + bars + '</div>';
 }
 function ldBusy(key){ return !!(S.ld[key] && S.ld[key].loading); }
 /** ms ミリ秒以内に読めたか（読み直すかどうかの目安） */
@@ -754,6 +779,28 @@ function ldFresh(key, ms){ var x = S.ld[key]; return !!(x && !x.loading && !x.er
 var LD_KEEP = 600000;
 /** 画面・タブを開いたときに読むか: 中身が無い（has が偽）・10 分より古い・古いの印・失敗のとき。読み込み中は重ねて読まない（「もう一度読み込む」は読む関数を直接呼ぶ） */
 function ldNeed(key, has){ return !ldBusy(key) && !(has && ldFresh(key, LD_KEEP)); }
+/**
+ * 先読み（ほかの画面の中身を、今の画面が待っていない間に 1 つずつ裏で読む。2026-10-13 村井さん「読み込みが遅すぎる」）。
+ * load と同じ読み込みの印（S.ld[key]）を付けるので、その画面を開いたときに重ねて読まない。届いても、その画面（view）を見ているときだけ描き直す
+ * （今の画面の選ぶ欄を開いている間に閉じない）。失敗したら印を消すだけ（開いたときにふつうに読む）。
+ * job: [key, 入口の名前（READS のもの）, 引数, 届いたとき, 描き直す画面, 読むか（関数。省けば ldNeed で決める）]
+ */
+S.preQ = [];
+function preload(jobs){ S.preQ = S.preQ.concat(jobs); preNext(); }
+function preNext(){
+  clearTimeout(S.preT);
+  if (!S.preQ.length || S.preBusy) return;
+  if (S.pending > 0 || S.writing || S.job || S.starting) { S.preT = setTimeout(preNext, 1500); return; }
+  var j = S.preQ.shift(), key = j[0], fn = j[1];
+  if (!READS[fn] || (j[5] ? !j[5]() : ldBusy(key) || !!S.ld[key])) return preNext();
+  var t = { loading: true, start: Date.now() };
+  S.ld[key] = t; S.preBusy = true;
+  var fin = function(){ S.preBusy = false; if (S.view === j[4]) render(); S.preT = setTimeout(preNext, 200); };
+  try {
+    google.script.run.withSuccessHandler(function(r){ if (S.ld[key] === t) { S.ld[key] = { at: t.stale ? 0 : Date.now(), ms: Date.now() - t.start }; j[3](r); } fin(); })
+      .withFailureHandler(function(){ if (S.ld[key] === t) delete S.ld[key]; fin(); })[fn].apply(null, j[2] || []);
+  } catch (e) { if (S.ld[key] === t) delete S.ld[key]; S.preBusy = false; }
+}
 
 // ---- 時間のかかる処理（裏で動かし、数秒ごとに状態を尋ねる。通信が長く続いて切れるのを避ける） ----
 var JOB_LABEL = {
@@ -782,7 +829,7 @@ function jobReload(planId, saved){ crossStale(); if (planId && S.fc.planId === p
  * 開いている間はそのまま出し、次に開いたとき読み直す。読み込み中のものは、届いた中身を古いとみなす（load の t.stale）
  */
 var LD_STALE = ['home', 'mk', 'fcPlans', 'fcBasis', 'fcLearn', 'fcVer', 'an', 'lrPeople', 'lrAi'];
-function crossStale(){ LD_STALE.forEach(function(k){ var x = S.ld[k]; if (!x || x.error) return; if (x.loading) x.stale = true; else x.at = 0; }); }
+function crossStale(){ LD_STALE.forEach(function(k){ var x = S.ld[k]; if (!x || x.error) return; if (x.loading) x.stale = true; else x.at = 0; }); S.fcMem = {}; S.fcMemGen = (S.fcMemGen || 0) + 1; }
 var JOB_DONE = {
   // 旧来の計算が入力の確認を求めたとき（極端な入力値など）は、内容を見せて、続けるときだけもう一度動かす（計算の処理が返す）
   'FORECAST.RUN_CALC': function(r, payload){ JOB_DONE['FORECAST.RUN'](r, payload); },
@@ -960,6 +1007,19 @@ function openPlan(planId, tab){
   go('forecast');
   if (!tab && from !== 'forecast' && window.scrollTo) { try { window.scrollTo(0, 0); } catch (e) { /* 送れなくても開く */ } }
   if (tab) fcJump();
+}
+/** 読み込み中のカード（見出しの帯 + 中身の帯。title があれば見出しはその名前）。読めたら同じ場所に同じ大きさのカードが入る */
+function skelCard(title, h, label){
+  return '<div class="card skel-card"><div class="card-head">' + (title ? '<h2>' + esc(title) + '</h2>' : '<span class="skel-h" aria-hidden="true"></span>') + '</div>' + skel(label || (title ? title + 'を読み込んでいます' : '読み込んでいます'), h) + '</div>';
+}
+/**
+ * 読み込み中・失敗の画面の形（よみ + 読み込み中のカード）。key の読み込みが失敗していれば、よみが理由と「もう一度読み込む」を言う（カードは出したまま）。
+ * cards: [[見出し（無ければ帯）, 高さ]]
+ */
+function skelPage(key, label, retryJs, cards, cls){
+  var x = S.ld[key];
+  var hero = x && x.error ? slot(key, label, retryJs) : loading(label).replace('<div class="card loading"', '<div class="card loading' + (cls ? ' ' + cls : '') + '"');
+  return hero + (cards || []).map(function(c){ return skelCard(c[0], c[1]); }).join('');
 }
 function guide(pose, html){ return '<div class="card"><div class="guide"><div class="charbox">' + YOMI_POSE[pose] + '</div><div class="bubble">' + html + '</div></div></div>'; }
 /** 待ちの表示: よみが画面の中で「観測中…」と話す（右下には出さない。2026-10-06 村井さん） */
@@ -1789,6 +1849,24 @@ function homeLearnKick(){
   S.homeKick = true;
   setTimeout(function(){ S.homeKick = false; if (S.view === 'home' && !S.ld.lrAi) lrNeed('ai'); }, 0);
 }
+/**
+ * ホームを開いたら、ほかの画面の中身を先読みする（1 回だけ）: 計画の一覧 → 予測を開いたときに出る最初のメーカー → 分析 → 人の学び。
+ * どれも、まだ読んでいないものだけ（読み込み中・読めたものは飛ばす）
+ */
+function homePreKick(){
+  if (S.homePre) return;
+  S.homePre = true;
+  setTimeout(function(){
+    preload([
+      ['fcPlans', 'apiListPlans', [], function(r){ S.fc.plans = r.plans; if (S.view === 'forecast') fcAutoOpen(); else fcPreFirst(); }, 'forecast', function(){ return !S.fc.plans && !S.ld.fcPlans; }],
+      ['an', 'apiCrossMaker', [{ fy: S.an.fy }], function(r){ if (!S.an.data && String(S.an.fy || '') === '') { S.an.data = r; S.an.fy = String(r.fy); } }, 'analysis', function(){ return !S.an.data && !S.ld.an && !S.an.fy; }],
+      ['lrPeople', 'apiPeopleLearning', [], function(r){ S.lr.people = r; }, 'learning', function(){ return !S.lr.people && !S.ld.lrPeople; }]
+    ]);
+    if (S.fc.plans) fcPreFirst();
+  }, 600);
+}
+/** 予測を開いたときに出る最初のメーカー（まだ開いていなければ）を先読みする */
+function fcPreFirst(){ var first = !S.fc.planId && S.fc.plans ? fcFyPlans(fcFy())[0] : null; if (first) fcPrefetch([first.planId]); }
 /** 所有者の初期設定（最初の 1 回。何度実行しても同じ結果） */
 function homeSetup(){ call('apiSetup', [], function(){ B.setUp = true; toast('初期設定が終わりました'); go('home'); }); }
 /** 見せる年度の計画（サーバーが決めた年度 h.fy）。測る専用の計画は入れない（合計・空模様・よみの話に出さない。サーバーの合計と同じ） */
@@ -1801,14 +1879,23 @@ function viewHome(){
     return '<h1>Trends2Targets</h1>' + guide('observe', '準備中です。もうしばらくお待ちください。');
   }
   var h = B.home;
-  if (!h) return '<h1>ホーム</h1>' + (slot('home', 'ホームを読み込んでいます', 'homeLoad()') || loading(S.homeFy ? 'FY' + S.homeFy + ' を読み込んでいます' : 'ホームを読み込んでいます'));
+  if (!h) {
+    // 読み込み中も、題の横の年度とカードを出しておく（読めたら同じ場所に入る）
+    var fy0 = S.homeFy || '';
+    var sel0 = fy0 ? '<select class="inp sm hm-fysel" id="hm_fy" data-near="1" aria-label="見る年度" disabled><option>FY' + esc(fy0) + '</option></select>' : '';
+    return '<div class="page-head"><h1>ホーム</h1>' + sel0 + '</div>' + skelPage('home', fy0 ? 'FY' + fy0 + ' を読み込んでいます' : 'ホームを読み込んでいます', 'homeLoad()',
+      [[fy0 ? 'FY' + fy0 + ' の数字' : '', HM_SKEL.kpi], ['見通しの空模様', HM_SKEL.sky], ['学びの進み', HM_SKEL.learn], ['データからわかること', HM_SKEL.insight]], 'wait-home');
+  }
   var plans = homePlans(h);
   var head = '<div class="page-head"><h1>ホーム</h1>' + homeFySelect(h) + '</div>';
   // 計画が無い年度は、よみの案内 1 枚だけ（「まだありません」を重ねない）
   if (!plans.length) return head + homeHero(h);
   homeLearnKick();
+  homePreKick();
   return head + homeHero(h) + homeKpis(h, plans) + homeSkyCard(plans) + homeLearnCard(h, plans) + homeInsightCard(plans);
 }
+/** 読み込み中のカードの中身の高さ（パソコンの幅で読めたときとほぼ同じ） */
+var HM_SKEL = { kpi: 112, sky: 196, learn: 204, insight: 168 };
 /** 見る年度のプルダウン（今の年度の前後 2 年。題のすぐ横。選ぶとその年度で読み直す） */
 function homeFySelect(h){
   var opts = (h.fyOptions && h.fyOptions.length ? h.fyOptions : [String(h.fy)]).slice();
@@ -1943,7 +2030,7 @@ function homeLearnCard(h, plans){
   if (!d) {
     if (x && x.error) return '<div class="card">' + head + '<div class="hm-wait" role="alert"><span class="hm-yomi">' + YOMI_POSE.discover + '</span><span class="err-text">読み込めませんでした</span><span class="note">' + esc(x.error) + '</span>'
       + '<button class="btn btn-ghost" onclick="lrLoad(\'ai\')">もう一度読み込む</button></div></div>';
-    return '<div class="card">' + head + '<div class="hm-wait" role="status"><span class="hm-yomi">' + YOMI_POSE.observe + '</span><span>観測中…</span><span class="note">学びを読み込んでいます</span></div></div>';
+    return '<div class="card">' + head + skel('学びを読み込んでいます', HM_SKEL.learn) + '</div>';   // 読めたときの 2 つの箱と同じ高さ
   }
   // 精度の天気は、比べた月が 3 か月以上のメーカーの外れ幅で決める（mw。少ないメーカーしか無ければ霧にして「比べた月がまだ N か月」。accFew）
   var m = homeMape(plans), mw = homeMapeWx(plans), rough = {}, roughN = {};
@@ -2144,7 +2231,12 @@ function mkFy(){
 }
 function viewMakers(){
   var plans = mkPlans();
-  if (!plans) return '<h1>メーカー一覧</h1>' + (slot('mk', 'メーカーを読み込んでいます', 'mkLoad()') || loading('メーカーを読み込んでいます'));
+  if (!plans) {
+    var x = S.ld.mk;
+    var fyw = S.mkFy || (B.home && B.home.fy ? String(B.home.fy) : '');
+    return '<div class="page-head"><h1>メーカー一覧</h1>' + (fyw ? '<select class="inp sm" data-near="1" aria-label="年度" disabled><option>FY' + esc(fyw) + '</option></select>' : '') + '</div>'
+      + (x && x.error ? slot('mk', 'メーカーを読み込んでいます', 'mkLoad()') : skelCard('メーカーの一覧', 560));
+  }
   var fys = mkFys(), fy = mkFy();
   // 測る専用の計画は後ろに分けて並べる（状態の数・合計には入れない）
   var rows = plans.filter(function(p){ return String(p.fy) === fy; }).sort(function(a, b){ return (planMeasure(a) ? 1 : 0) - (planMeasure(b) ? 1 : 0) || String(a.clientName).localeCompare(String(b.clientName), 'ja'); });
@@ -2195,19 +2287,18 @@ function mkTable(rows){
     return '<tr><td class="wrap">' + planLink(p) + '</td><td>' + (m ? '-' : skyCell(p)) + '</td><td>' + (m ? measureChip(true) : '<span class="chip st ' + st[1] + '"' + (tipText ? ' data-tip="' + esc(tipText) + '"' : '') + '>' + st[0] + '</span>') + '</td>'
       + '<td class="num">' + yen(isNum(b) ? b : null) + '</td>'
       + '<td class="num"' + (p.actualMonths ? ' data-tip="' + p.actualMonths + ' か月分"' : '') + '>' + yen(isNum(a) ? a : null) + '</td>'
-      + (m ? '<td class="num">-</td>' : mkLanding(p)) + '<td class="mk-fill"></td></tr>';
+      + (m ? '<td class="num">-</td>' : mkLanding(p)) + '</tr>';
   };
   var body = bud.map(line).join(''), rest = ms.map(line).join('');
   var r = homeRange(bud), all = bud.length;
   // 合計の行: 予算と着地は、値のあるメーカーの数が違うことがある（その数を数字の下に出す）。最初のセルは名前の列と同じく左に残る
   var cnt = function(n){ return n < all ? '<div class="note">' + n + ' メーカー分</div>' : ''; };
   var foot = !all ? '' : '<tr class="total"><td>合計</td><td colspan="2"' + (ms.length ? ' data-tip="' + esc('測る専用の ' + ms.length + ' メーカーは入れていません') + '"' : '') + '>' + all + ' メーカー</td><td class="num">' + yen(tot.budget) + cnt(nB) + '</td><td class="num">' + yen(tot.actual) + '</td>'
-    + '<td class="num" data-tip="' + esc(homeRangeTip(r, all)) + '">' + yen(r ? r.landing : null) + cnt(r ? r.n : 0) + '</td><td class="mk-fill"></td></tr>';
-  // 列の幅: メーカーの名前は、いちばん長い名前が 1 行に入る幅（1〜2 マス）・空模様 144・ステータス 128（同じ幅の札 112）・金額 128（1280px の画面の枠に収める）。
-  // 残りは最後の空の列へ（名前の列を広げない）。「開く」の列は置かない（名前を押すと開く。2026-10-13 村井さん）
-  var nameW = Math.max(160, Math.min(332, Math.max.apply(null, rows.map(function(p){ return String(p.clientName || '').length * 15 + 24; }).concat([0]))));
-  return '<table class="tbl mk"><colgroup><col style="width:' + nameW + 'px"><col style="width:144px"><col style="width:128px"><col style="width:128px"><col style="width:128px"><col style="width:128px"><col class="mk-fill"></colgroup>'
-    + '<thead><tr><th>メーカー</th><th data-tip="締まった月の実績と予測から推定した着地を、予算と比べた見通しです">空模様</th><th data-tip="未着手 = まだ予測がない・策定中 = 予測はあるが公式版をまだ出していない・承認待ち = 出した版を承認者が確認中・承認済み = 公式版が承認された">ステータス</th><th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">年間予算</th><th class="num" data-tip="締まった月（月末から 5 日たってから取り込んだ月）の実績の合計">暫定実績</th><th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th><th class="mk-fill"></th></tr></thead><tbody>'
+    + '<td class="num" data-tip="' + esc(homeRangeTip(r, all)) + '">' + yen(r ? r.landing : null) + cnt(r ? r.n : 0) + '</td></tr>';
+  // 列の幅: カードの幅いっぱいに割り振る（名前 24%・空模様 16%・ステータス 15%・金額 15% ずつ）。左に寄せて右を空けない（2026-10-13 村井さん「左に寄りすぎ。バランスを」）。
+  // 「開く」の列は置かない（名前を押すと開く）
+  return '<table class="tbl mk"><colgroup><col style="width:24%"><col style="width:16%"><col style="width:15%"><col style="width:15%"><col style="width:15%"><col style="width:15%"></colgroup>'
+    + '<thead><tr><th>メーカー</th><th data-tip="締まった月の実績と予測から推定した着地を、予算と比べた見通しです">空模様</th><th data-tip="未着手 = まだ予測がない・策定中 = 予測はあるが公式版をまだ出していない・承認待ち = 出した版を承認者が確認中・承認済み = 公式版が承認された">ステータス</th><th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">年間予算</th><th class="num" data-tip="締まった月（月末から 5 日たってから取り込んだ月）の実績の合計">暫定実績</th><th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th></tr></thead><tbody>'
     + body + foot + rest + '</tbody></table>';
 }
 // ==== END REGION: MAKERS ====
@@ -2296,19 +2387,15 @@ function loadForecast(planId, force, saved){
     else if (w === 'budget') { f.budget = {}; f.budBasis = null; }
     else if (w === 'ins') f.ins = {};
   }
-  fcSecData(force);
-  load('fcLatest', function(ok, fail){ call('apiForecastLatest', [{ planId: planId }], ok, fail); }, null, function(r){ if (S.fc.planId === planId) S.fc.data = r; });
-  load('fcView', function(ok, fail){ call('apiPlanView', [{ planId: planId }], ok, fail); }, null, function(r){ if (S.fc.planId === planId) S.fc.view = r; });
-  setTimeout(fcWaitTick, 1000);
+  // 予測と画面の中身は、根拠・振り返り・公式版と同じ 1 回の通信で読む。先読みの控え（S.fcMem）が 10 分以内なら、それを出して読まない（force のときは使わない）
+  fcSecData(force, ['latest', 'view'].filter(function(p){ return force || !fcMemUse(planId, p); }));
   render();
 }
 /** 読み込みに失敗した方だけを読み直す（読めた方は読み直さない） */
 function fcRetry(){
   var id = S.fc.planId, err = function(k){ return S.ld[k] && S.ld[k].error; };
   if (!err('fcLatest') && !err('fcView')) return loadForecast(id, true);
-  if (err('fcLatest')) load('fcLatest', function(ok, fail){ call('apiForecastLatest', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.data = r; });
-  if (err('fcView')) load('fcView', function(ok, fail){ call('apiPlanView', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.view = r; });
-  setTimeout(fcWaitTick, 1000);
+  fcFetch(id, ['latest', 'view'].filter(function(p){ return err(FC_PARTS[p][0]); }));
   render();
 }
 /** 保存していない入力（予算・入力・人の記入・見直し案の判断）があるか */
@@ -2333,20 +2420,114 @@ function fcSwitch(planId){
   ask(FC_DIRTY_MSG + '保存せずに、ほかのメーカーを開きますか？（入力は消えます）', '開く', function(){ fcDropDrafts(); loadForecast(planId); }, true);
   render();   // 選ぶ欄を今のメーカーに戻しておく（「やめる」のとき）
 }
-/** 区切りに要る中身（根拠・振り返り・公式版）: [読み込みの key, S.fc の置き場所] */
-var FC_SEC_LD = { basis: ['fcBasis', 'basis'], review: ['fcLearn', 'learn'], version: ['fcVer', 'ver'] };
 /**
- * 区切りに要る中身（根拠・振り返り・公式版）を、開いている計画の分だけ並べて読む。同じ計画のものを 10 分以内に読んでいて、古いの印（crossStale）が無ければ読み直さない。
- * 同じ計画を読み込み中なら重ねない。force: 保存・実行の後に計画を読み直すとき（いつも読む）
+ * 予測の画面の中身（サーバーの apiForecastPage の中身の名前 → [読み込みの key, S.fc の置き場所]）。
+ * 予測（latest）・画面の中身（view）・根拠（basis）・振り返り（learn）・公式版（ver）を 1 回の通信で読む（2026-10-13。前は 5 回に分けて読み、サーバーが同じ表を何度も読んでいた）
  */
-function fcSecData(force){
+var FC_PARTS = { latest: ['fcLatest', 'data'], view: ['fcView', 'view'], basis: ['fcBasis', 'basis'], learn: ['fcLearn', 'learn'], ver: ['fcVer', 'ver'] };
+/** 区切りに要る中身（根拠・振り返り・公式版） */
+var FC_SEC_PARTS = ['basis', 'learn', 'ver'];
+/** 読んである中身がその計画のものか（予測と画面の中身は plan.planId、ほかは planId） */
+function fcHas(p, planId){ var x = S.fc[FC_PARTS[p][1]]; return !!x && (p === 'latest' || p === 'view' ? !!(x.plan && x.plan.planId === planId) : x.planId === planId); }
+/**
+ * 区切りに要る中身（根拠・振り返り・公式版）を、開いている計画の分だけ読む（more: 一緒に読む予測・画面の中身）。読むものは 1 回の通信にまとめる。
+ * 同じ計画のものを 10 分以内に読んでいて、古いの印（crossStale）が無ければ読み直さない（先読みの控えがあれば、それを使う）。同じ計画を読み込み中なら重ねない。
+ * force: 保存・実行の後に計画を読み直すとき（いつも読む）
+ */
+function fcSecData(force, more){
   var f = S.fc;
   if (!f.planId) return;
-  Object.keys(FC_SEC_LD).forEach(function(t){
-    var x = FC_SEC_LD[t], have = f[x[1]], ld = S.ld[x[0]];
-    if (!force && (ld && ld.loading ? ld.tag === f.planId : !!have && have.planId === f.planId && ldFresh(x[0], LD_KEEP))) return;
-    if (t === 'basis') fcLoadBasis(); else if (t === 'review') fcLoadLearning(); else fcLoadVersions();
+  var parts = FC_SEC_PARTS.filter(function(p){
+    var ld = S.ld[FC_PARTS[p][0]];
+    if (force) return true;
+    if (ld && ld.loading ? ld.tag === f.planId : fcHas(p, f.planId) && ldFresh(FC_PARTS[p][0], LD_KEEP)) return false;
+    return fcHas(p, f.planId) || !fcMemUse(f.planId, p);   // 出している中身が古いなら読み直す（控えは、まだ出していない中身にだけ使う）
   });
+  parts = (more || []).concat(parts);
+  if (parts.length) fcFetch(f.planId, parts);
+}
+/**
+ * 計画の中身を 1 回の通信で読む（parts の分だけ）。中身ごとに読み込みの印（S.ld）を付け、届いたら中身ごとに読めた・失敗を付ける。
+ * 読み込み中に別の計画へ移ったら、届いた中身は先読みの控えにだけ入れる。読み込み中の中身は消さない（読み直しの間も前の中身を出したまま。画面が動かない）
+ */
+function fcFetch(planId, parts){
+  var ts = {}, now = Date.now();
+  parts.forEach(function(p){ ts[p] = { loading: true, start: now, tag: planId }; S.ld[FC_PARTS[p][0]] = ts[p]; });
+  call('apiForecastPage', [{ planId: planId, parts: parts }], function(r){ fcApply(planId, r || {}, ts); }, function(e){
+    var msg = errText((e && e.message) || String(e));
+    parts.forEach(function(p){ var k = FC_PARTS[p][0]; if (S.ld[k] === ts[p]) S.ld[k] = { error: msg, at: Date.now() }; });
+    render(); return false;
+  });
+  fcSlowKick();
+}
+/** 届いた中身を入れる（ts: 中身ごとの読み込みの印。印が変わっていれば、その中身はもう待っていない）。届いた中身は先読みの控えにも入れる */
+function fcApply(planId, r, ts){
+  var now = Date.now(), errs = r.errors || {};
+  fcMemPut(planId, r);
+  Object.keys(ts).forEach(function(p){
+    var k = FC_PARTS[p][0], t = ts[p];
+    if (S.ld[k] !== t) return;
+    if (errs[p] || r[p] === undefined || r[p] === null) { S.ld[k] = { error: errText(errs[p] || '読み込めませんでした'), at: now }; return; }
+    S.ld[k] = { at: t.stale ? 0 : now, ms: now - t.start, tag: planId };
+    if (S.fc.planId === planId) S.fc[FC_PARTS[p][1]] = r[p];
+  });
+}
+// ---- 先読みの控え（計画ごと・中身ごと。10 分。保存・処理の後は捨てる: crossStale）。メーカーを切り替えたとき・予測を開いたときに、待たずに出す ----
+S.fcMem = {};
+function fcMemPut(planId, r){
+  var m = S.fcMem[planId] = S.fcMem[planId] || {}, now = Date.now(), errs = r.errors || {};
+  Object.keys(FC_PARTS).forEach(function(p){ if (r[p] !== undefined && r[p] !== null && !errs[p]) m[p] = { v: r[p], at: now }; });
+}
+/** 控えが 10 分以内なら画面の中身に入れる（読めた印も付ける）。使えたら true */
+function fcMemUse(planId, p){
+  var m = S.fcMem[planId], x = m && m[p], ld = S.ld[FC_PARTS[p][0]];
+  if (!x || Date.now() - x.at >= LD_KEEP || (ld && ld.error)) return false;   // 読み込みに失敗した後は読み直す（「もう一度読み込む」と同じ）
+  S.fc[FC_PARTS[p][1]] = x.v;
+  S.ld[FC_PARTS[p][0]] = { at: x.at, ms: 0, tag: planId };
+  return true;
+}
+/**
+ * 先読み: 見ている年度のメーカーの中身を、画面が待っていない間に 1 つずつ読んで控える（メーカーを切り替えたときに待たない）。
+ * ホームを開いたときは、予測を開いたときに出る最初のメーカーを読む。通信は google.script.run を直接使い、画面は描き直さない（選ぶ欄を開いている間に閉じない）。
+ * ほかの通信の途中・保存の途中・処理の途中は待つ。失敗しても何も出さない（開いたときに読む）
+ */
+var FC_PRE_MAX = 12;
+function fcPrefetch(ids){
+  S.fcPreQ = (ids || []).filter(function(id, i, a){ return id && a.indexOf(id) === i; }).slice(0, FC_PRE_MAX);
+  clearTimeout(S.fcPreT);
+  S.fcPreT = setTimeout(fcPreNext, 1200);
+}
+function fcPreNext(){
+  var q = S.fcPreQ || [];
+  if (!q.length || S.fcPreBusy) return;
+  if (S.pending > 0 || S.writing || S.job || S.starting) { S.fcPreT = setTimeout(fcPreNext, 1500); return; }
+  var id = q.shift(), m = S.fcMem[id];
+  var fresh = m && Object.keys(FC_PARTS).every(function(p){ return m[p] && Date.now() - m[p].at < LD_KEEP; });
+  var busyNow = Object.keys(FC_PARTS).some(function(p){ var x = S.ld[FC_PARTS[p][0]]; return x && x.loading && x.tag === id; });
+  if (fresh || busyNow) { S.fcPreT = setTimeout(fcPreNext, 0); return; }
+  S.fcPreBusy = true;
+  var gen = S.fcMemGen;
+  var done = function(){ S.fcPreBusy = false; S.fcPreT = setTimeout(fcPreNext, 300); };
+  try {
+    google.script.run.withSuccessHandler(function(r){
+      if (gen === S.fcMemGen && r) {
+        fcMemPut(id, r);
+        // 先読みの途中でそのメーカーを開いていたら（まだ読み込み中なら）、届いた中身をそのまま使う
+        if (S.fc.planId === id) {
+          var ts = {};
+          Object.keys(FC_PARTS).forEach(function(p){ var x = S.ld[FC_PARTS[p][0]]; if (x && x.loading && x.tag === id) ts[p] = x; });
+          if (Object.keys(ts).length) { fcApply(id, r, ts); if (S.view === 'forecast') render(); }
+        }
+      }
+      done();
+    }).withFailureHandler(done).apiForecastPage({ planId: id });
+  } catch (e) { done(); }
+}
+/** 見ている年度のほかのメーカーを先読みする（予測の画面を開いて中身が出た後） */
+function fcPrefetchFy(){
+  var f = S.fc;
+  if (!f.planId || !f.plans) return;
+  fcPrefetch(fcFyPlans(fcFy()).map(function(p){ return p.planId; }).filter(function(id){ return id !== f.planId; }));
 }
 /**
  * 題の横の選ぶ欄の幅: いちばん長い名前が見切れない幅（太字 18px の字の幅＋左右の余白と ▼ の 60px）。1 マス（160）より狭くせず、2 マス（332）を超えない。
@@ -2367,22 +2548,27 @@ function fcHeadSel(fy){
     + list.map(function(p){ return '<option value="' + esc(p.planId) + '"' + (p.planId === f.planId ? ' selected' : '') + '>' + esc(p.clientName) + '</option>'; }).join('') + '</select>' : '';
   return '<span class="fc-sels" data-near="1">' + fySel + mkSel + '</span>';
 }
+/** 計画の一覧を読むまでの選ぶ欄（押せない。読めたら同じ場所に入る。スマホで題の下の段が後から増えない） */
+function fcHeadSelWait(fy){
+  return '<span class="fc-sels" data-near="1"><select class="inp sm" aria-label="年度" disabled><option>' + (fy ? 'FY' + esc(fy) : '') + '</option></select>'
+    + '<select class="inp sm" aria-label="メーカー" disabled><option></option></select></span>';
+}
 function viewForecast(){
   var f = S.fc, d = f.data, v = f.view;
-  if (!f.plans && !f.planId) return '<h1>予測</h1>' + (slot('fcPlans', '計画の一覧を読み込んでいます', 'fcLoadPlans()') || loading('計画の一覧を読み込んでいます'));
-  var fy = fcFy(), sel = f.plans && f.plans.length ? fcHeadSel(fy) : '';
+  if (!f.plans && !f.planId) return '<div class="page-head"><h1>予測</h1>' + fcHeadSelWait(fcFy()) + '</div>' + (S.ld.fcPlans && S.ld.fcPlans.error ? slot('fcPlans', '計画の一覧を読み込んでいます', 'fcLoadPlans()') : fcSkelPage());
+  var fy = fcFy(), sel = f.plans && f.plans.length ? fcHeadSel(fy) : f.plans ? '' : fcHeadSelWait(fy);
   if (!f.planId) {
     var head0 = '<div class="page-head"><h1>予測</h1>' + sel + '</div>';
     if (!f.plans.length) return head0 + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここで見られます。');
     if (!fcFyPlans(fy).length) return head0 + guide('guide', 'FY' + esc(fy) + ' の計画はまだありません。所有者が計画を作ると、ここで見られます。');
-    return head0 + loading('計画を読み込んでいます');
+    return head0 + fcSkelPage();
   }
   // 締め済み・測る専用の札は題のすぐ後ろに（選ぶ欄の前）
   var html = '<div class="page-head"><h1>予測'
     + (d && (d.plan.frozen || (v && v.plan && v.plan.frozen)) ? ' <span class="chip warn" data-tip="この年度は締め済みです。元の行は残したまま、読み取り専用です">締め済み</span>' : '')
     + (fcMeasure() ? ' ' + measureChip() : '') + '</h1>' + sel + '</div>';
   if (v && v.pendingWrite) return html + fcPendingBox(v);
-  if (!d || !v) return html + fcWaitBox();
+  if (!d || !v) return html + fcSkelPage();
   var body = { forecast: fcForecastTab, basis: fcBasisTab, input: fcInputTab, review: fcReviewTab, version: fcVersionTab, steps: fcStepsTab };
   html += FC_SECS.map(function(s){
     var inner;
@@ -2394,7 +2580,25 @@ function viewForecast(){
     return fcSec(s, inner, s[0] === 'forecast' ? fcRunBtn() : '');
   }).join('');
   if (f.jump) setTimeout(fcJump, 0);
+  if (!f.preFy || f.preFy !== f.planId) { f.preFy = f.planId; fcPrefetchFy(); }
   return html;
+}
+/**
+ * 読み込み中の予測の画面: 区切りのカード（見出しと、中身とほぼ同じ高さの灰色の帯）を先に出しておく。中身が届いたら同じ場所に入るので、画面が動かない。
+ * 失敗したら、最初の区切りに理由と「もう一度読み込む」
+ */
+var FC_SKEL_H = { forecast: 972, basis: 360, input: 320, review: 360, version: 260, steps: 240 };
+function fcSkelPage(){
+  var keys = ['fcLatest', 'fcView'], failed = keys.some(function(k){ return S.ld[k] && S.ld[k].error; }), busyNow = keys.some(ldBusy);
+  return FC_SECS.map(function(s, i){
+    var inner = skel(s[1] + 'を読み込んでいます', FC_SKEL_H[s[0]]);
+    if (i === 0 && failed && !busyNow) {
+      var why = keys.map(function(k){ return S.ld[k] && S.ld[k].error; }).filter(Boolean)[0];
+      inner = '<div class="ld-in" role="alert" style="min-height:' + FC_SKEL_H.forecast + 'px"><div class="hero"><div class="charbox">' + YOMI_POSE.discover + '</div><div class="bubble">読み込めませんでした<small>' + esc(why) + '</small>'
+        + '<div class="say-act"><button class="btn btn-ghost" onclick="fcRetry()">もう一度読み込む</button></div></div></div></div>';
+    } else if (i === 0) inner = skel('予測を読み込んでいます', FC_SKEL_H.forecast - 56) + fcWaitNote();
+    return fcSec(s, inner, '');
+  }).join('');
 }
 /** 区切りのカード（見出し + 中身）。中のカードは、区切りの中の段として出す（CSS の .fcsec）。right: 見出しの右に置く操作（予測を実行など） */
 function fcSec(s, inner, right){
@@ -2422,31 +2626,19 @@ function fcPendingBox(v){
       ? actBtn('<button class="btn" ' + (S.job ? 'disabled ' : '') + 'onclick="startJob(\'SYSTEM.RECOVER\', {})">保存の続きを書く</button>', '1〜2 分ほどかかります。終わると画面が元に戻ります')
       : '<span class="note">予算策定担当か管理者に「保存の続きを書く」を押してもらってください。</span>') + '</div></div>';
 }
-/** 読み込みの待ち（何を待っているか・何秒か。失敗したら理由と、もう一度読む）。待ち続けないように 1 秒ごとに表示を新しくする */
-function fcWaitBox(){
-  var now = Date.now(), keys = ['fcLatest', 'fcView'];
-  var part = function(k, label){ var x = S.ld[k]; if (!x) return '';
-    if (x.error) return '<li><span class="chip ng">失敗</span>' + label + '<span class="note">（' + esc(x.error) + '）</span></li>';
-    if (!x.loading) return '<li><span class="chip ok">読めました</span>' + label + '<span class="note">（' + Math.round((x.ms || 0) / 1000) + ' 秒）</span></li>';
-    return '<li><span class="dot"></span>' + label + '<span class="note">読み込み中…（' + Math.round((now - x.start) / 1000) + ' 秒）</span></li>'; };
-  var list = '<ul class="waitlist">' + part('fcLatest', '予測の結果') + part('fcView', '画面の中身（入力・予算・振り返りなど）') + '</ul>';
-  var slow = keys.some(function(k){ var x = S.ld[k]; return x && x.loading && now - x.start > 90000; });
-  var failed = keys.some(function(k){ return S.ld[k] && S.ld[k].error; }), busyNow = keys.some(ldBusy);
-  var retry = '<div class="say-act"><button class="btn btn-ghost" onclick="fcRetry()">もう一度読み込む</button></div>';
-  // 失敗して読み込みが止まったら「観測中…」と言い続けず、ほかの画面と同じ形（よみ・読み込めませんでした・理由・もう一度読み込む）にする
-  if (failed && !busyNow) return '<div class="card ldfail" id="fcWait" role="alert"><div class="hero"><div class="charbox">' + YOMI_POSE.discover + '</div><div class="bubble">読み込めませんでした<small>計画の一部を読み込めませんでした</small>' + list + retry + '</div></div></div>';
-  // どちらも読み込んでいないのに中身が無い（途中で別の計画に移ったなど）ときも、読み直すボタンを出す
-  var stuck = !busyNow && !failed;
-  return loading('計画を読み込んでいます', list
-    + (slow ? '<p class="note warn-text mt8">時間がかかっています。データが変わった後の最初の表示は 1 分ほどかかることがあります。</p>' : '')
-    + (slow || stuck ? retry : ''), 'fcWait');
+/** 読み込みが遅いときの一言（15 秒を過ぎたら。90 秒を過ぎた・何も読んでいないのに中身が無いときは「もう一度読み込む」）。高さは決まっている（画面が動かない） */
+function fcWaitNote(){
+  var xs = [S.ld.fcLatest, S.ld.fcView].filter(function(t){ return t && t.loading; });
+  var sec = xs.length ? Math.round((Date.now() - Math.min.apply(null, xs.map(function(t){ return t.start; }))) / 1000) : 0;
+  return '<div id="fcWait" class="fc-wait" role="status" aria-live="polite">' + (sec >= 15 ? '<span class="note">時間がかかっています（' + sec + ' 秒）。データが変わった後の最初の表示は、1 分ほどかかることがあります</span>' : '')
+    + (sec >= 90 || !xs.length ? '<button class="btn btn-ghost" onclick="fcRetry()">もう一度読み込む</button>' : '') + '</div>';
 }
 var fcWaitT = null;
+function fcSlowKick(){ clearTimeout(fcWaitT); fcWaitT = setTimeout(fcWaitTick, 1000); }
 function fcWaitTick(){
   clearTimeout(fcWaitT);
-  var busyNow = ldBusy('fcLatest') || ldBusy('fcView');
-  if (S.view === 'forecast' && $('fcWait')) $('fcWait').outerHTML = fcWaitBox();
-  if (busyNow) fcWaitT = setTimeout(fcWaitTick, 1000);
+  if (S.view === 'forecast' && $('fcWait')) $('fcWait').outerHTML = fcWaitNote();
+  if (ldBusy('fcLatest') || ldBusy('fcView')) fcWaitT = setTimeout(fcWaitTick, 1000);
 }
 function fcCan(kind){ var v = S.fc.view; return !!(v && v.can && (kind === 'approve' ? v.can.approve : kind === 'admin' ? v.can.admin : v.can.plan)); }
 /** 開いている計画が測る専用か（計画の画面の plan.measure。読み込む前は計画の一覧から）。予算と公式版の操作を出さない */
@@ -2884,7 +3076,7 @@ function fcBudDraftLine(closed, lv){
 }
 
 // ---- 根拠（何が予測を押したか。中の言葉は出さない: 話題・向き・種類・AI の見立て） ----
-function fcLoadBasis(){ var id = S.fc.planId; S.fc.basis = null; load('fcBasis', function(ok, fail){ call('apiForecastBasis', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.basis = r; }, id); }
+function fcLoadBasis(){ if (S.fc.planId) fcFetch(S.fc.planId, ['basis']); }
 var FC_TOPIC = { market: '市場', competitor: '競合', channel: '販路', dx: 'DX' };
 function fcTopic(t){ var s = String(t == null ? '' : t).trim(); return FC_TOPIC[s.toLowerCase()] || s; }
 var FC_DIR = { up: 1, positive: 1, increase: 1, '上昇': 1, '上向き': 1, down: -1, negative: -1, decrease: -1, '低下': -1, '下向き': -1, flat: 0, neutral: 0, stable: 0, '横ばい': 0 };
@@ -3260,7 +3452,7 @@ function fcInLogTip(e){
 }
 
 // ---- 振り返り（検証と四半期の見直しをまとめた: 精度の天気 → 精度の推移 → 人の記入 → AI の見直し案 → 更新。2026-10-06 村井さん） ----
-function fcLoadLearning(){ var id = S.fc.planId; S.fc.learn = null; load('fcLearn', function(ok, fail){ call('apiLearningView', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.learn = r; }, id); }
+function fcLoadLearning(){ if (S.fc.planId) fcFetch(S.fc.planId, ['learn']); }
 function fcReviewTab(d, v){
   var boot = v.boot || {}, e = boot.eval || {}, q = boot.quarterly || {}, lr = S.fc.learn, canPlan = fcCan('plan');
   var acc = lr && lr.planId === S.fc.planId ? lr.accuracy || { months: [] } : null;
@@ -3474,7 +3666,7 @@ function rvChainGet(planId){
 var VER_STATE = { SUBMITTED: ['承認待ち', 'warn'], APPROVED: ['承認済み', 'ok'], REJECTED: ['却下', 'ng'], SUPERSEDED: ['置き換え済み', 'off'], WITHDRAWN: ['取り下げ', 'off'] };
 /** 版の状態の札。表の状態の列（col: true）は、ほかの表の状態の列と同じ幅（.chip.st）にそろえる */
 function verChip(st, col){ var x = VER_STATE[st] || ['-', 'off']; return '<span class="chip ' + (col ? 'st ' : '') + x[1] + '">' + x[0] + '</span>'; }
-function fcLoadVersions(){ var id = S.fc.planId; S.fc.ver = null; load('fcVer', function(ok, fail){ call('apiVersionList', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.ver = r; }, id); }
+function fcLoadVersions(){ if (S.fc.planId) fcFetch(S.fc.planId, ['ver']); }
 function verWho(email, at){ return email ? esc(fcWho(email)) + '<div class="note">' + esc(fcDate(at, true).slice(5)) + '</div>' : '-'; }
 function verDiff(a, b){ return !isNum(a) || !isNum(b) ? '-' : (a - b > 0 ? '+' : '') + yen(a - b); }
 /**
@@ -3692,11 +3884,11 @@ function anClosed(d){
 function anFy(fy){ S.an.fy = String(fy); S.an.data = null; anLoad(); render(); }
 function viewAnalysis(){
   var a = S.an, d = a.data;
-  var fys = d ? (d.fys || []).slice().reverse() : a.fy ? [a.fy] : [];
-  var sel = fys.length ? '<select class="inp sm" id="an_fy" data-near="1" aria-label="年度" onchange="anFy(this.value)">'
+  var fys = d ? (d.fys || []).slice().reverse() : [a.fy || String(anThisFy())];
+  var sel = fys.length ? '<select class="inp sm" id="an_fy" data-near="1" aria-label="年度"' + (d ? '' : ' disabled') + ' onchange="anFy(this.value)">'
     + fys.map(function(f){ return '<option value="' + esc(f) + '"' + (String(f) === String(a.fy) ? ' selected' : '') + '>FY' + esc(f) + '</option>'; }).join('') + '</select>' : '';
   var html = '<div class="page-head"><h1>分析</h1>' + sel + '</div>';
-  if (!d) return html + (slot('an', '分析を読み込んでいます', 'anLoad()') || loading('分析を読み込んでいます'));
+  if (!d) return html + skelPage('an', a.fy ? 'FY' + a.fy + ' を分析しています' : '分析を読み込んでいます', 'anLoad()', [['', 288], ['', 380], ['', 380]], 'wait-an');
   return html + anOverview(d);
 }
 
@@ -4294,9 +4486,9 @@ var LR_SEC_TUNE = 'シングルループ学習: 前提はそのままで、外�
 function viewLearning(){
   var p = S.lr.people, a = S.lr.ai;
   var html = '<h1>学び</h1>' + lrSec('lr-human', '前提と情報の見直し', LR_SEC_HUMAN, '人に返す学び');
-  html += p ? lrPeopleView(p, lrReviewCard(p, a)) : (slot('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')") || loading('人の学びを読み込んでいます'));
+  html += p ? lrPeopleView(p, lrReviewCard(p, a)) : skelPage('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')", [['', 244], ['', 620]], 'wait-lr');
   html += lrSec('lr-tune', '補正と重みの調整', LR_SEC_TUNE, 'AI が直す学び');
-  html += a ? lrAiView(a) : (slot('lrAi', 'AI の学びを読み込んでいます', "lrLoad('ai')") || loading('AI の学びを読み込んでいます'));
+  html += a ? lrAiView(a) : skelPage('lrAi', 'AI の学びを読み込んでいます', "lrLoad('ai')", [['', 244], ['', 400]], 'wait-lr');
   return html;
 }
 

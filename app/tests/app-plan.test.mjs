@@ -330,7 +330,9 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.doesNotMatch(homeHtml, /よみが観測しました|class="dash"|状態を見る/);
   // 2026-10-06 村井さん: 読み込みの待ちは、右下ではなく画面の中で、よみが「観測中…」と話す
   const waitHtml = vm.runInContext(`S.homeLoading = true; B.home = null; var __w = viewHome(); B.home = __home; S.homeLoading = false; __w`, ui);
-  assert.match(waitHtml, /class="card loading"[\s\S]*観測中…[\s\S]*読み込んでいます/);
+  assert.match(waitHtml, /class="card loading[^"]*"[\s\S]*観測中…[\s\S]*読み込んでいます/);
+  // 2026-10-13 村井さん: 読み込み中もカードを出しておく（読めたら同じ場所に入る。画面が動かない）
+  assert.deepEqual([...waitHtml.matchAll(/<div class="card skel-card"><div class="card-head">(?:<h2>([^<]*)<\/h2>)?/g)].map((m) => m[1] || ''), ['', '見通しの空模様', '学びの進み', 'データからわかること'], '数字・空模様・学びの進み・わかることのカード');
   assert.doesNotMatch(waitHtml, /読み込み中…/);
   // 読み込みに失敗したら、理由と「もう一度読み込む」を出し、描くたびに読み直さない（前は失敗のたびに apiHome を呼び直していた）
   const failHtml = JSON.parse(vm.runInContext(`var __n = 0, __c0 = call; call = function(){ __n++; }; B.home = null; S.ld.home = { error: 'つながりません', at: Date.now() }; var __f = viewHome() + viewHome(); call = __c0; B.home = __home; S.ld.home = { at: Date.now() }; JSON.stringify([__f, __n])`, ui));

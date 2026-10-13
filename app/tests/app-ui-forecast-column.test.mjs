@@ -78,7 +78,13 @@ const card = (h, kind) => { const i = h.indexOf('id="fc-in-' + kind + '"'); retu
 
 // ==== 1. 予測を開くと、見ている年度の最初のメーカーを開く（「メーカーを選ぶ」の画面は無い） ====
 run(`go('forecast')`);
-assert.match(page(), /観測中…/, '一覧を読むまでは、よみの「観測中…」');
+{
+  // 一覧を読むまでも、区切りのカード（見出しと灰色の帯）を出しておく（読めたら同じ場所に中身が入る。2026-10-13 村井さん）
+  const w = page();
+  assert.deepEqual([...w.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]), ['forecast', 'basis', 'input', 'review', 'version', 'steps'], '読み込み中も 6 つの区切り');
+  assert.match(w, /class="skel" role="status"/, '中身の場所は灰色の帯');
+  assert.doesNotMatch(w, /観測中…/, 'よみの待ちのカードは出さない（中身と大きさが違い、読めたときに画面が動くため）');
+}
 flush(); flush();
 assert.equal(run('S.fc.planId'), P[firstKey][FY], '今の年度の、名前の順で最初のメーカーを開く');
 let h = page();

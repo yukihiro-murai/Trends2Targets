@@ -26,6 +26,7 @@ const manifest = JSON.parse(await readFile(path.join(srcDir, 'appsscript.json'),
 const PUBLIC = ['doGet', 'apiSetup', 'apiAuthorizeAi', 'apiOwnerTask',
   'apiStartJob', 'apiJobStatus', 'apiListPlans', 'apiPortfolio', 'apiHome', 'apiVersionList', 'apiVersionSubmit', 'apiVersionDecide',
   'apiForecastBasis', 'apiLearningView', 'apiForecastLatest', 'apiPlanView',
+  'apiForecastPage',
   'apiCrossMaker', 'apiPeopleLearning', 'apiAiLearning',
   'apiBudgetProposal',
   'triggerDailyBackup', 'triggerRunJob', 'triggerAutoResearch'];

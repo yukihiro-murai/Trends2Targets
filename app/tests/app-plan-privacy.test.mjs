@@ -236,6 +236,8 @@ const redactedBasis = (full) => {
 {
   const a = build();
   const b = build();
+  // 処理の終わりに作る画面の中身の控え（appJobWarm_）を捨て、見る人の順に控えを作り直す（2026-10-13 から処理の終わりにも控えを作る）
+  for (const t of [a, b]) for (const k of Object.keys(t.env.cache)) delete t.env.cache[k];
   const count = (env) => env.run(`(() => { globalThis.__builds = { view: 0, basis: 0 };
     const sb = appStoreBook_, et = appEngTableObjects_;
     appStoreBook_ = function () { __builds.view++; return sb.apply(null, arguments); };
@@ -358,6 +360,8 @@ const redactedBasis = (full) => {
   env.run(`appInsertRows_('PLAN_ACTIONS', __a); appInsertRows_('FORECAST_RUNS', __r); appBumpGen_();`, {
     __a: [{ action_id: 'ACT-T6', plan_id: t.planId, action: 'INPUT.SAVE', status: 'DONE', changed_sheets_json: '["PRODUCT"]', result_json: '{}', started_at: T1, finished_at: T1, actor_email: PLANNER_ALL }],
     __r: [Object.assign({}, run0, { run_id: 'FR-T6', started_at: T2, finished_at: T3, actor_email: APPROVER })] });
+  // 行を直に足したので（ふつうは処理が書き、計算の入力も変わる）、処理の終わりに作った画面の中身の控え（appJobWarm_）を捨てる
+  for (const k of Object.keys(env.cache)) delete env.cache[k];
   // 公式版: 予算策定担当が出し、承認者が承認した
   env.as(PLANNER_ALL);
   const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: t.planId, inputHash: env.call('apiVersionList(__in)', { __in: { planId: t.planId } }).inputHash } });

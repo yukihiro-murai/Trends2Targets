@@ -770,7 +770,8 @@ const ai = env.call('apiAiLearning()');
   assert.equal(after.summary.withNotes, 1, '4 月は 1 か月（2025/05 の行は数字が違うので出さない）');
   env.call('apiAiLearning()');
   assert.deepEqual(J(env.run('__evd')), [[A]], '当たりは保存した計画の分だけ数え直す（乙は控えから）');
-  assert.deepEqual(J(env.run('__acc')), [A], '精度も保存した計画の分だけ');
+  // 精度は、処理の終わりに作る画面の中身の控え（appJobWarm_。2026-10-13）で、もう保存した計画の分を計算し直していることがある
+  assert.ok(J(env.run('__acc')).every((id) => id === A), '精度も保存した計画の分だけ（乙は控えから）');
   // 履歴の表は、保存した計画の行だけを読む
   for (const k of Object.keys(STATS)) STATS[k] = k === 'bySheet' ? {} : 0;
   env.run(`(() => { APP_STORE_CACHE_ = {}; appReadTable_('ENG_SUBJECTIVE_IMPACT_HISTORY'); })()`);

@@ -40,7 +40,7 @@ function apiOwnerTask() {
 
 /** 計画の一覧（取り込み・計算の一致の確認の対象） */
 function apiListPlans() {
-  return api_('PLANS.LIST', { minRole: 'VIEWER', audit: false }, () => appCachedRead_('PLANS', () => ({ plans: appListPlans_() })));
+  return api_('PLANS.LIST', { minRole: 'VIEWER', audit: false }, () => appPagePlans_());
 }
 
 /** 全部の計画の要点（閲覧は社内全員） */
@@ -53,12 +53,12 @@ function apiPortfolio() {
  * 押したものの人や話題ごとの内訳（名前と信頼度）は、その計画のメーカーで予算策定担当以上の人だけ（ほかの人には情報源の種類ごと。appBasisFor_）
  */
 function apiForecastBasis(input) {
-  return api_('FORECAST.BASIS', { minRole: 'VIEWER', audit: false }, ctx => appForecastBasis_(ctx, input && input.planId));
+  return api_('FORECAST.BASIS', { minRole: 'VIEWER', audit: false }, ctx => appPageBasis_(ctx, input && input.planId));
 }
 
 /** 精度の推移と学習の影（月の誤差・偏り・P10〜P90 に入った割合・全計画で縮めた偏りの補正）。閲覧は社内全員 */
 function apiLearningView(input) {
-  return api_('LEARNING.VIEW', { minRole: 'VIEWER', audit: false }, () => appLearningView_(input && input.planId));
+  return api_('LEARNING.VIEW', { minRole: 'VIEWER', audit: false }, ctx => appPageLearn_(ctx, input && input.planId));
 }
 
 /** 分析: 年度のメーカーを横に並べる（予測と予算・予測の改訂・精度・AI の話題と市場のまとめ）。閲覧は社内全員。読むだけ。中身は「今日」でも変わる（既定の年度）ので、控えの鍵に日付も入れる */
@@ -102,7 +102,7 @@ function apiBudgetProposal(input) {
 
 /** 計画の公式版の一覧と、今の数字 */
 function apiVersionList(input) {
-  return api_('VERSION.LIST', { minRole: 'VIEWER', audit: false }, ctx => appCachedRead_('VERSIONS\u0001' + ctx.actor + '\u0001' + (input && input.planId), () => appVersionList_(ctx, input)));
+  return api_('VERSION.LIST', { minRole: 'VIEWER', audit: false }, ctx => appPageVer_(ctx, input && input.planId));
 }
 
 /** 今の予測と予算を、公式版として出す（予算策定担当。その計画のクライアントの担当でもよい） */
@@ -129,8 +129,7 @@ function apiHome(input) {
  * 今日の日付でも変わるので、予測の控えとは別に足す。読めなければ null）
  */
 function apiForecastLatest(input) {
-  return api_('FORECAST.LATEST', { minRole: 'VIEWER', audit: false }, ctx => appForecastLatestFor_(ctx, Object.assign(
-    appCachedRead_('LATEST\u0001' + (input && input.planId), () => appForecastLatest_(input && input.planId)), { shadow: appPlanShadow_(input && input.planId) })));
+  return api_('FORECAST.LATEST', { minRole: 'VIEWER', audit: false }, ctx => appPageLatest_(ctx, input && input.planId));
 }
 
 /**
@@ -138,7 +137,17 @@ function apiForecastLatest(input) {
  * 人ごとの当たりと外れた月の担当は、その計画のメーカーで予算策定担当以上の人だけ（appPlanViewFor_）。控えの鍵は見る人ごと
  */
 function apiPlanView(input) {
-  return api_('PLAN.VIEW', { minRole: 'VIEWER', audit: false }, ctx => appCachedRead_('VIEW\u0001' + ctx.actor + '\u0001' + (input && input.planId) + '\u0001' + appToday_(), () => appPlanView_(ctx, input && input.planId)));
+  return api_('PLAN.VIEW', { minRole: 'VIEWER', audit: false }, ctx => appPageView_(ctx, input && input.planId));
+}
+
+/**
+ * 予測の画面の中身をまとめて（1 回の通信・1 回の実行で）。input: { planId, parts: ['latest','view','basis','learn','ver'] の一部（省けば全部）, plans: true なら計画の一覧も }。
+ * 中身は上の入口（apiForecastLatest・apiPlanView・apiForecastBasis・apiLearningView・apiVersionList・apiListPlans）と同じもの・同じ控え。
+ * 1 回の実行で読むので、同じ表を何度も読まない（別々に呼ぶと、表を読む回数が 2 倍ほどになり、同時に同じ計算もしていた。2026-10-13）。
+ * 1 つの中身で失敗しても、ほかは返す（errors[中身] に理由。画面はその区切りだけに「読み込めませんでした」を出す）。閲覧は社内全員
+ */
+function apiForecastPage(input) {
+  return api_('FORECAST.PAGE', { minRole: 'VIEWER', audit: false }, ctx => appForecastPage_(ctx, input || {}));
 }
 
 /** 時間のかかる処理を始める（裏で動かす。種類ごとに権限が違う） */
@@ -269,4 +278,28 @@ function appBootstrap_(ctx) {
 function appDeniedBootstrap_(ctx) {
   return { app: { name: APP_NAME, nameJa: APP_NAME_JA, version: APP_VERSION }, user: { email: ctx.user.email, isOwner: false, isAdmin: false, roles: [] },
     setUp: appIsSetUp_(), allowed: false };
+}
+
+// ---- 予測の画面の中身（上の入口と apiForecastPage で同じものを返す） ----
+function appPagePlans_() { return appCachedRead_('PLANS', () => ({ plans: appListPlans_() })); }
+function appPageLatest_(ctx, planId) {
+  return appForecastLatestFor_(ctx, Object.assign(appCachedRead_('LATEST\u0001' + planId, () => appForecastLatest_(planId)), { shadow: appPlanShadow_(planId) }));
+}
+function appPageView_(ctx, planId) { return appCachedRead_('VIEW\u0001' + ctx.actor + '\u0001' + planId + '\u0001' + appToday_(), () => appPlanView_(ctx, planId)); }
+function appPageBasis_(ctx, planId) { return appForecastBasis_(ctx, planId); }
+function appPageLearn_(ctx, planId) { return appLearningView_(planId); }
+function appPageVer_(ctx, planId) { return appCachedRead_('VERSIONS\u0001' + ctx.actor + '\u0001' + planId, () => appVersionList_(ctx, { planId: planId })); }
+const APP_PAGE_PARTS = { latest: appPageLatest_, view: appPageView_, basis: appPageBasis_, learn: appPageLearn_, ver: appPageVer_ };
+
+/** apiForecastPage の中身。返り値 { planId, latest?, view?, basis?, learn?, ver?, plans?, errors: { 中身: 理由 } }（中身ごとに google.script.run で返せる形にする） */
+function appForecastPage_(ctx, input) {
+  const planId = String(input.planId || '');
+  const want = Array.isArray(input.parts) && input.parts.length ? input.parts : Object.keys(APP_PAGE_PARTS);
+  const out = { planId: planId, errors: {} };
+  const one = (name, fn) => {
+    try { out[name] = appSerialize_(fn()); } catch (e) { out.errors[name] = String(e && e.message ? e.message : e); appLogError_('FORECAST.PAGE.' + name, e, ctx); }
+  };
+  if (input.plans) one('plans', () => appPagePlans_());
+  if (planId) want.forEach(k => { if (APP_PAGE_PARTS[k]) one(k, () => APP_PAGE_PARTS[k](ctx, planId)); });
+  return out;
 }
