@@ -126,9 +126,9 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   env.as(OWNER);
   assert.equal(plan(env, planA).purpose, '');
   // 承認待ちの公式版がある計画は、測る専用にしない（承認か却下が先）
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: planA } });
   assert.throws(() => task(env, { action: 'setPlanPurpose', planId: planA, purpose: 'MEASURE' }), /承認待ちの公式版があります/);
-  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'REJECTED', note: '見直す', rowVersion: sub.version.rowVersion } });
+  env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'REJECTED', note: '見直す', rowVersion: sub.version.rowVersion } });
   assert.equal(task(env, { action: 'setPlanPurpose', planId: planA, purpose: 'MEASURE' }).result.changed, true, '却下の後は付けられる');
   // 書きかけの保存があるときは止める
   env.props.APP_WRITE_JOURNAL = JSON.stringify({ id: 'JNL-x', fileId: '', label: 'x', planId: planA, at: '' });
@@ -156,7 +156,7 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   // すでに測る専用の計画の付け直し（同じ印）は数に関係なく通る
   assert.equal(task(env, { action: 'setPlanPurpose', planId: ids[0], purpose: 'MEASURE' }).result.changed, false);
   // 保管をやめた計画は数えない
-  env.run(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${ids[1]}' }, { state: 'ARCHIVED' }, undefined, 'test'))`);
+  env.run(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${ids[1]}' }, { state: 'ARCHIVED' }, APP_ROW_UNCHECKED, 'test'))`);
   assert.equal(task(env, { action: 'setPlanPurpose', planId: ids[5], purpose: 'MEASURE' }).result.changed, true);
 }
 
@@ -174,10 +174,10 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
     /測る専用の計画なので、予算は立てません。/);
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.RUN', payload: { planId: planM, action: 'AI.RESEARCH' } } }), /測る専用の計画なので、市場は調べません/);
   assert.equal(env.call('appJobList_()').length, jobs0, '待ち行列に入れない');
-  assert.throws(() => env.call('apiVersionSubmit(__in)', { __in: { planId: planM } }), new RegExp(VERSION_REFUSED));
+  assert.throws(() => env.call('appTestVersionSubmit_(__in)', { __in: { planId: planM } }), new RegExp(VERSION_REFUSED));
   assert.equal(env.table('PLAN_VERSIONS').length, 0, '公式版を書かない');
   // 予算を立てる計画は今までどおり（公式版を出せる）
-  assert.equal(env.call('apiVersionSubmit(__in)', { __in: { planId: planA } }).version.no, 1);
+  assert.equal(env.call('appTestVersionSubmit_(__in)', { __in: { planId: planA } }).version.no, 1);
   // 公式版の画面: 出せない（can.submit が false）・印を返す
   const vm1 = env.call('apiVersionList(__in)', { __in: { planId: planM } });
   assert.deepEqual([vm1.measure, vm1.can.submit, vm1.can.approve], [true, false, true]);
@@ -197,9 +197,10 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   assert.deepEqual([paused(viewA, 'BUDGET.SAVE'), paused(viewA, 'AI.RESEARCH')], ['', '']);
   // 予算を立てる計画の予算の保存を待ち行列に入れた後で、測る専用の印が付いた: 動かす前に断る（何も書かない）
   const out0 = JSON.stringify(env.table('ENG_ROWS').filter((r) => r.plan_id === planA));
-  const j = env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.EDIT', payload: { planId: planA, action: 'BUDGET.SAVE', args: { rows: [{ row: 29, adopted: 5, uplift: '' }] } } } });
+  const j = env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.EDIT', payload: { planId: planA, action: 'BUDGET.SAVE', args: { rows: [{ row: 29, adopted: 5, uplift: '' }] },
+    inputHash: env.run('appTestPlanHash_(__p)', { __p: planA }) } } });
   if (j.status === 'QUEUED') {
-    env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { purpose: 'MEASURE' }, undefined, 'test'))`);
+    env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, 'test'))`);
     const st = finish(env, j.jobId);
     assert.equal(st.status, 'FAILED');
     assert.equal(st.error, R['BUDGET.SAVE'], '途中で印が付いた計画も止める');
@@ -255,8 +256,8 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   const past = env.run('appFy_(new Date())') - 1;
   const planA = env.seedPlan(env.makeBook('A', planBook('テスト製薬', past)));
   const planM = env.seedPlan(env.makeBook('M', planBook('テスト薬品', past)));
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
-  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: planA } });
+  env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   assert.match(env.task('yearPreview(__in)', { __in: { fy: past } }).reason, /公式版のない計画/, '印の前は締められない');
   task(env, { action: 'setPlanPurpose', planId: planM, purpose: 'MEASURE' });
   const pv = env.task('yearPreview(__in)', { __in: { fy: past } });

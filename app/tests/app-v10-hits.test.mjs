@@ -288,10 +288,10 @@ seedA4(E1, P1);
   const PA = E4.seedPlan(book('甲製薬', done));      // 実績を取り込んだ予算の計画
   const PM = E4.seedPlan(book('乙製薬', done));      // 測る専用の計画（外す）
   const PN = E4.seedPlan(book('丙製薬', null));      // 実績の無い計画（外す）
-  E4.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${PM}' }, { purpose: 'MEASURE' }, undefined, '${OWNER}'))`);
+  E4.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${PM}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, '${OWNER}'))`);
   for (const p of [PA, PN]) {
-    const sub = E4.call('apiVersionSubmit(__in)', { __in: { planId: p } });
-    E4.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+    const sub = E4.call('appTestVersionSubmit_(__in)', { __in: { planId: p } });
+    E4.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   }
   let pv = E4.task('yearPreview(__in)', { __in: { fy } });
   assert.equal(pv.canClose, false);

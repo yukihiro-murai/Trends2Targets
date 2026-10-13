@@ -79,8 +79,8 @@ function yearBook(env, { evaluated = false, skip = [FEB] } = {}) {
 }
 const b2 = (env, planId) => { const st = env.runJob('PLAN.RUN', { planId, action: 'EVAL.REPORT' }); assert.equal(st.status, 'DONE', st.error); };
 const approve = (env, planId) => {
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId } });
-  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId } });
+  env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
 };
 const preview = (env) => env.task('yearPreview(__in)', { __in: { fy: FYP } });
 const q4Markers = (env, planId) => env.table('HIT_RECORDS').filter((r) => r.plan_id === planId && r.source_kind === 'QUARTER' && r.quarter === 'FY' + FYP + '-Q4');
@@ -224,11 +224,11 @@ const keyAt = (i) => (i === 0 ? K : K + '#' + (i + 1));
   st = saveNew(E, Y, 'product', [{ person: '佐藤', product: '製品R', ym: ym(7), step: '+1%', reason: '前の画面' }], { flag: false });
   assert.equal(st.status, 'DONE', st.error);
   assert.deepEqual(added(E, Y, n0).map((r) => [r.change, r.row_key, tidy(r.before_json).product]), [['CHANGE', 'product|佐藤|製品R|' + ym(7), '製品Q']], '前の画面は同じ位置で組む');
-  // 入力のハッシュを確かめない保存は、fromRows があっても出どころを使わない
+  // 入力のハッシュの無い保存は、始める前に断る（2026-10-13 から必須。前は確かめずに書き、fromRows があっても出どころを使わなかった）
   n0 = countOf(E, Y);
-  st = saveNew(E, Y, 'product', [{ person: '鷹野', product: '製品S', ym: ym(8), step: '+1%', reason: 'ハッシュなし' }], { hash: null });
-  assert.equal(st.status, 'DONE', st.error);
-  assert.deepEqual(added(E, Y, n0).map((r) => r.change), ['CHANGE']);
+  assert.throws(() => E.call('apiStartJob(__in)', { __in: { kind: 'PLAN.EDIT', payload: { planId: Y, action: 'INPUT.SAVE',
+    args: { kind: 'product', rows: [{ person: '鷹野', product: '製品S', ym: ym(8), step: '+1%', reason: 'ハッシュなし' }], fromRows: true } } } }), /画面が古いので、読み直してから/);
+  assert.equal(countOf(E, Y), n0, '何も書かない');
   // 道具: fromRows は記録にだけ使い、旧来に渡す中身から外す
   const take = E.call('(() => { const i = { action: "INPUT.SAVE" }; const out = appInputLogTake_({ kind: "product", rows: [{ person: "a" }], fromRows: true }, i); return { out: out, from: i.from }; })()');
   assert.deepEqual(take, { out: { kind: 'product', rows: [{ person: 'a' }] }, from: { kind: 'product', bySeq: {} } });

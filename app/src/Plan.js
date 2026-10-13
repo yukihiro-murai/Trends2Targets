@@ -480,7 +480,8 @@ const APP_EDIT_WRITE_DEADLINE_MS = 4 * 60 * 1000;
 function appPlanEdit_(ctx, p) {
   const act = appPlanAction_(p.action, 'edit');
   const plan = appPlanOf_(p.planId);
-  // hashChecked: 画面が開いたときの入力のハッシュを渡した保存（下で一致を確かめる）。行の出どころ（fromRow）は、そのときだけ使う
+  // hashChecked: 画面が開いたときの入力のハッシュを渡した保存（下で一致を確かめる）。行の出どころ（fromRow）は、そのときだけ使う。
+  // 2026-10-13 からハッシュは必須（無ければ下で止める。始める前にも appStartJob_ が断る）なので、いつも true
   const inLog = { action: p.action, hashChecked: !!p.inputHash };
   const args = appInputLogTake_(appPlanCheckArgs_(appJobArgs_(p)), inLog);   // 自信・行の出どころ・保存の理由は入力の記録にだけ使う（旧来の表に渡さない。InputLog.js）
   // 予算の決め方・確率・割り振り（版 11 の下書きにだけ使う。旧来の webSaveBudget には rows だけを渡す）。だめな値なら何も書かずに止める
@@ -491,7 +492,8 @@ function appPlanEdit_(ctx, p) {
     appJournalRecover_(ctx);   // 前の保存が途中で止まっていれば、先に書き終える
     const stored = appStoredHashes_(plan.plan_id);
     const inputHash = appPlanInputHash_(plan.plan_id);
-    if (p.inputHash && p.inputHash !== inputHash) {
+    if (!p.inputHash) throw new Error(APP_STALE_MSG);   // 省くと後から保存した方が勝つ（画面は必ず渡す。所有者の操作は今の指紋を読んで渡す）
+    if (p.inputHash !== inputHash) {
       throw new Error('画面を開いた後に、ほかの人の操作でデータが変わりました。画面を開き直して、もう一度入力してください。');
     }
     const scratch = appWorkScratch_(plan);

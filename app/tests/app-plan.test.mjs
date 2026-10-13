@@ -374,7 +374,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } });
   const verHtml = vm.runInContext(`S.fc.ver = __ver; S.fc.tab = 'version'; viewForecast()`, ui);
   assert.match(verHtml, /公式版の最終予算[\s\S]*今の内容を公式版として出す[\s\S]*まだ版がありません/);
-  env.call('apiVersionSubmit(__in)', { __in: { planId, note: 'テスト' } });
+  env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'テスト' } });
   ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } });
   const verHtml2 = vm.runInContext(`S.fc.ver = __ver; S.fc.verCmp = __ver.versions[0].versionId; viewForecast()`, ui);
   assert.match(verHtml2, /承認待ち（v1）[\s\S]*v1 と今の比べ/);

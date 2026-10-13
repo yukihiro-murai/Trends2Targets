@@ -578,7 +578,7 @@ function appPatchRow_(name, keyVals, patch, actor) {
   const cur = appReadTable_(name).filter(r => def.key.every(k => r[k] === keyVals[k]))[0];
   if (!cur) throw new Error('対象が見つかりません（' + name + '）。');
   if (Object.keys(patch).every(k => String(cur[k]) === String(patch[k]))) return false;
-  appUpdateByKey_(name, keyVals, patch, undefined, actor || '');
+  appUpdateByKey_(name, keyVals, patch, APP_ROW_UNCHECKED, actor || '');
   return true;
 }
 
@@ -609,16 +609,25 @@ function appStripRow_(o) {
 }
 
 /**
- * キーで 1 行を更新する。expectedVersion を渡すと、読み込んだ後にほかの人が更新していたら止める（楽観ロック）。
+ * 行の版を確かめずに書き換える印（appUpdateByKey_ の expectedVersion）。仕組みの中で、同じロックの中で読んだ行を書き直すときだけ渡す
+ * （_SCHEMA の版・同じ値なら書かない直し）。画面や所有者の操作から渡る値（JSON）は、同じ形でも別のものなので、この印にはならない
+ */
+const APP_ROW_UNCHECKED = Object.freeze({ unchecked: true });
+/** 今ある行・計画を書き換える操作に、楽観ロックの印（行の版 rowVersion・画面を開いたときの指紋 inputHash）が無いときの文（2026-10-13 から必須） */
+const APP_STALE_MSG = '画面が古いので、読み直してからもう一度操作してください。';
+
+/**
+ * キーで 1 行を更新する。expectedVersion（読み込んだときの行の版）が要る: 読み込んだ後にほかの人が更新していたら止める（楽観ロック）。
+ * 2026-10-13 から必須（省くと後から書いた方が勝っていた）。無ければ APP_STALE_MSG で止める。仕組みの中の書き直しだけ APP_ROW_UNCHECKED を渡す。
  * 返り値は { before, after }（監査の変更前後に使う）
  */
 function appUpdateByKey_(name, keyVals, patch, expectedVersion, actor) {
   const def = APP_TABLES[name];
   const cur = appReadTable_(name).filter(r => def.key.every(k => r[k] === keyVals[k]))[0];
   if (!cur) throw new Error('対象が見つかりません（' + name + '）。');
-  if (expectedVersion !== undefined && expectedVersion !== null && expectedVersion !== '' &&
-      Number(expectedVersion) !== Number(cur.row_version)) {
-    throw new Error('ほかの人が先に更新しました。画面を読み直してから、もう一度保存してください。');
+  if (expectedVersion !== APP_ROW_UNCHECKED) {
+    if (expectedVersion === undefined || expectedVersion === null || expectedVersion === '') throw new Error(APP_STALE_MSG);
+    if (Number(expectedVersion) !== Number(cur.row_version)) throw new Error('ほかの人が先に更新しました。画面を読み直してから、もう一度保存してください。');
   }
   const after = Object.assign(appStripRow_(cur), patch, {
     updated_at: appNowIso_(), updated_by: actor, row_version: Number(cur.row_version || 0) + 1

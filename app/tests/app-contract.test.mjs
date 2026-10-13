@@ -326,6 +326,56 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.equal(env.state.lockHeld, false, '失敗してもロックは返す');
 }
 
+// ==== 7b. 行の版は、今ある行を書き換える操作で必須（2026-10-13。省くと後から書いた方が勝っていた）。新しく作る操作には要らない。
+//          所有者の操作（エディタから 1 人で動かす）は、頼みに無ければ今の版を読んで渡す ====
+{
+  const env = setUpEnv();
+  const ctx = `{ actor: '${OWNER}', user: { email: '${OWNER}', owner: '${OWNER}', domain: 'bigm2y.com', isOwner: true }, roles: [{ role: 'ADMIN', scope_type: 'ALL', client_id: '' }] }`;
+  const inner = (fn, input) => () => env.run(`${fn}(${ctx}, __in)`, { __in: input });
+  const STALE = /画面が古いので、読み直してからもう一度操作してください。/;
+  // 新しく作る: 版は要らない
+  env.run(`appSaveMember_(${ctx}, { email: '${MEMBER}', displayName: 'A' })`);
+  const cl = env.call(`appSaveClient_(${ctx}, { clientName: 'テスト製薬' })`).client;
+  const role = env.call(`appGrantRole_(${ctx}, { email: '${MEMBER}', role: 'PLANNER', scopeType: 'CLIENT', clientId: '${cl.client_id}' })`).role;
+  env.call(`appSaveClientName_(${ctx}, { clientId: '${cl.client_id}', displayName: 'テスト' })`);
+  const link = env.call(`appLinkPerson_(${ctx}, { personName: '鷹野', email: '${MEMBER}' })`).link;
+  const before = JSON.stringify(['MEMBERS', 'CLIENTS', 'ROLES', 'CLIENT_NAMES', 'PERSON_LINKS'].map((t) => env.table(t)));
+  // 書き換える: 版が無ければ（undefined・null・空）止める。何も書かない
+  for (const rv of [undefined, null, '']) {
+    assert.throws(inner('appSaveMember_', { email: MEMBER, displayName: 'B', rowVersion: rv }), STALE, 'メンバー ' + rv);
+    assert.throws(inner('appRevokeRole_', { roleId: role.role_id, rowVersion: rv }), STALE, '役割 ' + rv);
+    assert.throws(inner('appSaveClientName_', { clientId: cl.client_id, displayName: 'テスト2', rowVersion: rv }), STALE, '表示名 ' + rv);
+    assert.throws(inner('appSaveClient_', { clientId: cl.client_id, clientName: 'テスト製薬', rowVersion: rv }), STALE, 'メーカー ' + rv);
+    assert.throws(inner('appUnlinkPerson_', { linkId: link.link_id, rowVersion: rv }), STALE, 'つなぎ ' + rv);
+  }
+  assert.equal(JSON.stringify(['MEMBERS', 'CLIENTS', 'ROLES', 'CLIENT_NAMES', 'PERSON_LINKS'].map((t) => env.table(t))), before, '何も書かない');
+  // 書き換える仕組みの印は、画面から渡る同じ形の値では効かない
+  assert.throws(inner('appSaveMember_', { email: MEMBER, displayName: 'B', rowVersion: { unchecked: true } }), /ほかの人が先に更新しました/);
+  assert.throws(() => env.run(`appWithLock_(() => appUpdateByKey_('MEMBERS', { email: '${MEMBER}' }, { note: 'x' }, undefined, 'test'))`), STALE, '保存の層でも必須');
+  env.run(`appWithLock_(() => appUpdateByKey_('MEMBERS', { email: '${MEMBER}' }, { note: '仕組み' }, APP_ROW_UNCHECKED, 'test'))`);
+  assert.equal(env.table('MEMBERS').find((m) => m.email === MEMBER).note, '仕組み', '仕組みの中の書き直しは印で通す');
+  // 自動に戻した表示名（空の行）も、一覧に版を出す（その行を書き直すので要る）
+  env.call(`appSaveClientName_(${ctx}, { clientId: '${cl.client_id}', displayName: '', rowVersion: 1 })`);
+  const dir = env.task('listDirectory()');
+  const c = dir.clients.find((x) => x.client_id === cl.client_id);
+  assert.deepEqual([c.display_auto, c.display_row_version], [true, 2], '自動に戻した行の版');
+  // 所有者の操作: 頼みに版が無ければ、今の版を読んで渡す（エディタの操作は壊れない）。頼みに入れた古い版は断る
+  const m0 = env.table('MEMBERS').find((m) => m.email === MEMBER).row_version;
+  assert.equal(env.task(`saveMember({ email: '${MEMBER}', displayName: 'C' })`).member.display_name, 'C');
+  assert.equal(String(env.table('MEMBERS').find((m) => m.email === MEMBER).row_version), String(Number(m0) + 1));
+  assert.throws(() => env.task(`saveMember({ email: '${MEMBER}', displayName: 'D', rowVersion: ${m0} })`), /ほかの人が先に更新しました/, '古い版は断る');
+  env.task(`saveClientName({ clientId: '${cl.client_id}', displayName: 'テスト3' })`);
+  assert.equal(env.table('CLIENT_NAMES').find((r) => r.client_id === cl.client_id).display_name, 'テスト3');
+  env.task(`revokeRole({ roleId: '${role.role_id}' })`);
+  assert.equal(env.table('ROLES').find((r) => r.role_id === role.role_id).is_active, 'FALSE');
+  env.task(`unlinkPerson({ linkId: '${link.link_id}' })`);
+  assert.equal(env.table('PERSON_LINKS').find((r) => r.link_id === link.link_id).is_active, 'FALSE');
+  const startOf = (a) => JSON.parse(env.audit().filter((x) => x.action === a && x.phase === 'START').slice(-1)[0].detail_json);
+  assert.equal(startOf('ROLE.REVOKE').rowVersion, 1, '読んで渡した版は記録の入力に残る');
+  // メーカーを直すのは、所有者の操作でも全部の項目と版が要る（前からの決まり）
+  assert.throws(() => env.task(`saveClient({ clientId: '${cl.client_id}', clientName: 'テスト製薬', zacCode: '', isActive: true, note: '' })`), /足りない項目: rowVersion/);
+}
+
 // ==== 8. クライアント（表記ゆれを吸収して重複を防ぐ） ====
 {
   const env = setUpEnv();

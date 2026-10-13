@@ -452,7 +452,7 @@ reachOn();
   assert.doesNotMatch(visible(h), CODES);
   tipsOf(h).forEach((t) => assert.doesNotMatch(t, /SHADOW|LIVE|closedMonths|tau\b/));
   // サーバーの一覧のまま: 前のサーバー（届く見込みを返さない）は今までどおり。版 11 のサーバーは出したときの見込み（この計画は着地見込みが無いので「-」）
-  env.call('apiVersionSubmit(__in)', { __in: { planId: X, note: 'テスト' } });
+  env.call('appTestVersionSubmit_(__in)', { __in: { planId: X, note: 'テスト' } });
   const rl = env.call('apiVersionList(__in)', { __in: { planId: X } });
   const real = tab(rl);
   assert.match(real, /承認待ち（v1）/);

@@ -57,8 +57,8 @@ function v9Env({ closePast = false } = {}) {
     .forEach((r, i) => runs.getRange(2 + i, 1, 1, r.length).setNumberFormat('@').setValues([r]));
   env.run('APP_STORE_CACHE_ = {}');
   if (closePast) {
-    const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
-    env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+    const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: planA } });
+    env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
     const pv = env.task('yearPreview(__in)', { __in: { fy: past } });
     assert.equal(pv.canClose, true, JSON.stringify(pv));
     const st = env.runJob('YEAR.CLOSE', { fy: past, inputHash: pv.inputHash });
@@ -127,7 +127,7 @@ function checkMigrated(env, before) {
   // 列を足す前の表も読める（足した列は空）。書くと止まる
   const plans0 = env.run('appReadTable_("PLANS")').map((p) => ({ id: p.plan_id, purpose: p.purpose }));
   assert.ok(plans0.length === 2 && plans0.every((p) => p.purpose === ''), '列を足す前の表は、足した列を空で読む');
-  assert.throws(() => env.run(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { note: 'x' }, undefined, 'test'))`), /移行がまだ/);
+  assert.throws(() => env.run(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { note: 'x' }, APP_ROW_UNCHECKED, 'test'))`), /移行がまだ/);
   // 一度だけの写しを数える（移行が済んだ後に 1 回だけ動く）
   env.run('__bf = 0; appV10BackfillInputLog_ = function(ctx) { __bf++; return { rows: 2 }; };');
   // 版を上げた後の最初の操作
@@ -221,7 +221,7 @@ function checkMigrated(env, before) {
   const h = env.task('health()');
   assert.deepEqual(h.tables.filter((t) => t.pending).map((t) => t.name), ['PLANS', 'FORECAST_RUNS']);
   assert.deepEqual(h.tables.filter((t) => t.missing).map((t) => t.name), NEW_TABLES);
-  assert.throws(() => env.run(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { note: 'x' }, undefined, 'test'))`), /移行がまだ/, '列を足す前の表には書かない');
+  assert.throws(() => env.run(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { note: 'x' }, APP_ROW_UNCHECKED, 'test'))`), /移行がまだ/, '列を足す前の表には書かない');
   assert.deepEqual(env.call(`appLogOps_('INPUT_LOG', [{ plan_id: '${planA}', log_id: 'INL-1' }])`), [], '版がそろう前は記録を足さない');
   // 取れない間は、操作のたびに複製を試さない（10 分あける）
   env.props.APP_ARCHIVE_FOLDER_ID = archiveId;
@@ -236,8 +236,8 @@ function checkMigrated(env, before) {
   assert.equal(env.props.APP_MIGRATE_BACKUP_FAILED_AT, undefined);
   assert.equal(env.run('__bf'), 1);
   // 移行の前に読んだ控え（列を足す前）を持つ実行も、ロックを取ると見出しを読み直す。足した列に入った値を空で書き戻さない
-  env.run(`APP_STORE_CACHE_ = {}; appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { purpose: 'MEASURE' }, undefined, 'test'));`);
-  env.run(`APP_STORE_CACHE_ = __stale; appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { note: '移行の後' }, undefined, 'test'));`);
+  env.run(`APP_STORE_CACHE_ = {}; appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, 'test'));`);
+  env.run(`APP_STORE_CACHE_ = __stale; appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planA}' }, { note: '移行の後' }, APP_ROW_UNCHECKED, 'test'));`);
   const row = env.data().getSheetByName('PLANS').rows.find((r) => r && r[0] === planA);
   assert.equal(row.length, V9.PLANS.length + 1, '今の列の数で書く');
   assert.equal(row[V9.PLANS.indexOf('note')], '移行の後');

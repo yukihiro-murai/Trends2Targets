@@ -182,7 +182,7 @@ function appMigrateSchemaRow_(ctx, name) {
   const patch = { schema_version: APP_SCHEMA_VERSION, columns_hash: appColumnsHash_(name), migrated_at: appNowIso_(), migrated_by: ctx.actor };
   if (!cur) { appInsertRows_('_SCHEMA', [Object.assign({ table: name }, patch)]); return; }
   if (cur.columns_hash === patch.columns_hash && Number(cur.schema_version) === APP_SCHEMA_VERSION) return;
-  appUpdateByKey_('_SCHEMA', { table: name }, patch, undefined, ctx.actor);
+  appUpdateByKey_('_SCHEMA', { table: name }, patch, APP_ROW_UNCHECKED, ctx.actor);
 }
 
 /**

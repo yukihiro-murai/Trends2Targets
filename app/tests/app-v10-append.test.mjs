@@ -24,8 +24,8 @@ const past = currentFy - 1;
 const planA = env.seedPlan(env.makeBook('A', planBook('テスト製薬', past)));        // 締める年度
 const planB = env.seedPlan(env.makeBook('B', planBook('テスト薬品', currentFy)));   // 今の年度
 {
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
-  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: planA } });
+  env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   const pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(env.runJob('YEAR.CLOSE', { fy: past, inputHash: pv.inputHash }).status, 'DONE');
 }

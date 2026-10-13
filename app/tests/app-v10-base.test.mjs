@@ -221,15 +221,15 @@ function planBook(client, fy) {
   const past = env.run('appFy_(new Date())') - 1;
   const planA = env.seedPlan(env.makeBook('A', planBook('テスト製薬', past)));
   const planM = env.seedPlan(env.makeBook('M', planBook('テスト薬品', past)));
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planA } });
-  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: planA } });
+  env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   let pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(pv.canClose, false);
   assert.match(pv.reason, /公式版のない計画/);
   assert.equal(env.call('appPlanIsMeasure_({ purpose: "MEASURE" })'), true);
   assert.equal(env.call('appPlanIsMeasure_({ purpose: "" })'), false);
   assert.equal(env.call('APP_MEASURE_PLAN_MAX'), 5);
-  env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planM}' }, { purpose: 'MEASURE' }, undefined, '${OWNER}'))`);
+  env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planM}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, '${OWNER}'))`);
   pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(pv.canClose, true, '測る専用の計画は公式版が無くても締められる: ' + pv.reason);
   assert.equal(pv.planCount, 2, '年度の控えには入る');

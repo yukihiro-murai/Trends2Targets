@@ -332,8 +332,8 @@ let planId;
   };
   for (const c of ['過去製薬', '過去薬品']) {
     const id = env.seedPlan(planBook(c, past));
-    const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: id } });
-    env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+    const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: id } });
+    env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   }
   const pv = ok(env, { action: 'yearPreview', fy: past });
   assert.equal(pv.rec.result.canClose, true, JSON.stringify(pv.rec.result));

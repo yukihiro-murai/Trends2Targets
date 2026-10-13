@@ -360,9 +360,9 @@ const redactedBasis = (full) => {
     __r: [Object.assign({}, run0, { run_id: 'FR-T6', started_at: T2, finished_at: T3, actor_email: APPROVER })] });
   // 公式版: 予算策定担当が出し、承認者が承認した
   env.as(PLANNER_ALL);
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: t.planId, inputHash: env.call('apiVersionList(__in)', { __in: { planId: t.planId } }).inputHash } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: t.planId, inputHash: env.call('apiVersionList(__in)', { __in: { planId: t.planId } }).inputHash } });
   env.as(APPROVER);
-  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   env.as(OWNER);
   const read = (email) => {
     env.as(email);

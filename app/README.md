@@ -315,9 +315,9 @@ Trends2Targets_System/
 
 - 中で使う関数・権限の判定・入力の確かめは、画面の操作と同じです。書く操作は画面と同じ操作の名前（`SETTING.SAVE`・`ROLE.GRANT`・`CLIENT.SAVE` など）で操作の記録に残り、理由の欄に「OWNER_TASK（エディタから）」と入ります。
 - `roleId`・`clientId`・`rowVersion` は `listDirectory`、`planId` は `listPlans`、ZAC の名前は `planCandidates` の結果から写します。
-- `rowVersion` は、ほかの変更を上書きしないための行の版です。空にすると確かめずに書くので、必ず `listDirectory` の結果から写してください。
+- `rowVersion` は、ほかの変更を上書きしないための行の版です。今ある行を書き換える操作では中の関数が必ず確かめます（2026-10-13 から。無いと「画面が古いので、読み直してからもう一度操作してください。」で止まる）。エディタからの頼みで省くと、実行したときの今の版を読んで渡します（`saveMember`・`revokeRole`・`saveClientName`・`unlinkPerson`。`saveClient` で直すときは省けません）。確かめてから書きたいときは `listDirectory` の結果から写します（写した版より新しくなっていれば止まる）。
   - `saveMember` は `members[].rowVersion`、`revokeRole` は `roles[].rowVersion` を写します。
-  - `saveClientName` は `clients[].rowVersion`（表示名の行の版）を写します。まだ表示名を決めたことがないメーカーだけ空（`""`）です。
+  - `saveClientName` は `clients[].rowVersion`（表示名の行の版。自動の名前に戻した行にもある）を写します。まだ表示名を決めたことがないメーカーだけ空（`""`）です。
   - `saveClient` は `clients[].clientRowVersion`（メーカーの行の版）を写します。
 - `saveClient` は、`clientId` を省くとメーカーを足し、`clientId` を入れると直します。直すときは全部の項目（`clientName`・`zacCode`・`isActive`・`note`・`rowVersion`）が要ります（省いた項目が空や有効に戻らないよう、足りなければ何もせずに止まります）。今の値は `listDirectory` の `clients[]`（`zacName`・`zacCode`・`active`・`note`）から写し、変えたい項目だけ変えます。`isActive` は `true` か `false`（`""` で囲まない）です。`clientName` は売上の取り込みで ZAC と照らし合わせる名前なので、画面に出す名前を変えるときは `saveClientName` を使います。
 - `createPlan`・`yearPreview`・`yearClose` には年度 `fy`（4 桁の数。例 `2027`）が要ります。無い・4 桁でないときは、何も始めずに止まります。
@@ -370,7 +370,7 @@ Trends2Targets_System/
 - `reason`（理由）は必ず入れます（200 字まで。`CALIBRATION_STATE` の `note` と操作の記録に残ります）。
 - 変わった項目ごとに `CALIBRATION_HISTORY` へ 1 行を足します（月次の自動学習・見直し案の反映と同じ形。`review_id` は `OWNER-APPROVED`、`changed_by` は所有者）。前の履歴は消しません。戻すときは、履歴の `old_value` をもう一度 `setCalibration` で書きます。
 - `withdrawPendingReview` を `true` にすると、一番新しい四半期の見直し案のどの案もまだ反映していなければ取り下げます。判断が保留・却下・承認でも（反映の操作 C-3 を保留のまま動かした後でも）、反映していなければ取り下げます（判断し直して C-3 をもう一度動かせば反映できてしまうためです）。`QUARTERLY_REVIEW_LOG` の行の判断を「取り下げ」にし（判断した日時と人を入れます。`applied` は 0 のまま。行は消しません）、計画の画面でも取り下げた案として出し、承認した見直し案の反映（C-3）でも適用されなくなります（後から判断を保存し直しても同じです）。前の判断と日時は結果の `withdrawn.before` に残ります。案を 1 つでも反映した見直し案と、もう取り下げた見直し案には何もしません（`withdrawn` が `null`）。
-- 先に `calibrationPreview` で今の値と取り下げる見直し案（`pending`。今の判断 `decisions` と判断の日時 `decidedAt` も出ます。取り下げるものが無ければ `null`）を確かめ、出た `inputHash` を渡すと、確かめた後に計画が変わっていれば書かずに止まります（省くと確かめずに書きます）。
+- 先に `calibrationPreview` で今の値と取り下げる見直し案（`pending`。今の判断 `decisions` と判断の日時 `decidedAt` も出ます。取り下げるものが無ければ `null`）を確かめ、出た `inputHash` を渡すと、確かめた後に計画が変わっていれば書かずに止まります（省くと、実行したときの今の指紋を読んで渡します。計画への保存は 2026-10-13 から指紋が必須。`setPeople` も同じ）。
 - 変わる値が無ければ何も書きません（同じ頼みを 2 度動かしても、履歴は増えません）。締めた年度の計画には書けません。所有者だけの操作です（管理者の役割があっても、ほかの人は画面からも始められません）。
 - 結果（`jobStatus` の `result.result`）に、前と後の値（`changed`）・変えなかった項目（`unchanged`）・取り下げた見直し案（`withdrawn`）・書いた後の値の注意（`warnings`）が出ます。
 - **年度の数字には掛かりません**: 旧来の予測（A-9）は、係数と暦月の補正を月の P10/P50/P90 にだけ掛け、年度の P10/P50/P90（ホームの中心・公式版の中心・予測の記録の年間）には掛けません。係数が 1 以外か暦月の補正があると、年度の数字と月の合計がずれます。そのときは `calibrationPreview` と `setCalibration` の `warnings` にそう出ます（書くのは止めません）。
@@ -433,6 +433,7 @@ Trends2Targets_System/
 ## コードの約束
 
 - 公開する関数（ブラウザから `google.script.run` で呼べる関数）は `Api.js` の `doGet`・`api*`・`trigger*` だけ。どれも本体は `return api_(...)` だけにし、本人確認 → 役割 → 記録つき実行 → エラーの記録 を必ず通す。それ以外の関数は名前の末尾を `_` にする。`trigger*` は、このプロジェクトのその入口のトリガー（`triggerRunJob` は待ち行列の処理のトリガー）の UID のときだけ受け付けて所有者として動かす。管理者や所有者がブラウザから呼んでも断る（2026-10-13。前は管理者なら呼べ、毎日の処理の知らせのメールや AI 調査を動かせた）。
+- 今ある行・計画を書き換える操作は、楽観ロックの印が必須（2026-10-13。省くと後から書いた方が勝っていた）: 行の版 `rowVersion`（`Store.js` の `appUpdateByKey_`。仕組みの中の書き直しだけ `APP_ROW_UNCHECKED`）・計画への保存（`PLAN.EDIT`）と公式版を出す（`VERSION.SUBMIT`）は開いたときの指紋 `inputHash`・判断（`VERSION.DECIDE`）は版の `rowVersion`。新しく作る操作には要らない。無いときは「画面が古いので、読み直してからもう一度操作してください。」。
 - 書き込みは開始を記録できなければ実行しない（fail-closed）。記録はハッシュの鎖でつなぎ、所有者が `apiOwnerTask` の `health`（今月）・`verifyAudit`（全部の月）で改ざんを点検できる。
 - 表の列は `Schema.js` だけで決める。データ本体の 1 行目が定義と違えば書き込みを止める。列を変えるときは版を上げて移行する（列は後ろに足すだけ。`APP_ADDED_COLUMNS` に書くと、最初の操作が移す）。
 - `Assets.js` は自動生成（`cd ../assets/characters/src && python3 build.py`）。手で編集しない。

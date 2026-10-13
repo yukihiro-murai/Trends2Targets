@@ -17,12 +17,15 @@ function appListDirectory_(ctx) {
   const members = appReadTable_('MEMBERS').map(appStripRow_);
   const roles = appReadTable_('ROLES').map(appStripRow_);
   const ov = appClientNameOverrides_();
+  // 表示名の行の版（saveClientName の rowVersion）は、自動に戻した空の行にもある（その行を書き直すので要る）
+  const nameRows = {};
+  try { appReadTable_('CLIENT_NAMES').forEach(r => { nameRows[r.client_id] = r; }); } catch (e) { if (!/表がありません/.test(String(e && e.message))) throw e; }
   const clients = appReadTable_('CLIENTS').map(appStripRow_).map(c => Object.assign(c, { display_name: ov[c.client_id] ? ov[c.client_id].display_name : appClientDisplayName_(c.client_name),
-    display_auto: !ov[c.client_id], display_row_version: ov[c.client_id] ? ov[c.client_id].row_version : '' }));
+    display_auto: !ov[c.client_id], display_row_version: nameRows[c.client_id] ? nameRows[c.client_id].row_version : '' }));
   return { members: members, roles: roles, clients: clients, owner: ctx.user.owner, grantable: APP_GRANTABLE_ROLES, roleLabels: APP_ROLE_LABELS };
 }
 
-/** メンバーを足す・直す。既存なら rowVersion で楽観ロック */
+/** メンバーを足す・直す。既存なら rowVersion が要る（楽観ロック。2026-10-13 から必須） */
 function appSaveMember_(ctx, input) {
   const email = appNormalizeEmail_(input && input.email);
   appRequireInternalEmail_(ctx, email);
@@ -75,7 +78,7 @@ function appGrantRole_(ctx, input) {
   });
 }
 
-/** 役割を外す（行は残して無効にする） */
+/** 役割を外す（行は残して無効にする）。rowVersion が要る */
 function appRevokeRole_(ctx, input) {
   const roleId = String(input && input.roleId || '');
   return appWithLock_(() => {
@@ -123,7 +126,7 @@ function appClientNameMap_() {
   return out;
 }
 
-/** 画面に出す名前を決める（空にすると自動の名前に戻す） */
+/** 画面に出す名前を決める（空にすると自動の名前に戻す）。前に決めた行があれば rowVersion が要る（自動に戻した空の行も） */
 function appSaveClientName_(ctx, input) {
   const id = String(input && input.clientId || '');
   const name = String(input && input.displayName || '').normalize('NFKC').replace(/[\s\u3000]+/g, ' ').trim().slice(0, 100);
@@ -142,7 +145,7 @@ function appSaveClientName_(ctx, input) {
   });
 }
 
-/** クライアントを足す・直す */
+/** クライアントを足す・直す。直すとき（clientId あり）は rowVersion が要る */
 function appSaveClient_(ctx, input) {
   const name = String(input && input.clientName || '').trim();
   if (!name) throw new Error('メーカー名を入力してください。');

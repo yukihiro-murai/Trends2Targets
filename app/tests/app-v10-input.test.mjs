@@ -249,8 +249,8 @@ let planId;
   // 写しは止めておき、前の年度を締めてから動かす（締めた年度の計画は飛ばす）
   e2.props.APP_BACKFILLS = JSON.stringify({ done: { appV10BackfillInputLog_: { at: 'x', v: 10, rows: 0 } }, failed: {} });
   const past = e2.seedPlan(book('前の製薬', fy - 1));
-  const sub = e2.call('apiVersionSubmit(__in)', { __in: { planId: past } });
-  e2.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const sub = e2.call('appTestVersionSubmit_(__in)', { __in: { planId: past } });
+  e2.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   const pv = e2.task('yearPreview(__in)', { __in: { fy: fy - 1 } });
   assert.equal(e2.runJob('YEAR.CLOSE', { fy: fy - 1, inputHash: pv.inputHash }).status, 'DONE');
   const cur = e2.seedPlan(book('今の製薬', fy));

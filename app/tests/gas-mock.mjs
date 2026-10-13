@@ -285,6 +285,9 @@ export function extractFunction(src, name) {
  * テストだけで使う関数（アプリには無い）。vm の中で、アプリのコードの後に読む。
  * appEngCompare_: 2 つのシートの読み取り（appSheetSnapshot_ / appEngDecodeSheet_ の形）が同じか。違うセルの A1 を返す
  * appTestSeedPlan_: 見本のブックの CONFIG（B2 クライアント・B3 年度・B4 担当者）とシートから、計画 1 つ分をデータ本体に書く
+ * appTestPlanHash_: 計画の今の指紋（画面を開いたときの inputHash と同じ）
+ * appTestVersionSubmit_ / appTestVersionDecide_: 画面と同じく、開いたときの指紋（inputHash）・行の版（rowVersion）を添えて公式版を出す・判断する
+ *   （画面は必ず渡す。2026-10-13 から必須。省いたときを確かめるテストは apiVersionSubmit / apiVersionDecide を直接呼ぶ）
  */
 const TEST_SUPPORT = `
 function appEngCompare_(snap, dec) {
@@ -302,6 +305,24 @@ function appEngCompare_(snap, dec) {
     }
   }
   return bad;
+}
+function appTestPlanHash_(planId) {
+  APP_STORE_CACHE_ = {};
+  return appPlanInputHash_(planId);
+}
+function appTestVersionSubmit_(input) {
+  const i = Object.assign({}, input || {});
+  if (i.inputHash === undefined && i.planId) { try { i.inputHash = appTestPlanHash_(i.planId); } catch (e) { /* 計画が無い: 入口が断る */ } }
+  return apiVersionSubmit(i);
+}
+function appTestVersionDecide_(input) {
+  const i = Object.assign({}, input || {});
+  if (i.rowVersion === undefined) {
+    APP_STORE_CACHE_ = {};
+    const v = appVersionTable_().filter(x => x.version_id === String(i.versionId || ''))[0];
+    if (v) i.rowVersion = v.row_version;
+  }
+  return apiVersionDecide(i);
 }
 function appTestSeedPlan_(book) {
   const ctx = { actor: Session.getActiveUser().getEmail() || 'test', requestId: 'TEST' };
@@ -547,6 +568,8 @@ export function makeEnv({ owner = OWNER, active = owner, order = 'name' } = {}) 
   };
   /** 処理を始めて、トリガーで動かし、結果を受け取る（続きの処理があればそれも動かす） */
   const runJob = (kind, payload, opts) => {
+    // 画面と同じく、計画への保存には開いたときの指紋（inputHash）を添える（画面は必ず渡す。2026-10-13 から必須。省いたときを確かめるテストは apiStartJob を直接呼ぶ）
+    if (kind === 'PLAN.EDIT' && payload && payload.inputHash === undefined && payload.planId) payload = Object.assign({}, payload, { inputHash: run('appTestPlanHash_(__pid)', { __pid: payload.planId }) });
     let id = call('apiStartJob(__in)', { __in: { kind, payload } }).jobId;
     for (let i = 0; i < 60; i++) {   // 組み立てが何回かに分かれても最後まで
       fireTriggers('triggerRunJob', opts);

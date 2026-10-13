@@ -307,16 +307,15 @@ const logOf = (env, planId) => env.call('appInputLogRead_(__p)', { __p: planId }
   assert.equal(il.rows.product[0].n, 2);
   assert.equal(il.rows.product[0].hist[0].before.product, '製品C');
   assert.equal(il.rows.product[0].hist[1].after.product, '製品C');
-  // 入力のハッシュを確かめない保存は、出どころを使わない（前の画面と同じ組み方: 同じ位置）
+  // 入力のハッシュの無い保存は、始める前に断る（2026-10-13 から必須。前は確かめずに書き、出どころも使わなかった）
   const P2 = E.seedPlan(inputBook(E, '組み製薬二', fy, [['鷹野', '製品A', D(fy, 5), '+5%', 'a'], ['佐藤', '製品B', D(fy, 6), '+3%', 'b']]));
   E.call('apiListPlans()');
   loaded = view(E, P2).boot.input.product;
   n0 = logOf(E, P2).length;
-  st = E.runJob('PLAN.EDIT', { planId: P2, action: 'INPUT.SAVE', args: { kind: 'product', rows: [Object.assign({}, loaded[1], { ym: m(7), fromRow: 1 })] } });
-  assert.equal(st.status, 'DONE', st.error);
-  add = logOf(E, P2).slice(n0);
-  assert.deepEqual(add.map((r) => [r.change, r.row_key, r.before_json ? JSON.parse(r.before_json).person : '']).sort(),
-    [['CHANGE', 'product|佐藤|製品B|' + m(7), '鷹野'], ['REMOVE', 'product|佐藤|製品B|' + m(6), '佐藤']], 'ハッシュを確かめない保存は、今までの組み方（同じ位置）');
+  assert.throws(() => E.call('apiStartJob(__in)', { __in: { kind: 'PLAN.EDIT', payload: { planId: P2, action: 'INPUT.SAVE', args: { kind: 'product', rows: [Object.assign({}, loaded[1], { ym: m(7), fromRow: 1 })] } } } }),
+    /画面が古いので、読み直してから/);
+  assert.equal(logOf(E, P2).length, n0, '何も書かない');
+  assert.deepEqual(view(E, P2).boot.input.product, loaded);
   // 道具: 出どころの読み方
   assert.deepEqual(E.call('[0, 2, "3", -1, 1.5, "x", null, "", true].map(appInputLogFromRow_)'), [0, 2, 3, null, null, null, null, null, null]);
 }
@@ -501,8 +500,8 @@ const NEW_TABLES = ['INPUT_LOG', 'AI_RESEARCH_LOG', 'LAYER_EFFECTS', 'HIT_RECORD
   output.push(['年度合計（予測）', 900, 1000, 1100], [], []);
   for (let i = 0; i < 12; i++) output.push([new Date(fy, 3 + i, 1), 70, 80, 90, '', '', '', 80, '']);
   const P = E.seedPlan(E.makeBook('甲製薬', { CONFIG: CONFIG('甲製薬', fy), OUTPUT: { values: output }, PROCESS_STATUS: { values: done } }));
-  const sub = E.call('apiVersionSubmit(__in)', { __in: { planId: P } });
-  E.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  const sub = E.call('appTestVersionSubmit_(__in)', { __in: { planId: P } });
+  E.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
   const months = E.call('appHitQuarterMonths_(__q)', { __q: 'FY' + fy + '-Q4' });
   const marker = (n, miss) => ({ plan_id: P, client_id: E.table('PLANS').find((p) => p.plan_id === P).client_id, quarter: 'FY' + fy + '-Q4', source_kind: 'QUARTER', source_key: '',
     person_email: '', months_json: months.map((ym, i) => (miss[i] ? { ym, run: miss[i] === 'forecast' ? '' : 'R', miss: miss[i] } : { ym, run: 'R' })), push: null, actual_dir: n === 3 ? 1 : null, hit: null, n_months: n });

@@ -270,7 +270,7 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   assert.deepEqual([pc.ok, pc.alloc, pc.fallback, pc.shapeYears], [true, 'FORECAST_SHAPE', true, 1]);
   assert.match(pc.basisText, /過去の売上が 2 年分そろわないので、予測の月の形で割り振りました/);
   // 測る専用の計画は予算を立てない
-  env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planC}' }, { purpose: 'MEASURE' }, undefined, '${OWNER}'))`);
+  env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planC}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, '${OWNER}'))`);
   assert.throws(() => propose(planC, 60), /測る専用の計画なので、予算は立てません/);
 }
 
@@ -305,7 +305,7 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
 {
   const shadow = env.call('apiForecastLatest(__in)', { __in: { planId: planB } }).shadow;
   const n = nums(planB);
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: planB, note: '確率 70%' } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId: planB, note: '確率 70%' } });
   const Phi = (x) => env.call(`appNormCdf_(${x})`);
   const rc = sub.version.reach;
   assert.deepEqual([rc.mode, rc.closedMonths, rc.tau, rc.w], ['SHADOW', 0, 0.15, 1]);
@@ -323,7 +323,7 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   // 承認しても、後から予算を変えても、出した版の列は変わらない
   const cols = ['reach_final', 'reach_adopted', 'center', 'sd', 'tau', 'w', 'closed_months', 'prob_mode', 'prob_basis_json'];
   const keep = Object.fromEntries(cols.map((c) => [c, row[c]]));
-  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', note: 'ok', rowVersion: sub.version.rowVersion } });
+  env.call('appTestVersionDecide_(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', note: 'ok', rowVersion: sub.version.rowVersion } });
   assert.equal(save(planB, [{ row: 29, adopted: 1 }]).status, 'DONE');
   const after = env.table('PLAN_VERSIONS').find((v) => v.version_id === sub.version.versionId);
   assert.equal(after.state, 'APPROVED');
@@ -336,14 +336,14 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   assert.equal(list.versions.find((v) => v.versionId === 'VER-OLD').reach, null);
   // 本番の計画（appPlanAlignedLive_ が真）は LIVE
   env.run('globalThis.__liveOrig = appPlanAlignedLive_; appPlanAlignedLive_ = function () { return true; }; appBumpGen_();');
-  const sub2 = env.call('apiVersionSubmit(__in)', { __in: { planId: planB } });
+  const sub2 = env.call('appTestVersionSubmit_(__in)', { __in: { planId: planB } });
   assert.equal(sub2.version.reach.mode, 'LIVE');
   env.run('appPlanAlignedLive_ = globalThis.__liveOrig; appBumpGen_();');
   // 着地見込みが出ていない計画（今の年度で、実績を取り込んでいない = 実績の遅れ）も出せる（数は空で、理由を残す）
   const stale = env.seedPlan(env.makeBook('遅れ製薬', { CONFIG: { values: [['項目', '値'], ['[必須] メーカー名（外部集計キー）', '遅れ製薬'], ['[必須] 予測年度FY（YYYY）', 2026], ['[必須] 担当者（カンマ区切り）', '鷹野']] },
     OUTPUT: { values: (() => { const o = [['FY2026']]; for (let r = 2; r <= 25; r++) o.push([]); o.push(['年度合計（予測）', 1, 2, 3], [], []); fyYms(2026).forEach((ym) => o.push([ym, 1, 2, 3, '', '', '', 2, ''])); return o; })(), formats: { A: '@' } } }));
   assert.equal(env.call('apiForecastLatest(__in)', { __in: { planId: stale } }).shadow.reach, null, '前提: 着地見込みが無い');
-  const s3 = env.call('apiVersionSubmit(__in)', { __in: { planId: stale } });
+  const s3 = env.call('appTestVersionSubmit_(__in)', { __in: { planId: stale } });
   assert.deepEqual([s3.version.reach.final, s3.version.reach.center, s3.version.reach.mode], [null, null, 'SHADOW']);
   assert.equal(JSON.parse(env.table('PLAN_VERSIONS').find((v) => v.version_id === s3.version.versionId).prob_basis_json).missing, 'no_landing');
 }

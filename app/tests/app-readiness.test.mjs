@@ -64,7 +64,7 @@ const RUN_ACTIONS = ['IMPORT.SALES', 'IMPORT.ACTUALS', 'SALES.AGGREGATE', 'AI.RE
 {
   const { env, planId, clientId } = seeded();
   env.as(OWNER);
-  env.call('apiVersionSubmit(__in)', { __in: { planId, note: 'v1' } });   // 承認の選択が解る承認待ちを作る
+  env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'v1' } });   // 承認の選択が解る承認待ちを作る
   const versionId = env.table('PLAN_VERSIONS').filter((v) => v.state === 'SUBMITTED')[0].version_id;
   const before = Object.fromEntries(['MEMBERS', 'CLIENTS', 'ROLES', 'SETTINGS', 'PLANS', 'PLAN_VERSIONS'].map((t) => [t, JSON.stringify(env.table(t))]));
   env.as(MEMBER);
@@ -152,7 +152,7 @@ const RUN_ACTIONS = ['IMPORT.SALES', 'IMPORT.ACTUALS', 'SALES.AGGREGATE', 'AI.RE
   assert.equal(stB.status, 'DONE', stB.error);
   assert.ok(env.table('ENG_ROWS').some((r) => r.plan_id === planId && r.sheet === 'OUTPUT'), '予算を OUTPUT に残す');
   // 公式版も出せる（自分のクライアントの計画）
-  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId, note: 'v1' } });
+  const sub = env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'v1' } });
   assert.equal(sub.version.state, 'SUBMITTED');
   assert.equal(env.table('PLAN_VERSIONS').filter((v) => v.plan_id === planId && v.state === 'SUBMITTED').length, 1);
 }
@@ -166,7 +166,7 @@ const RUN_ACTIONS = ['IMPORT.SALES', 'IMPORT.ACTUALS', 'SALES.AGGREGATE', 'AI.RE
   env.task('grantRole(__in)', { __in: { email: MEMBER, role: 'PLANNER', scopeType: 'CLIENT', clientId } });
   env.task('grantRole(__in)', { __in: { email: OTHER, role: 'APPROVER', scopeType: 'ALL' } });
   env.as(MEMBER);
-  env.call('apiVersionSubmit(__in)', { __in: { planId, note: 'v1' } });
+  env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'v1' } });
   const v1 = env.table('PLAN_VERSIONS').filter((v) => v.state === 'SUBMITTED')[0];
   deny(env, `apiVersionDecide({ versionId: '${v1.version_id}', decision: 'APPROVED' })`, null, /権限がありません/, '策定担当は承認できない');
   env.as(OTHER);
@@ -174,7 +174,7 @@ const RUN_ACTIONS = ['IMPORT.SALES', 'IMPORT.ACTUALS', 'SALES.AGGREGATE', 'AI.RE
   assert.equal(ok.version.state, 'APPROVED', '承認者はほかの人の版を承認できる');
   // 別の版でも同じ（出した本人ではない承認者が決める）
   env.as(OWNER);
-  env.call('apiVersionSubmit(__in)', { __in: { planId, note: 'v2' } });
+  env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'v2' } });
   const v2 = env.table('PLAN_VERSIONS').filter((v) => v.state === 'SUBMITTED')[0];
   env.as(OTHER);
   const ok2 = env.call(`apiVersionDecide({ versionId: '${v2.version_id}', decision: 'APPROVED', rowVersion: ${v2.row_version} })`);
@@ -197,7 +197,7 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
 {
   const { env, planId, planId2 } = seeded();
   env.as(OWNER);
-  env.call('apiVersionSubmit(__in)', { __in: { planId, note: 'v1' } });   // 承認待ちがある状態で描く
+  env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'v1' } });   // 承認待ちがある状態で描く
   // 閲覧だけの社内の人
   env.as(MEMBER);
   const view = env.call('apiPlanView(__in)', { __in: { planId } });
