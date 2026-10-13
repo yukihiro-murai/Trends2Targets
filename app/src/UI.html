@@ -1033,7 +1033,7 @@ var CODE_RE = new RegExp('(^|[^A-Za-z0-9_-])([ABC]-\\d{1,2})(?!\\d)(?:[ 　]?(?:
   + '|四半期レビューの提案|四半期レビュー|承認した提案の適用|製品ごとの動向を入力|クライアント動向を入力|担当者意見を入力|開発\\/スポット要因を入力|予算を策定))?', 'g');
 /** サーバー・旧来の計算の文に出る計算用の表の名前（と後ろのセルの番地）を、画面の名前に直す（裏側の名前を見せない） */
 var TABLE_WORDS = { CONFIG: '計画の設定', SALES_INPUT: '取り込んだ売上', SALES_MONTHLY: '月ごとの売上', PRODUCT: '製品の入力', CLIENT: 'メーカー全体の入力', OPINIONS: '見解',
-  DEV_SPOT: 'スポット案件', OUTPUT: '予算と予測', ACTUAL_EVAL_MONTHLY: '検証用の実績', AI_RESEARCH: '市場の調査', AI_RESEARCH_STRUCTURED: '市場の調査（話題ごと）',
+  DEV_SPOT: 'スポット案件', OUTPUT: '予算と予測', ACTUAL_EVAL_MONTHLY: '振り返り用の実績', AI_RESEARCH: '市場の調査', AI_RESEARCH_STRUCTURED: '市場の調査（話題ごと）',
   RUN_LOG: '実行の記録', FORECAST_SNAPSHOT: '予測の記録', EVAL_LOG: '当たり具合の記録', EVAL_COMPARE_MONTHLY: '予測と実績の比べ', EVAL_INSIGHTS: '外れた月の振り返り',
   PROCESS_STATUS: '進み', DASHBOARD: '指標', AI_SCORE_HISTORY: '市場の調査の記録', AI_IMPACT_HISTORY: 'AI の効きの記録', SUBJECTIVE_IMPACT_HISTORY: '入力の効きの記録',
   CALIBRATION_STATE: '補正', CALIBRATION_HISTORY: '補正の記録', QUARTERLY_REVIEW: '見直し案', QUARTERLY_REVIEW_LOG: '見直し案の記録', SOURCE_RELIABILITY: '信頼度',
@@ -2527,7 +2527,7 @@ function fcLater(a, b){ return !a ? b : !b ? a : a > b ? a : b; }
 function fcQuarter(q){ return qrQuarter(q); }   // 学びと同じ言い方（FY2026 7〜9月）
 /** 変わったもの: シートの名前は出さず、ふつうの名前にして重ねない */
 var FC_SHEET_NAMES = [[/^OUTPUT$/, '予算と予測'], [/^PRODUCT$/, '製品の入力'], [/^CLIENT$/, 'メーカー全体の入力'], [/^OPINIONS$/, '見解'], [/^DEV_SPOT$/, 'スポット案件'],
-  [/^(ACTUAL_)?EVAL_/, '検証'], [/^SALES_/, '売上'], [/^AI_/, '市場の調査'], [/^VERTEX_/, 'AI の見立て'], [/^PROCESS_STATUS$/, '進み'], [/^CONFIG$/, '計画の設定'],
+  [/^(ACTUAL_)?EVAL_/, '振り返り'], [/^SALES_/, '売上'], [/^AI_/, '市場の調査'], [/^VERTEX_/, 'AI の見立て'], [/^PROCESS_STATUS$/, '進み'], [/^CONFIG$/, '計画の設定'],
   [/^QUARTERLY_/, '見直し案'], [/^CALIBRATION_/, '補正'], [/RELIABILITY/, '信頼度']];
 function fcSheets(list){
   var out = [];
@@ -4349,8 +4349,6 @@ function lrPill(cur, key, label, fn){ return '<button type="button" class="tab' 
 function lrMoreBtn(key, rest){ return '<div class="row lr-morerow"><button type="button" class="btn btn-ghost" onclick="lrToggle(\'' + key + '\')">' + (S.lr.more[key] ? 'たたむ' : 'ほか ' + rest + ' 件') + '</button></div>'; }
 function lrToggle(k){ S.lr.more[k] = !S.lr.more[k]; render(); }
 function lrLessonView(v){ S.lr.lessonView = v; S.lr.more.lessons = false; render(); }
-/** 開く（その計画の振り返りへ。表とカードの中は 128px） */
-function lrOpen(planId, tipText){ return actBtn('<button type="button" class="btn btn-ghost btn-sm" onclick="openPlan(\'' + esc(planId) + '\',\'review\')">開く</button>', tipText || 'この計画の「振り返り」を開きます'); }
 
 // ---- 人の学び ----
 /**
@@ -4530,7 +4528,7 @@ function lrLesson(x, full, rep){
   return '<div class="lr-lesson"><div class="lr-lh"><div class="lr-who"><span class="lr-mk">' + esc(x.clientName) + '</span><span class="meta">' + esc(lrYm(x.ym)) + '</span></div>'
     + '<div class="lr-err" data-tip="' + esc(errTip) + '"><span class="num">' + lrPct(x.absErr) + '</span><small>外れ</small></div></div>'
     + (tags ? '<div class="lr-tags">' + tags + '</div>' : '') + '<dl class="lr-dl">' + dl + '</dl>'
-    + '<div class="lr-lf">' + lrOpen(x.planId, 'この計画の「振り返り」を開きます。仮説・対応・担当・状態はそこで書きます') + '</div></div>';
+    + '</div>';
 }
 /** 外れの原因: 外れた月を、向き × 決めた対応で数える（サーバーは幅の外かでも分けるので、ここで合わせる） */
 function lrCauseCard(d){
@@ -4843,12 +4841,11 @@ function lrPendingCard(pend){
     var list = ps.map(function(q){ var hv = hide && /^reliability:/.test(String(q.target || ''));   // 閲覧の人には信頼度の値を出さない
       return (q.target ? qrTarget(q.target, hide) : lrWords(q.targetLabel || '')) + (hv ? '' : ' ' + qrValue(q.target, q.current) + ' → ' + qrValue(q.target, q.proposed)) + (q.confidence ? '（確度 ' + qrConf(q.confidence) + '）' : '') + (q.decision ? '・' + q.decision : ''); }).join('\n');
     return [{ h: esc(p.clientName) + ' <span class="meta">FY' + esc(p.fy) + '</span><span class="lr-so meta">案 ' + ps.length + ' 件</span>', tip: list },
-      esc(qrQuarter(p.quarter) || '-') + '<span class="lr-sub meta">' + esc(lrDate(p.at)) + '</span>', { h: ps.length + ' 件', tip: list, cls: 'num' }, { h: dec + ' / ' + ps.length, cls: 'num' },
-      lrOpen(p.planId, 'この計画の「振り返り」を開きます。見直し案の承認はそこでします')];
+      esc(qrQuarter(p.quarter) || '-') + '<span class="lr-sub meta">' + esc(lrDate(p.at)) + '</span>', { h: ps.length + ' 件', tip: list, cls: 'num' }, { h: dec + ' / ' + ps.length, cls: 'num' }];
   });
-  // スマホは メーカー（案の数はその下）・開く だけ（開くを横に送らずに押せるように）
-  var cols = [['メーカー', 'lr-wr', LR_C1], ['四半期', 'lr-hm', LR_C1, '見直し案の対象の四半期（作った日はその下）'], ['案', 'num lr-hm', LR_C1, 'カーソルを合わせると、案の中身（今 → 案）が出ます'], ['判断済み', 'num lr-hm', LR_C1, '保存した判断（承認・却下・保留）の数'], ['', 'lr-open', LR_C1, '', 152]];
-  return lrCard('承認待ちの見直し案', 'AI が四半期ごとに作った見直し案です。承認するまで予測には効きません。承認は、開いた計画の「振り返り」でします', '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>');
+  // スマホは メーカー（案の数はその下）だけ
+  var cols = [['メーカー', 'lr-wr', LR_C1], ['四半期', 'lr-hm', LR_C1, '見直し案の対象の四半期（作った日はその下）'], ['案', 'num lr-hm', LR_C1, 'カーソルを合わせると、案の中身（今 → 案）が出ます'], ['判断済み', 'num lr-hm', LR_C1, '保存した判断（承認・却下・保留）の数']];
+  return lrCard('承認待ちの見直し案', 'AI が四半期ごとに作った見直し案です。承認するまで予測には効きません。承認は、予測の画面の「振り返り」でします', '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>');
 }
 /** 小さなグラフの幅（2 つ並べる。スマホは 1 つ） */
 function lrHalfW(){ var w = chW(); return (window.innerWidth || 1280) <= 760 ? Math.max(220, w) : Math.max(240, Math.floor((w - 12) / 2) - 34); }
