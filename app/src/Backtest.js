@@ -1,36 +1,49 @@
 /**
  * Backtest.js — 物差し（表の版 10 の 3-7・決定 9 (b)。2026-10-08 村井さん承認「版10はおすすめで」）。
  * 過去の区切り（年度の初めの 4 月）に戻って予測し直し、単純な方法・本番の予測と並べて、締まった月の実績で採点する点を BACKTEST に足す。
- * 1 回 = 12 か月 × 5 方法 = 60 行（追記だけ。予測の数字・OUTPUT・ENG_*・FORECAST_*・PLAN_VERSIONS は変えない）。記録は計算に使わない。
- *   STAT_ONLY … 旧来の A-9（runForecastFYCore_）の統計の部分だけを、同じ順で呼ぶ（人の入力・AI・補正・既知のスポットを入れない）。
- *               旧来の関数は LegacyEngine.js の入口（build-engine.mjs の ENGINE_EXPORTS）から呼ぶ。中身は 1 文字も変えない
- *   LAST_YEAR … 前年同月の売上（ベース + スポット）
- *   TWO_YEAR  … 前の 2 年の同じ月の売上の平均
- *   SEASONAL  … 旧来の季節加重（forecastSeasonalWeighted48_。OUTPUT の Seasonal Weighted Total と同じ式。既知のスポットは入れない）
- *   LIVE      … 本番の、その月が始まる前の最後の予測（FORECAST_RUNS・FORECAST_MONTHLY。比べるため）
- * 「今」は区切りの月の 1 日（その前の月までが締まった月）。乱数の種は、売上と CONFIG の中身・区切り・計画の地域・旧来の計算の版から決める
- * （同じ中身なら同じ数字。appBacktestSeed_）。
+ * 1 回 = 12 か月 × 6 方法 = 72 行（追記だけ。予測の数字・OUTPUT・ENG_*・FORECAST_*・PLAN_VERSIONS は変えない）。記録は計算に使わない。
+ * 比べる時点は 2 つ（2026-10-13 村井さん承認。時点の違う予測を比べると、情報の差だけで外れの差が出る）:
+ *   区切りの「今」（4/1）に 1〜12 か月先を予測したもの（horizon = 1〜12）
+ *     STAT_ONLY … 旧来の A-9（runForecastFYCore_）の統計の部分だけを、同じ順で呼ぶ（人の入力・AI・補正・既知のスポットを入れない）。
+ *                 旧来の関数は LegacyEngine.js の入口（build-engine.mjs の ENGINE_EXPORTS）から呼ぶ。中身は 1 文字も変えない
+ *     LAST_YEAR … 前年同月の売上（ベース + スポット）
+ *     TWO_YEAR  … 前の 2 年の同じ月の売上の平均
+ *     SEASONAL  … 旧来の季節加重（forecastSeasonalWeighted48_。OUTPUT の Seasonal Weighted Total と同じ式。既知のスポットは入れない）
+ *     どれも区切りの「今」に締まっていた月（月末から 5 日たった月。D5）の売上だけを使う。4/1 には 3 月はまだ締まっていない
+ *     （4/5 以降に取り込む）ので、3 月の売上は無いものとして予測する（appBacktestClosed_。統計だけは旧来の「今」を 3 月の終わりの日に置き、
+ *     3 月を締まっていない月として補う。appBacktestStatAsOf_）。前年同月・2 年平均で、使う月が締まっていなければ予測は空
+ *   各月が始まる前の最後の本番の予測の時点（horizon = その回から何か月先か。多くは 1）
+ *     LIVE           … 本番の、その月が始まる前の最後の予測（FORECAST_RUNS・FORECAST_MONTHLY）。その年度に学んだ補正と更新した入力が入る
+ *     LAST_YEAR_PACE … 同じ時点の単純な方法: 前年同月 × （その時点で締まっていた年度の月の実績 ÷ 前年の同じ月々の売上）。締まった年度の月が
+ *                      無ければ前年同月のまま。本番の回が無い月は空
+ *   統計だけは 4/1 の単純な方法と、本番は同じ時点の単純な方法と比べる（統計だけと本番は比べない）。
+ * 乱数の種は、売上と CONFIG の中身・区切り・計画の地域・旧来の計算の版から決める（同じ中身なら同じ数字。appBacktestSeed_）。
  * 実績は締まった月だけ（実績の取り込み B-1 の日に、月末から 5 日たった月。D5）。締まっていない月は空。
  * 本物の月（real_months）: 区切りの前 48 か月のうち、最初に売上があった月から後で、売上の取り込み（A-2）の日に締まっていた月
  * （取引が始まる前の 0 円は本物と数えない。9 章 5 のおすすめ）。点として数える（counted）のは、本物の月が 48・実績が締まった・予測がある点だけ。
  * 動かすのは所有者だけ（apiOwnerTask の runBacktest → 裏の処理 MEASURE.BACKTEST。組み立て → 計算と保存。組み立てが 6 分に収まらなければ続きに分ける）。
- * 分析の画面には、年度の計画ごとに、その年度の初めを区切りにした回のうち一番新しい回の点だけを方法ごとにまとめて出す（appBacktestCard_。
- * 点の数と 95% の幅を必ず添える。点が 30 より少ない・1 社だけなら「まだ判断できません」）。前の年度を区切りにした回（cutoffFy）は、
- * 計画が持つ売上が年度の前の 48 か月だけなので数えられる点が無く、まとめには入れない（数えていない回の数だけ olderRuns に出す）。
+ * 分析の画面には、年度の計画ごとに、その年度の初めを区切りにした今の数え方の回のうち一番新しい回の点だけを方法ごとにまとめて出す（appBacktestCard_。
+ * 点の数と 95% の幅を必ず添える。95% の幅は、同じ計画の月どうしはつながっているので、点を独立とみなさず、メーカーごとに平均してから
+ * メーカーの数の t 分布で出す（appBacktestClusterMean_。1 社だけなら幅を出さず「差を言えない」。点が 30 より少なければ「まだ判断できません」）。
+ * 前の年度を区切りにした回（cutoffFy）は、計画が持つ売上が年度の前の 48 か月だけなので数えられる点が無く、まとめには入れない
+ * （数えていない回の数だけ olderRuns に出す）。前の数え方（calc_version が今と違う）の回も入れない（oldCalcRuns）。
  */
 
-/** 物差しの版（数え方を変えたら上げて、新しい行を足す） */
-const APP_BACKTEST_CALC_VERSION = 'BT-1';
+/**
+ * 物差しの版（数え方を変えたら上げて、新しい行を足す）。BT-2（2026-10-13）: 区切りの時点で締まった月だけを使う・本番と同じ時点の単純な方法
+ * （LAST_YEAR_PACE）を足す・本番の horizon を本当の何か月先にする。前の版の回はまとめに入れない（行は消さない）
+ */
+const APP_BACKTEST_CALC_VERSION = 'BT-2';
 /** 組み立てる計算用のシート（統計の部分が読むものだけ） */
 const APP_BACKTEST_SHEETS = ['CONFIG', 'SALES_INPUT', 'SALES_MONTHLY'];
-/** 方法（画面に出す順）。単純な方法は p50 だけ */
-const APP_BACKTEST_METHODS = ['STAT_ONLY', 'LIVE', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL'];
-const APP_BACKTEST_SIMPLE = ['LAST_YEAR', 'TWO_YEAR', 'SEASONAL'];
+/** 方法（記録の順。画面は比べる組で並べ直す）。単純な方法は p50 だけ */
+const APP_BACKTEST_METHODS = ['STAT_ONLY', 'LIVE', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL', 'LAST_YEAR_PACE'];
+const APP_BACKTEST_SIMPLE = ['LAST_YEAR', 'TWO_YEAR', 'SEASONAL'];   // 区切りの「今」（4/1）の単純な方法（統計だけと比べる。外れ幅のいちばん小さいもの）
+const APP_BACKTEST_SIMPLE_LIVE = 'LAST_YEAR_PACE';                    // 本番と同じ時点の単純な方法（本番と比べる）
 const APP_BACKTEST_WINDOW = 48;          // 区切りの前の月の数（旧来の A-9 の 48 か月）
 const APP_BACKTEST_BACK_YEARS = 3;       // 区切りは計画の年度から 3 年前まで（実績の取り込み B-1 が持つ範囲）
 const APP_BACKTEST_MIN_POINTS = 30;      // 比べてよい点の数（これより少なければ「まだ判断できません」）
-const APP_BACKTEST_MIN_MAKERS = 2;       // 比べてよいメーカーの数（1 社だけでは言わない）
-const APP_BACKTEST_Z95 = 1.959963984540054;
+const APP_BACKTEST_MIN_MAKERS = 2;       // 比べてよいメーカーの数（1 社だけでは言わない。幅も出さない）
 
 // ---- 区切りと種 ----
 
@@ -51,9 +64,39 @@ function appBacktestYmAdd_(ym, k) {
   return Math.floor(n / 12) + '/' + ('0' + (n % 12 + 1)).slice(-2);
 }
 
-/** 「今」: 区切りの月の 1 日の正午（日本の時刻。前の月までが締まった月。どの時差の日付で読んでも区切りの月） */
+/** 「今」: 区切りの月の 1 日の正午（日本の時刻。どの時差の日付で読んでも区切りの月） */
 function appBacktestAsOf_(cutoffYm) {
   return appMonthStartMs_(cutoffYm) + 12 * 3600e3;
+}
+
+/**
+ * 区切りの「今」に締まっていた月（前の 48 か月の窓。[true = 締まっていた]。D5: 月末から 5 日たった月。appActualClosed_）。
+ * 4/1 なら 2 月まで（3 月は 4/5 に締まる）
+ */
+function appBacktestClosed_(cutoffYm) {
+  const day = Utilities.formatDate(new Date(appBacktestAsOf_(cutoffYm)), APP_TZ, 'yyyy-MM-dd');
+  const start = appBacktestYmAdd_(cutoffYm, -APP_BACKTEST_WINDOW);
+  return Array.from({ length: APP_BACKTEST_WINDOW }, (_, k) => appActualClosed_(appBacktestYmAdd_(start, k), day));
+}
+
+/**
+ * 統計だけを動かす旧来の「今」。旧来の計算は「今」の前の月までを締まった月とみなす（getLastClosedMonthStart_・getForecastContext_）ので、
+ * 区切りの「今」に締まっていない月（4/1 の 3 月）があれば、最後に締まっていた月の次の月の終わりの日の正午（日本の時刻。3/31）に置く
+ * （その月は締まっていない月として、旧来の補い方で補う）。全部締まっていれば区切りの「今」
+ */
+function appBacktestStatAsOf_(cutoffYm, closed) {
+  const last = (closed || []).lastIndexOf(true);
+  const asOf = appBacktestAsOf_(cutoffYm);
+  if (!closed || last === closed.length - 1) return asOf;
+  const open = appBacktestYmAdd_(cutoffYm, -APP_BACKTEST_WINDOW + last + 1);   // 最後に締まっていた月の次の月
+  return Math.min(asOf, appMonthStartMs_(appBacktestYmAdd_(open, 1)) - 12 * 3600e3);
+}
+
+/** 'yyyy/MM' の from から to まで何か月か（to − from） */
+function appBacktestMonthsBetween_(fromYm, toYm) {
+  const n = ym => { const m = /^(\d{4})\/(\d{2})$/.exec(String(ym || '')); return m ? Number(m[1]) * 12 + Number(m[2]) - 1 : null; };
+  const a = n(fromYm), b = n(toYm);
+  return a === null || b === null ? null : b - a;
 }
 
 /** 種が見る中身: 統計の部分が読む表（CONFIG・SALES_INPUT）の中身のハッシュ。SALES_MONTHLY は SALES_INPUT から作り直す */
@@ -73,8 +116,9 @@ function appBacktestSeed_(plan, inputHash, cutoffYm, engine) {
 
 /**
  * 計算用ブック book（CONFIG・SALES_INPUT・SALES_MONTHLY を組み立てたもの）の上で、統計だけの 12 か月を作る。
- * opts: { fy（区切りの年度）, asOfMs（「今」）, seed（文字か、旧来の計算の版 { version, sourceSha256 } から種を作る関数）, uuidSeed, actor }。
- * 返り値: { p10, p50, p90, seasonal（12 か月）, total48（窓の 48 か月の売上 = ベース + スポット）, seed, engine }
+ * opts: { fy（区切りの年度）, asOfMs（旧来の「今」）, closed（省ける。48 か月の窓の [締まっていたか]。締まっていない月の売上は 0 円 = まだ分からない
+ * として読む。appBacktestClosed_）, seed（文字か、旧来の計算の版 { version, sourceSha256 } から種を作る関数）, uuidSeed, actor }。
+ * 返り値: { p10, p50, p90, seasonal（12 か月）, total48（窓の 48 か月の売上 = ベース + スポット。締まっていない月も、取り込んだままの値）, seed, engine }
  */
 function appBacktestStatRun_(book, opts) {
   const svc = appLegacyServices_(book, { asOfMs: opts.asOfMs, seed: 'backtest', uuidSeed: opts.uuidSeed || 'backtest', actor: opts.actor || '' });
@@ -82,20 +126,28 @@ function appBacktestStatRun_(book, opts) {
   const eng = appLegacyEngine_(svc);
   const engine = { version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256 };
   const seed = String(typeof opts.seed === 'function' ? opts.seed(engine) : opts.seed);
-  return appWithSeededRandom_(seed, () => Object.assign(appBacktestStatCore_(eng, book, Number(opts.fy), opts.asOfMs), { seed: seed, engine: engine }));
+  return appWithSeededRandom_(seed, () => Object.assign(appBacktestStatCore_(eng, book, Number(opts.fy), opts.asOfMs, opts.closed), { seed: seed, engine: engine }));
 }
 
 /**
  * 旧来の runForecastFYCore_ の統計の部分を、同じ順で呼ぶ（乱数を使うのは混合のシミュレーションだけ。同じ種なら同じ並び）。
  * 人の入力（製品・メーカー全体・見解・既知のスポット）・AI・補正（CALIBRATION_STATE の値・学んだ偏り・AI のアシスト）・情報源の信頼度は入れない。
- * 売上の表は runPhase1Forecast と同じく SALES_INPUT から作り直す（syncSalesFromSalesInput_）
+ * 売上の表は runPhase1Forecast と同じく SALES_INPUT から作り直す（syncSalesFromSalesInput_）。
+ * closed（省ける）の締まっていない月の売上は、読んだ後に 0 円にする（その時点では分からない。旧来の「今」をその月に置けば、旧来の計算が
+ * 締まっていない月として補う。SALES_MONTHLY のその月を 0 円にして本番の A-9 を動かすのと同じ）
  */
-function appBacktestStatCore_(eng, book, fy, asOfMs) {
+function appBacktestStatCore_(eng, book, fy, asOfMs, closed) {
   const cfg = book.getSheetByName(eng.SHEETS.CONFIG);
   const client = eng.normalizeClientName_(String(cfg ? cfg.getRange('B2').getValue() || '' : '').trim());
   if (!client) throw new Error('計画の CONFIG にメーカーがありません。');
   eng.syncSalesFromSalesInput_(fy, client);
   const salesData = eng.readSales48Months_(book.getSheetByName(eng.SHEETS.SALES_MONTHLY));
+  const rawTotal48 = (salesData.baseSeries48 || []).map((v, i) => Number(v || 0) + Number((salesData.spotSeries48 || [])[i] || 0));
+  if (closed) {
+    // 製品ごとの並びと BASE・SPOT の並び（同じ配列のこともある）の、締まっていない月を 0 円に
+    [].concat(salesData.monthlyByProduct || [], [salesData.baseSeries48 || [], salesData.spotSeries48 || []])
+      .forEach(arr => closed.forEach((ok, k) => { if (!ok && k < arr.length) arr[k] = 0; }));
+  }
   const tuning = eng.readModelTuningFromConfig_();
   const tuningApplied = eng.applyCalibrationToTuning_(tuning, eng.createDefaultCalibrationState_(client));   // 補正は入れない（既定の状態）
   const ctx = eng.getForecastContext_(fy, new Date(asOfMs), salesData.headerMonths || []);
@@ -135,7 +187,7 @@ function appBacktestStatCore_(eng, book, fy, asOfMs) {
     knownSpotBgSuppressRate: isFinite(tuning.knownSpotBgSuppressRate) ? tuning.knownSpotBgSuppressRate : eng.KNOWN_SPOT_BG_SUPPRESS_RATE,
     dlmBaseLogByMonth: dlmPrimary ? dlm.logByMonth : null, reliabilityApply: false, reliabilityMap: new Map(), lmdiEnabled: false
   });
-  const total48 = salesData.baseSeries48.map((v, i) => Number(v || 0) + Number((salesData.spotSeries48 || [])[i] || 0));
+  const total48 = salesData.baseSeries48.map((v, i) => Number(v || 0) + Number((salesData.spotSeries48 || [])[i] || 0));   // 締まっていない月は 0 円
   // 締まった年度の月を実績で置き換える設定（本番と同じ。区切りの「今」では年度の月はまだ締まっていない）
   if (eng.readForecastClosedMonthMode_() === 'actual') {
     months.forEach((_, i) => {
@@ -148,7 +200,7 @@ function appBacktestStatCore_(eng, book, fy, asOfMs) {
   // 季節加重（本番は OUTPUT を書くときに、補正を入れないチューニングで計算する）
   const seasonal = eng.forecastSeasonalWeighted48_({ adjustedBaseSeries48: aggYAdj, seriesStart: seriesStart, lastClosedMonthStart: ctx.lastClosedMonthStart,
     spotBackgroundExpectedByMonth: spotBg, knownSpotExpectedByMonth: known, tuning: eng.readModelTuningFromConfig_() });
-  return { p10: mixed.p10.slice(), p50: mixed.p50.slice(), p90: mixed.p90.slice(), seasonal: seasonal.totalByMonth.slice(), total48: total48 };
+  return { p10: mixed.p10.slice(), p50: mixed.p50.slice(), p90: mixed.p90.slice(), seasonal: seasonal.totalByMonth.slice(), total48: rawTotal48 };
 }
 
 // ---- 実績・本番の予測・本物の月 ----
@@ -183,7 +235,7 @@ function appBacktestActuals_(planId, yms, day) {
   return out;
 }
 
-/** 本番の予測（LIVE）: 月ごとに、その月が始まる前（「今」< 月の 1 日）の最後の予測の回の P10/P50/P90。無ければ null */
+/** 本番の予測（LIVE）: 月ごとに、その月が始まる前（「今」< 月の 1 日）の最後の予測の回の P10/P50/P90 と、その回の「今」（at。ミリ秒）。無ければ null */
 function appBacktestLive_(planId, yms) {
   const runs = appReadTable_('FORECAST_RUNS').filter(r => r.plan_id === planId && r.status === 'DONE')
     .map(r => ({ id: r.run_id, at: appLandingTime_('', r.as_of), fin: String(r.finished_at || ''), row: r._row })).filter(r => r.at !== null);
@@ -197,7 +249,7 @@ function appBacktestLive_(planId, yms) {
     const best = runs.filter(r => r.at < start && monthly[r.id + '\u0001' + ym])
       .sort((a, b) => b.at - a.at || b.fin.localeCompare(a.fin) || b.row - a.row)[0];
     const m = best ? monthly[best.id + '\u0001' + ym] : null;
-    out[ym] = m ? { p10: appNum_(m.p10), p50: appNum_(m.p50), p90: appNum_(m.p90), runId: best.id } : null;
+    out[ym] = m ? { p10: appNum_(m.p10), p50: appNum_(m.p50), p90: appNum_(m.p90), runId: best.id, at: best.at } : null;
   });
   return out;
 }
@@ -215,30 +267,60 @@ function appBacktestRealMonths_(total48, startYm, salesDay) {
   return n;
 }
 
-/** 物差し 1 回の行（12 か月 × 5 方法）。id と時刻はここで決める（控えの書き直しで同じ行になるように） */
+/**
+ * 物差し 1 回の行（12 か月 × 6 方法）。id と時刻はここで決める（控えの書き直しで同じ行になるように）。
+ * horizon = 予測した時点から何か月先か: 区切りの「今」の方法は i + 1（4 月 = 1）、本番と同じ時点の単純な方法は、その月の本番の回の「今」の月から
+ * （3/20 の回の 4 月 = 1）。本番の回が無い月は 0（予測が無い。数えない）
+ */
 function appBacktestRows_(ctx, plan, fy, btId, stat) {
   const cutoffYm = fy + '/04';
   const yms = appLandingFyYms_(fy);
+  const startYm = appBacktestYmAdd_(cutoffYm, -APP_BACKTEST_WINDOW);
   const days = appBacktestImportDays_(plan.plan_id);
-  const real = appBacktestRealMonths_(stat.total48, appBacktestYmAdd_(cutoffYm, -APP_BACKTEST_WINDOW), days.sales);
+  const real = appBacktestRealMonths_(stat.total48, startYm, days.sales);
   const actual = appBacktestActuals_(plan.plan_id, yms, days.actuals);
   const live = appBacktestLive_(plan.plan_id, yms);
   const fin = v => (typeof v === 'number' && isFinite(v) ? v : null);
   const now = appNowIso_();
-  const t = stat.total48;
+  const raw = stat.total48;
+  const closed = appBacktestClosed_(cutoffYm);
+  const t = k => (closed[k] ? Number(raw[k] || 0) : null);   // 区切りの「今」に分かっていた売上（締まっていない月は空）
+  const dayOf = ms => Utilities.formatDate(new Date(ms), APP_TZ, 'yyyy-MM-dd');
+  // 本番と同じ時点の単純な方法: 前年同月 × （その時点で締まっていた年度の月の実績 ÷ 前年の同じ月々の売上）
+  const pace = (i, ym) => {
+    const l = live[ym];
+    if (!l) return null;
+    const day = dayOf(l.at);
+    const ly = k => (appActualClosed_(appBacktestYmAdd_(startYm, k), day) ? Number(raw[k] || 0) : null);
+    const base = ly(36 + i);
+    if (base === null) return null;
+    let a = 0, b = 0;
+    for (let j = 0; j < i; j++) {
+      const lj = ly(36 + j);
+      if (!appActualClosed_(yms[j], day) || fin(actual[yms[j]]) === null || lj === null) continue;
+      a += actual[yms[j]]; b += lj;
+    }
+    return base * (b > 0 ? a / b : 1);
+  };
   const value = (m, i, ym) => {
     if (m === 'STAT_ONLY') return [stat.p10[i], stat.p50[i], stat.p90[i]];
     if (m === 'LIVE') return live[ym] ? [live[ym].p10, live[ym].p50, live[ym].p90] : [null, null, null];
-    if (m === 'LAST_YEAR') return [null, t[36 + i], null];
-    if (m === 'TWO_YEAR') return [null, (Number(t[24 + i] || 0) + Number(t[36 + i] || 0)) / 2, null];
+    if (m === 'LAST_YEAR') return [null, t(36 + i), null];
+    if (m === 'TWO_YEAR') return [null, t(24 + i) === null || t(36 + i) === null ? null : (t(24 + i) + t(36 + i)) / 2, null];
+    if (m === 'LAST_YEAR_PACE') return [null, pace(i, ym), null];
     return [null, stat.seasonal[i], null];
+  };
+  const horizon = (m, i, ym) => {
+    if (m !== 'LIVE' && m !== APP_BACKTEST_SIMPLE_LIVE) return i + 1;
+    const l = live[ym];
+    return l ? appBacktestMonthsBetween_(Utilities.formatDate(new Date(l.at), APP_TZ, 'yyyy/MM'), ym) : 0;
   };
   const rows = [];
   APP_BACKTEST_METHODS.forEach(m => yms.forEach((ym, i) => {
     const v = value(m, i, ym).map(fin);
     const a = fin(actual[ym]);
     rows.push({ plan_id: plan.plan_id, point_id: appStableLogId_(APP_LOG_PREFIX.BACKTEST, [btId, m, ym]), bt_id: btId, cutoff_ym: cutoffYm,
-      target_ym: ym, horizon: i + 1, method: m, p10: v[0], p50: v[1], p90: v[2], actual: a, real_months: real,
+      target_ym: ym, horizon: horizon(m, i, ym), method: m, p10: v[0], p50: v[1], p90: v[2], actual: a, real_months: real,
       counted: real === APP_BACKTEST_WINDOW && a !== null && v[1] !== null,
       engine_sha256: stat.engine.sourceSha256, seed: stat.seed, calc_version: APP_BACKTEST_CALC_VERSION, computed_at: now, computed_by: ctx.actor });
   }));
@@ -268,7 +350,10 @@ function appBacktestBuild_(ctx, p, job) {
   });
 }
 
-/** 計算と保存（MEASURE.BACKTEST_CALC）: 統計だけを動かし、5 つの方法の 60 行を、控えの書き方 append で BACKTEST に足す */
+/**
+ * 計算と保存（MEASURE.BACKTEST_CALC）: 統計だけを動かし、6 つの方法の 72 行を、控えの書き方 append で BACKTEST に足す。
+ * 統計だけは区切りの「今」に締まっていた月の売上だけで動かす（appBacktestClosed_・appBacktestStatAsOf_）
+ */
 function appBacktestCalc_(ctx, p) {
   const plan = appPlanOf_(p.planId);
   const t0 = new Date().getTime();
@@ -279,7 +364,8 @@ function appBacktestCalc_(ctx, p) {
     const fy = appBacktestCutoffFy_(plan, p.fy);
     const cutoffYm = fy + '/04';
     const inputHash = appBacktestInputHash_(plan.plan_id);
-    const stat = appBacktestStatRun_(appWorkScratch_(plan), { fy: fy, asOfMs: appBacktestAsOf_(cutoffYm),
+    const closed = appBacktestClosed_(cutoffYm);
+    const stat = appBacktestStatRun_(appWorkScratch_(plan), { fy: fy, asOfMs: appBacktestStatAsOf_(cutoffYm, closed), closed: closed,
       seed: eng => appBacktestSeed_(plan, inputHash, cutoffYm, eng), uuidSeed: p.btId, actor: ctx.actor });
     const t1 = new Date().getTime();
     const rows = appBacktestRows_(ctx, plan, fy, p.btId, stat);
@@ -297,65 +383,92 @@ function appBacktestCalc_(ctx, p) {
 
 // ---- 分析のまとめ ----
 
-/** 平均と 95% の幅（2 点以上のとき。標本の標準偏差 / √n） */
-function appBacktestMean_(xs) {
-  if (!xs.length) return { mean: null, lo: null, hi: null, n: 0 };
-  const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
-  if (xs.length < 2) return { mean: mean, lo: null, hi: null, n: xs.length };
-  const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (xs.length - 1));
-  const half = APP_BACKTEST_Z95 * sd / Math.sqrt(xs.length);
-  return { mean: mean, lo: mean - half, hi: mean + half, n: xs.length };
+/**
+ * t 分布の 97.5% 点（両側 95%。df = 自由度 1 以上）。P(|T| > t) = I_{df/(df+t²)}(df/2, 1/2) なので、I_x(df/2, 1/2) = 0.05 の x から
+ * t = √(df (1 − x) / x)（appBetaQuantile_。df = 1 で 12.71、df = 2 で 4.30）。df が 1 より小さければ null
+ */
+function appBacktestT975_(df) {
+  if (!(df >= 1)) return null;
+  const x = appBetaQuantile_(0.05, df / 2, 0.5);
+  return x > 0 ? Math.sqrt(df * (1 - x) / x) : null;
 }
 
 /**
- * 数えた点（counted）を方法ごとにまとめる。clientOf = { 計画の ID: メーカーの ID }（メーカーの数を数える）。返り値:
- *   methods: [{ method, n（点）, makers, mape・mapeLo・mapeHi（外れ幅 = |予測 − 実績| ÷ 実績 の平均と 95% の幅。実績が 0 円以下の点は除く）,
+ * メーカーごとに平均してから、メーカーの数で 95% の幅を出す（同じ計画の月どうしはつながっているので、点を独立とみなさない。2026-10-13 村井さん承認）。
+ * byMaker = { メーカー: [値] }。mean = メーカーごとの平均の平均（メーカーを同じ重さで）、lo・hi = mean ± t(メーカーの数 − 1) × メーカーの平均の
+ * 標準偏差 ÷ √メーカーの数（メーカーが 2 より少なければ null）。clamp01 = true なら幅を 0〜1 に収める（割合）。
+ * 返り値: { mean, lo, hi, n（点の数）, makers }
+ */
+function appBacktestClusterMean_(byMaker, clamp01) {
+  const means = Object.keys(byMaker).map(k => byMaker[k]).filter(xs => xs.length).map(xs => xs.reduce((a, b) => a + b, 0) / xs.length);
+  const n = Object.keys(byMaker).reduce((s, k) => s + byMaker[k].length, 0);
+  const g = means.length;
+  if (!g) return { mean: null, lo: null, hi: null, n: 0, makers: 0 };
+  const mean = means.reduce((a, b) => a + b, 0) / g;
+  if (g < APP_BACKTEST_MIN_MAKERS) return { mean: mean, lo: null, hi: null, n: n, makers: g };
+  const sd = Math.sqrt(means.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (g - 1));
+  const half = appBacktestT975_(g - 1) * sd / Math.sqrt(g);
+  const c = v => (clamp01 ? Math.min(1, Math.max(0, v)) : v);
+  return { mean: mean, lo: c(mean - half), hi: c(mean + half), n: n, makers: g };
+}
+
+/**
+ * 数えた点（counted）を方法ごとにまとめる。clientOf = { 計画の ID: メーカーの ID }（メーカーの数を数え、95% の幅をメーカーごとに出す）。返り値:
+ *   methods: [{ method, n（点）, makers, mape・mapeLo・mapeHi（外れ幅 = |予測 − 実績| ÷ 実績。メーカーごとの平均の平均と 95% の幅。実績が 0 円以下の点は除く）,
  *              bias・biasLo・biasHi（偏り = (予測 − 実績) ÷ 実績）, pctN（外れ幅を数えた点）, cover・coverLo・coverHi・coverN（P10〜P90 に入った割合。
- *              統計だけ・本番だけ。95% は Wilson）}]
- *   compare: [{ method（STAT_ONLY・LIVE）, vs（外れ幅のいちばん小さい単純な方法）, n（両方に外れ幅のある点）, makers, diff・lo・hi（外れ幅の差の平均と 95% の幅）,
- *              verdict: wait（点が 30 より少ない・1 社だけ）・smaller・larger・unclear（幅が 0 をまたぐ）}]
+ *              統計だけ・本番だけ。メーカーごとの割合の平均と 95% の幅）, horizonMin・horizonMax・horizon（何か月先か。最小・最大・平均）}]
+ *              （95% の幅は appBacktestClusterMean_。メーカーが 2 より少なければ null）
+ *   compare: [{ method（STAT_ONLY・LIVE）, vs（STAT_ONLY は外れ幅のいちばん小さい 4/1 の単純な方法、LIVE は同じ時点の単純な方法 LAST_YEAR_PACE）,
+ *              n（両方に外れ幅のある点）, makers, diff・lo・hi（外れ幅の差の、メーカーごとの平均の平均と 95% の幅）,
+ *              verdict: oneMaker（1 社だけ。差を言えない）・wait（点が 30 より少ない）・smaller・larger・unclear（幅が 0 をまたぐ）}]
  *   points（統計だけの点）, makers, ready（30 点以上・2 社以上）, minPoints・minMakers（その境目。画面の説明に使う）
  */
 function appBacktestSummary_(rows, clientOf) {
   const of = r => (clientOf && clientOf[r.plan_id]) || r.plan_id;
   const pts = (rows || []).filter(r => r.counted && typeof r.p50 === 'number' && isFinite(r.p50) && typeof r.actual === 'number' && isFinite(r.actual));
   const keyOf = r => r.plan_id + '\u0001' + r.target_ym;
+  const group = (xs, f) => xs.reduce((o, r) => { (o[of(r)] = o[of(r)] || []).push(f(r)); return o; }, {});
   const ape = {};
   const methods = APP_BACKTEST_METHODS.map(m => {
     const xs = pts.filter(r => r.method === m);
     const pos = xs.filter(r => r.actual > 0);
-    const a = appBacktestMean_(pos.map(r => Math.abs(r.p50 - r.actual) / r.actual));
-    const b = appBacktestMean_(pos.map(r => (r.p50 - r.actual) / r.actual));
+    const a = appBacktestClusterMean_(group(pos, r => Math.abs(r.p50 - r.actual) / r.actual));
+    const b = appBacktestClusterMean_(group(pos, r => (r.p50 - r.actual) / r.actual));
     ape[m] = {};
     pos.forEach(r => { ape[m][keyOf(r)] = { v: Math.abs(r.p50 - r.actual) / r.actual, maker: of(r) }; });
     const band = xs.filter(r => typeof r.p10 === 'number' && typeof r.p90 === 'number' && isFinite(r.p10) && isFinite(r.p90));
-    const k = band.filter(r => r.actual >= r.p10 && r.actual <= r.p90).length;
-    const w = appWilson_(k, band.length, APP_BACKTEST_Z95);
-    return { method: m, n: xs.length, makers: Object.keys(xs.reduce((o, r) => { o[of(r)] = true; return o; }, {})).length, pctN: pos.length,
+    const w = appBacktestClusterMean_(group(band, r => (r.actual >= r.p10 && r.actual <= r.p90 ? 1 : 0)), true);
+    const hs = xs.map(r => Number(r.horizon)).filter(h => isFinite(h) && h > 0);
+    return { method: m, n: xs.length, makers: Object.keys(group(xs, r => 1)).length, pctN: pos.length,
       mape: a.mean, mapeLo: a.lo, mapeHi: a.hi, bias: b.mean, biasLo: b.lo, biasHi: b.hi,
-      cover: band.length ? k / band.length : null, coverLo: w ? w[0] : null, coverHi: w ? w[1] : null, coverN: band.length };
+      cover: band.length ? w.mean : null, coverLo: w.lo, coverHi: w.hi, coverN: band.length,
+      horizonMin: hs.length ? Math.min.apply(null, hs) : null, horizonMax: hs.length ? Math.max.apply(null, hs) : null,
+      horizon: hs.length ? hs.reduce((s, h) => s + h, 0) / hs.length : null };
   });
   const simple = methods.filter(m => APP_BACKTEST_SIMPLE.indexOf(m.method) >= 0 && m.mape !== null).sort((x, y) => x.mape - y.mape)[0] || null;
-  const enough = (n, makers) => n >= APP_BACKTEST_MIN_POINTS && makers >= APP_BACKTEST_MIN_MAKERS;
-  const compare = ['STAT_ONLY', 'LIVE'].map(m => {
-    if (!simple) return { method: m, vs: '', n: 0, makers: 0, diff: null, lo: null, hi: null, verdict: 'wait' };
-    const keys = Object.keys(ape[m]).filter(k => ape[simple.method][k]);
-    const d = appBacktestMean_(keys.map(k => ape[m][k].v - ape[simple.method][k].v));
-    const makers = Object.keys(keys.reduce((o, k) => { o[ape[m][k].maker] = true; return o; }, {})).length;
-    const verdict = !enough(d.n, makers) || d.lo === null ? 'wait' : d.hi < 0 ? 'smaller' : d.lo > 0 ? 'larger' : 'unclear';
-    return { method: m, vs: simple.method, n: d.n, makers: makers, diff: d.mean, lo: d.lo, hi: d.hi, verdict: verdict };
+  const compare = [['STAT_ONLY', simple ? simple.method : ''], ['LIVE', APP_BACKTEST_SIMPLE_LIVE]].map(c => {
+    const m = c[0], vs = c[1];
+    if (!vs) return { method: m, vs: '', n: 0, makers: 0, diff: null, lo: null, hi: null, verdict: 'wait' };
+    const keys = Object.keys(ape[m]).filter(k => ape[vs][k]);
+    const by = {};
+    keys.forEach(k => { (by[ape[m][k].maker] = by[ape[m][k].maker] || []).push(ape[m][k].v - ape[vs][k].v); });
+    const d = appBacktestClusterMean_(by);
+    const verdict = d.n && d.makers < APP_BACKTEST_MIN_MAKERS ? 'oneMaker' : d.n < APP_BACKTEST_MIN_POINTS || d.lo === null ? 'wait'
+      : d.hi < 0 ? 'smaller' : d.lo > 0 ? 'larger' : 'unclear';
+    return { method: m, vs: vs, n: d.n, makers: d.makers, diff: d.mean, lo: d.lo, hi: d.hi, verdict: verdict };
   });
   const stat = methods[0];
-  return { methods: methods, compare: compare, points: stat.n, makers: stat.makers, ready: enough(stat.n, stat.makers),
-    minPoints: APP_BACKTEST_MIN_POINTS, minMakers: APP_BACKTEST_MIN_MAKERS };
+  return { methods: methods, compare: compare, points: stat.n, makers: stat.makers,
+    ready: stat.n >= APP_BACKTEST_MIN_POINTS && stat.makers >= APP_BACKTEST_MIN_MAKERS, minPoints: APP_BACKTEST_MIN_POINTS, minMakers: APP_BACKTEST_MIN_MAKERS };
 }
 
 /**
- * 分析の画面の物差し（年度 fy の計画。計画ごとに、区切りがその年度の初め（fy/04）の回のうち一番新しい回の点だけ）。
+ * 分析の画面の物差し（年度 fy の計画。計画ごとに、区切りがその年度の初め（fy/04）の今の数え方の回のうち一番新しい回の点だけ）。
  * 区切りが前の年度の回は数えない（計画の 48 か月の窓がそろうのは、計画の年度の初めを区切りにした回だけ。新しくても、その計画の数える回を隠さない）。
- * その年度の初めを区切りにした回のある計画が無ければ null。
- * 返り値: appBacktestSummary_ の中身 + { fy, plans（物差しのある計画の数）, at（一番新しい回の時刻）, olderRuns（数えていない、前の年度を区切りにした回の数）}。
- * 金額は出さない（割合と点の数だけ）
+ * 前の数え方（calc_version が APP_BACKTEST_CALC_VERSION でない）の回も数えない（4/1 に締まっていない 3 月を使った・本番と時点の違う方法と比べた）。
+ * 物差しの回が 1 つも無ければ null。前の数え方の回だけなら plans = 0（画面は動かし直すよう言う）。
+ * 返り値: appBacktestSummary_ の中身 + { fy, plans（物差しのある計画の数）, at（一番新しい回の時刻）, olderRuns（数えていない、前の年度を区切りにした回の数）,
+ * oldCalcRuns（数えていない、前の数え方の回の数）}。金額は出さない（割合と点の数だけ）
  */
 function appBacktestCard_(fy) {
   const plans = appReadTable_('PLANS').filter(p => String(p.fy) === String(fy) && p.state !== 'ARCHIVED');
@@ -363,13 +476,15 @@ function appBacktestCard_(fy) {
   const clientOf = {};
   const pts = [];
   const older = {};
+  const oldCalc = {};
   let at = '';
   try {
     plans.forEach(p => {
       // 計画の行だけを読む（大きくなった表は計画の ID で探す）。一番新しい回 = 時刻が一番新しく、同じ時刻なら後に足した回
       const rows = appReadPlanTable_('BACKTEST', p.plan_id);
-      const mine = rows.filter(r => String(r.cutoff_ym) === cut);
-      rows.forEach(r => { if (String(r.cutoff_ym) !== cut) older[r.bt_id] = true; });
+      const now = r => String(r.calc_version) === APP_BACKTEST_CALC_VERSION;
+      const mine = rows.filter(r => String(r.cutoff_ym) === cut && now(r));
+      rows.forEach(r => { if (String(r.cutoff_ym) !== cut) older[r.bt_id] = true; else if (!now(r)) oldCalc[r.bt_id] = true; });
       const last = mine.reduce((b, r) => (!b || String(r.computed_at) > String(b.computed_at) || (String(r.computed_at) === String(b.computed_at) && r._row > b._row) ? r : b), null);
       if (!last) return;
       clientOf[p.plan_id] = p.client_id;
@@ -378,5 +493,6 @@ function appBacktestCard_(fy) {
     });
   } catch (e) { return null; }   // 表の版がそろう前（表が無い）
   const n = Object.keys(clientOf).length;
-  return n ? Object.assign({ fy: String(fy), plans: n, at: at, olderRuns: Object.keys(older).length }, appBacktestSummary_(pts, clientOf)) : null;
+  const oldCalcRuns = Object.keys(oldCalc).length;
+  return n || oldCalcRuns ? Object.assign({ fy: String(fy), plans: n, at: at, olderRuns: Object.keys(older).length, oldCalcRuns: oldCalcRuns }, appBacktestSummary_(pts, clientOf)) : null;
 }

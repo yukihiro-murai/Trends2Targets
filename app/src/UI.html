@@ -1188,8 +1188,15 @@ function aiPct(n){
   if (!isFinite(n) || n < 0) return '-';
   return n === 0 ? '0%' : n < 0.001 ? '0.001% 未満' : String(Number(n.toPrecision(2))) + '%';
 }
-/** 見直し案の理由（「的中率=40% / n=10」のような書き方を、ふつうの言葉に）。target が信頼度で、人ごとの当たりを見せない人には出さない */
-function qrWhy(s, target, hideKey){ if (hideKey && /^reliability:/.test(String(target || ''))) return ''; return plainMsg(String(s == null ? '' : s).replace(/的中率\s*=\s*([\d.]+%)\s*\/\s*n\s*=\s*(\d+)/g, '当たった割合 $1（$2 件）')); }
+/**
+ * 見直し案の理由（「的中率=40% / n=10」・「的中率=80% / 基準=84% / n=12」（2026-10-13 から。基準 = いつも同じ向きと言った場合に当たる割合）
+ * のような書き方を、ふつうの言葉に）。target が信頼度で、人ごとの当たりを見せない人には出さない
+ */
+function qrWhy(s, target, hideKey){
+  if (hideKey && /^reliability:/.test(String(target || ''))) return '';
+  return plainMsg(String(s == null ? '' : s).replace(/的中率\s*=\s*([\d.]+%)\s*\/\s*(?:基準\s*=\s*([\d.]+%)\s*\/\s*)?n\s*=\s*(\d+)/g,
+    function(m, h, b, n){ return '当たった割合 ' + h + '（' + (b ? 'いつも同じ向きなら ' + b + '・' : '') + n + ' 件）'; }));
+}
 /** 確度（高・中・低、または 0〜1） */
 function qrConf(c){ if (isNum(c)) return Math.round(c * 100) + '%'; var m = { '高': '高', '中': '中', '低': '低', high: '高', medium: '中', mid: '中', low: '低' }; return m[String(c || '').trim()] || String(c || ''); }
 /** 四半期（FY2026-Q2 → FY2026 7〜9月） */
@@ -1425,7 +1432,8 @@ function chartBars(rows, opts){
 }
 
 /**
- * 割合の区間（0〜1 の横の線と真ん中の点）。rows: [{ label, lo, mid, hi, tip }]。opts: { w, ref（例: 0.8 目標）, refLabel（上に書く）, min, max（既定 0 と 1）, labelW, label, empty }
+ * 割合の区間（0〜1 の横の線と真ん中の点）。rows: [{ label, lo, mid, hi, ref（その行だけの基準。短い縦の破線）, tip }]。
+ * opts: { w, ref（全部の行の基準。例: 0.8 目標）, refLabel（上に書く）, min, max（既定 0 と 1）, labelW, label, empty }
  */
 function chartIntervals(rows, opts){
   return chSafe(function(){
@@ -1446,6 +1454,7 @@ function chartIntervals(rows, opts){
       var cy = T + i * rh + rh / 2;
       out += chText(0, cy + 4, chClip(r.label, lw - 10), { c: 'lb' });
       if (isNum(r.lo) && isNum(r.hi)) out += chLine(x(cl(r.lo)), cy, x(cl(r.hi)), cy, 'iv s-main');
+      if (isNum(r.ref)) out += chLine(x(cl(r.ref)), cy - rh / 2 + 4, x(cl(r.ref)), cy + rh / 2 - 4, 'ref');
       if (isNum(r.mid)) out += '<circle cx="' + chR(x(cl(r.mid))) + '" cy="' + chR(cy) + '" r="5" class="pt f-navy"/>';
       out += chRect(0, cy - rh / 2, w, rh, 'hit', r.tip || r.label + '\n' + chPct(r.mid) + '（' + chPct(r.lo) + '〜' + chPct(r.hi) + '）');
     });
@@ -3753,40 +3762,66 @@ function anRevCard(plans){
 
 // ---- 物差し（apiCrossMaker の backtest。表の版 10 の 3-7）----
 // 過去の区切りに戻って予測し直した点を、方法ごとにまとめる。数字はサーバーの値のまま。割合と点の数だけ（金額は出さない）。
-// 95% の幅をいつも添える。点が 30 より少ない・1 社だけのときは比べない（「まだ判断できません」。良くなったとは言わない）
-var AN_BT = { STAT_ONLY: ['統計だけ', '過去の売上だけから、人の入力・AI・補正を入れずに予測し直したもの'], LIVE: ['本番', 'その月が始まる前の、最後の本番の予測'],
-  LAST_YEAR: ['前年同月', '前の年の同じ月の売上'], TWO_YEAR: ['2 年平均', '前の 2 年の同じ月の売上の平均'], SEASONAL: ['季節加重', '前の 4 年の同じ月を、新しい年ほど重く平均したもの'] };
-var AN_BT_SAY = { smaller: '単純な方法より外れが小さい', larger: '単純な方法より外れが大きい', unclear: 'はっきりした差はありません', wait: 'まだ判断できません' };
-/** 値と 95% の幅（幅は小さく添える。幅を出せなければ値だけ） */
-function anBtCell(v, lo, hi, f, tipText){
+// 95% の幅をいつも添える（メーカーごとに平均してから、メーカーの数で出す。1 社だけなら出さない）。点が 30 より少ない・1 社だけのときは比べない
+// （「まだ判断できません」「1 社だけなので差を言えません」。良くなったとは言わない）。
+// 比べる時点は 2 つ（2026-10-13）: 年度の初め（4/1）に 1〜12 か月先を予測したもの（統計だけと 4/1 の単純な方法）と、各月が始まる前の予測
+// （本番と、同じ時点の単純な方法）。時点の違う予測どうしは比べない
+var AN_BT = { STAT_ONLY: ['統計だけ', '過去の売上だけから、人の入力・AI・補正を入れずに、年度の初め（4/1）に予測し直したもの（4/1 に締まっていた 2 月までの売上で）'],
+  LIVE: ['本番', 'その月が始まる前の、最後の本番の予測（その年度に学んだ補正と、更新した入力が入る）'],
+  LAST_YEAR: ['前年同月', '前の年の同じ月の売上（4/1 に締まっていた月だけ）'], TWO_YEAR: ['2 年平均', '前の 2 年の同じ月の売上の平均（4/1 に締まっていた月だけ）'],
+  SEASONAL: ['季節加重', '前の 4 年の同じ月を、新しい年ほど重く平均したもの（4/1 に締まっていた 2 月までの売上で）'],
+  LAST_YEAR_PACE: ['前年同月 × 伸び', '本番と同じ時点で、前年同月の売上に、そのときまでに締まった年度の月の実績 ÷ 前年の同じ月々の売上 を掛けたもの'] };
+var AN_BT_ORDER = ['STAT_ONLY', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL', 'LIVE', 'LAST_YEAR_PACE'];   // 比べる組ごと（4/1 の予測 → 各月の前の予測）
+var AN_BT_WHEN = { STAT_ONLY: 'どちらも 4/1 の予測', LIVE: 'どちらも各月の前の予測' };
+var AN_BT_SAY = { smaller: '単純な方法より外れが小さい', larger: '単純な方法より外れが大きい', unclear: 'はっきりした差はありません', wait: 'まだ判断できません',
+  oneMaker: '1 社だけなので差を言えません' };
+/** 値と 95% の幅（幅は小さく添える。幅を出せなければ値だけ。makers = メーカーの数） */
+function anBtCell(v, lo, hi, f, tipText, makers){
   if (!isNum(v)) return '<td class="num">-</td>';
   var r = isNum(lo) && isNum(hi) ? f(lo) + '〜' + f(hi) : '';
-  return '<td class="num" data-tip="' + esc(tipText + ' ' + f(v) + (r ? '\n95% の幅 ' + r : '\n点が少なく、幅を出せません')) + '">' + esc(f(v)) + (r ? ' <span class="note">' + esc(r) + '</span>' : '') + '</td>';
+  var why = (makers || 0) < 2 ? '1 社だけなので、幅を出せません（幅はメーカーごとの平均のばらつきから出します）' : '幅を出せません';
+  return '<td class="num" data-tip="' + esc(tipText + ' ' + f(v) + (r ? '\n95% の幅 ' + r : '\n' + why)) + '">' + esc(f(v)) + (r ? ' <span class="note">' + esc(r) + '</span>' : '') + '</td>';
+}
+/** 何か月先か（最小〜最大。1 つなら その数） */
+function anBtAhead(m){
+  if (!isNum(m.horizonMin) || !isNum(m.horizonMax)) return '<td class="num">-</td>';
+  var t = m.horizonMin === m.horizonMax ? String(m.horizonMin) : m.horizonMin + '〜' + m.horizonMax;
+  var tipText = (m.method === 'LIVE' || m.method === 'LAST_YEAR_PACE' ? '各月が始まる前の最後の本番の予測の時点から' : '年度の初め（4/1）から')
+    + ' ' + t + ' か月先' + (isNum(m.horizon) ? '（平均 ' + m.horizon.toFixed(1) + ' か月）' : '');
+  return '<td class="num" data-tip="' + esc(tipText) + '">' + esc(t) + '</td>';
 }
 function anBacktestCard(d){
   var b = d.backtest;
   if (!b || !b.methods) return '';
-  var ms = b.methods.filter(function(m){ return AN_BT[m.method]; });
+  var tip = '年度の初め（4/1）に戻って予測し直し、締まった月の実績で採点しました。4/1 には 3 月の実績がまだ締まっていないので、2 月までの売上で予測しています。'
+    + '統計だけ（人の入力・AI・補正なし。4/1 に 1〜12 か月先）は同じ 4/1 の単純な方法と、本番（各月が始まる前の予測。多くは 1 か月先）は同じ時点の単純な方法（前年同月 × 伸び）と比べます。'
+    + '時点の違う予測どうしは、情報の差だけで外れに差が出るので比べません。';
+  // 前の数え方の回だけ（3 月の売上を 4/1 に使った・時点の違う方法と比べた回）: 動かし直すよう言う
+  if (!b.plans) return anCard('物差し', tip, '<p class="note">数え方を直す前の回だけです（' + (b.oldCalcRuns || 0) + ' 回）。所有者が物差しを動かし直すと、ここに出ます。</p>');
+  var ms = AN_BT_ORDER.map(function(k){ return b.methods.filter(function(m){ return m.method === k; })[0]; }).filter(Boolean);
   var rows = ms.map(function(m){
     var nm = AN_BT[m.method], band = m.method === 'STAT_ONLY' || m.method === 'LIVE';
     return '<tr><td data-tip="' + esc(nm[0] + '：' + nm[1]) + '">' + esc(nm[0]) + '</td>'
-      + anBtCell(m.mape, m.mapeLo, m.mapeHi, anPct1, '外れ幅（' + (m.pctN || 0) + ' 点。実績が 0 円以下の点は除く）')
-      + anBtCell(m.bias, m.biasLo, m.biasHi, pct1, '偏り（プラスは予測が実績より高め）')
-      + (band ? anBtCell(m.cover, m.coverLo, m.coverHi, anPct, '帯に入った割合（' + (m.coverN || 0) + ' 点。目標 80%）') : '<td class="num" data-tip="単純な方法には幅がありません">-</td>')
-      + '<td class="num">' + (m.n || 0) + ' 点</td></tr>';
+      + anBtCell(m.mape, m.mapeLo, m.mapeHi, anPct1, '外れ幅（' + (m.pctN || 0) + ' 点。実績が 0 円以下の点は除く）', m.makers)
+      + anBtCell(m.bias, m.biasLo, m.biasHi, pct1, '偏り（プラスは予測が実績より高め）', m.makers)
+      + (band ? anBtCell(m.cover, m.coverLo, m.coverHi, anPct, '帯に入った割合（' + (m.coverN || 0) + ' 点。目標 80%）', m.makers) : '<td class="num" data-tip="単純な方法には幅がありません">-</td>')
+      + anBtAhead(m)
+      + '<td class="num" data-tip="' + esc((m.makers || 0) + ' 社') + '">' + (m.n || 0) + ' 点</td></tr>';
   }).join('');
   // 列は 152・112 の格子。95% の幅は値の下の行に（.anbt。説明はカーソルで）
-  var tbl = anTable(['', 152, 152, 152, 112], '<th>方法</th><th class="num" data-tip="予測の中心と実績の差の割合の平均。小さいほどよく当たっています">外れ幅</th>'
+  var tbl = anTable(['', 152, 152, 152, 112, 112], '<th>方法</th><th class="num" data-tip="予測の中心と実績の差の割合の平均（メーカーごとに平均してから）。小さいほどよく当たっています">外れ幅</th>'
     + '<th class="num" data-tip="プラスは予測が実績より高め、マイナスは低め">偏り</th><th class="num" data-tip="' + esc('実績が見通しの幅（' + qName('p10') + '〜' + qName('p90') + '）に入った割合（統計だけと本番だけ）') + '">帯に入る</th>'
-    + '<th class="num" data-tip="数えた点（前の 48 か月の売上がそろい、実績が締まった月）">点</th>', rows, 'anbt');
+    + '<th class="num" data-tip="予測した時点から、その月まで何か月先か。統計だけと 4/1 の単純な方法は 1〜12 か月先、本番と前年同月 × 伸びは各月の前の予測なので多くは 1 か月先">何か月先</th>'
+    + '<th class="num" data-tip="数えた点（前の 48 か月の売上がそろい、実績が締まった月）。95% の幅は、同じ計画の月どうしはつながっているので、メーカーごとに平均してから出します">点</th>', rows, 'anbt');
   var cmp = (b.compare || []).filter(function(c){ return AN_BT[c.method]; });
   var vsName = function(c){ return AN_BT[c.vs] ? AN_BT[c.vs][0] : '単純な方法'; };
+  var noBand = function(c){ return c.verdict === 'wait' || c.verdict === 'oneMaker'; };
   var sayTip = !b.ready ? '点が ' + (b.minPoints || 30) + ' 以上・' + (b.minMakers || 2) + ' 社以上になると比べます（今は ' + (b.points || 0) + ' 点・' + (b.makers || 0) + ' 社）'
-    : cmp.map(function(c){ return AN_BT[c.method][0] + '：' + AN_BT_SAY[c.verdict] + (c.verdict === 'wait' ? '（' + (c.n || 0) + ' 点・' + (c.makers || 0) + ' 社）'
-      : '\n外れ幅の差（' + AN_BT[c.method][0] + ' − ' + vsName(c) + '） ' + pct1(c.diff) + '（95% の幅 ' + pct1(c.lo) + '〜' + pct1(c.hi) + '・' + c.n + ' 点・' + c.makers + ' 社）'); }).join('\n');
-  var say = !b.ready ? AN_BT_SAY.wait : cmp.map(function(c){ return AN_BT[c.method][0] + '：' + (AN_BT_SAY[c.verdict] || AN_BT_SAY.wait); }).join('・');
-  return anCard('物差し', '過去の区切り（年度の初め）に戻って予測し直し、締まった月の実績で採点しました。統計だけ（人の入力・AI・補正なし）と本番の予測を、単純な方法と比べます。'
-    + 'FY' + (b.fy || d.fy) + ' の計画ごとに一番新しい回（' + (b.plans || 0) + ' 計画）。幅は 95% の目安です',
+    : cmp.map(function(c){ return AN_BT[c.method][0] + '：' + (AN_BT_SAY[c.verdict] || AN_BT_SAY.wait) + (noBand(c) ? '（' + (c.n || 0) + ' 点・' + (c.makers || 0) + ' 社）'
+      : '\n外れ幅の差（' + AN_BT[c.method][0] + ' − ' + vsName(c) + '。' + (AN_BT_WHEN[c.method] || '') + '） ' + pct1(c.diff) + '（95% の幅 ' + pct1(c.lo) + '〜' + pct1(c.hi) + '・' + c.n + ' 点・' + c.makers + ' 社）'); }).join('\n');
+  var say = !b.ready ? ((b.makers || 0) === 1 ? AN_BT_SAY.oneMaker : AN_BT_SAY.wait) : cmp.map(function(c){ return AN_BT[c.method][0] + '：' + (AN_BT_SAY[c.verdict] || AN_BT_SAY.wait); }).join('・');
+  return anCard('物差し', tip + 'FY' + (b.fy || d.fy) + ' の計画ごとに一番新しい回（' + (b.plans || 0) + ' 計画）。幅は、メーカーごとの平均のばらつきから出した 95% の目安です（1 社だけなら出しません）'
+    + (b.oldCalcRuns ? '。数え方を直す前の回（' + b.oldCalcRuns + ' 回）は入れていません' : ''),
     '<div class="tblwrap">' + tbl + '</div><p class="note" data-tip="' + esc(sayTip) + '">' + esc(say) + '</p>');
 }
 
@@ -4036,33 +4071,48 @@ function lrCauseCard(d){
     rows.map(function(o){ return [{ h: esc(o.dir.name), tip: o.dir.say }, esc(o.act), o.n, o.range]; }));
   return lrCard('外れの向きと対応', '大きく外れた月を、外れの向き（強気の外れ = 予測が高すぎた・弱気の外れ = 予測が低すぎた）と、決めた対応ごとに数えました。人が決めていない月の対応は、計算が自動で付けたものです。原因の仮説は「大きく外れた月」のカードに出ます', chartOrTable('lrCause', chart, table));
 }
-/** 当たりの確かさ: 人や話題（閲覧の人には種類ごと）の、当たる割合の 80% の幅。左の端が高い順 */
+/** 当たりの基準（いつも同じ向きと言った場合に当たる割合。サーバーの base。無ければ半々） */
+function lrBase(r){ return r && isNum(r.base) ? r.base : 0.5; }
+/** 80% の幅と基準: 'above'（左の端が基準より上）・'below'（右の端が基準より下）・''（見分けられない） */
+function lrVsBase(r){ var b = lrBase(r); return !r || !r.ci80 ? '' : r.ci80[0] > b ? 'above' : r.ci80[1] < b ? 'below' : ''; }
+var LR_VS_BASE = { above: 'いつも同じ向きと言うよりも当たっています（80% の幅の左の端が基準より上）', below: 'いつも同じ向きと言うよりも外れています（80% の幅の右の端が基準より下）',
+  '': 'いつも同じ向きと言うのと、まだ見分けられません' };
+/** 当たりの確かさ: 人や話題（閲覧の人には種類ごと）の、当たる割合の 80% の幅と基準。幅の左の端と基準の差が大きい順 */
 function lrScoreCard(d, full){
-  var sc = (d.scoreboard || []).filter(function(r){ return r && r.ci80 && r.n; }).slice().sort(function(a, b){ return b.ci80[0] - a.ci80[0] || b.n - a.n; });
+  var gap = function(r){ return r.ci80[0] - lrBase(r); };
+  var sc = (d.scoreboard || []).filter(function(r){ return r && r.ci80 && r.n; }).slice().sort(function(a, b){ return gap(b) - gap(a) || b.n - a.n; });
   if (!sc.length) return '';
   var label = function(r){ var k = full ? lrKeyName(r.type, r.key) : ''; return lrSrc(r.type, r.label) + (k ? '・' + k : ''); };
   // スマホのグラフの名前は短く（種類の名前を縮める。正確な名前はカーソルと 表で見る に）
   var narrow = chW() < 480, short = function(r){ var k = full ? lrKeyName(r.type, r.key) : ''; return (LR_SRC_SHORT[r.type] || lrSrc(r.type, r.label)) + (k ? '・' + k : ''); };
   var wTxt = function(r){ return isNum(r.appliedR) ? r.appliedR.toFixed(2) : '1.00'; };
   var tipOf = function(r){
-    var t = label(r) + '\n当たり ' + r.hit + ' / ' + r.n + ' 回（' + lrPct(r.hitRate) + '）\n当たりの確かさ ' + lrPct(r.postMean) + '（80% の幅 ' + lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1]) + '）'
+    var t = label(r) + '\n当たり ' + r.hit + ' / ' + r.n + ' 回（' + lrPct(r.hitRate) + '）'
+      + '\nいつも同じ向きなら ' + lrPct(lrBase(r)) + (isNum(r.expected) ? '（当たるはずの数 ' + r.expected.toFixed(1) + '）' : '')
+      + '\n当たりの確かさ ' + lrPct(r.postMean) + '（80% の幅 ' + lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1]) + '）\n' + LR_VS_BASE[lrVsBase(r)]
       + (full ? '\n今の重み ' + wTxt(r) + (isNum(r.appliedR) ? '' : '（まだ変えていません）') : '');   // 今の重みは予算策定担当以上だけ（種類ごとの平均でも、1 人だけの種類ではその人の重みになる）
     if (!full && r.sources) t += '\nまとめた人や話題 ' + r.sources;
     if (full && r.plans && r.plans.length) t += '\n' + r.plans.slice(0, 6).map(function(p){ return p.clientName + ' FY' + p.fy + ' ' + p.hit + ' / ' + p.n; }).join('\n') + (r.plans.length > 6 ? '\nほか ' + (r.plans.length - 6) + ' 計画' : '');
     return t;
   };
-  // 横の目盛りは、幅のある所だけに寄せる（半々の線はいつも入れる。0.1 刻み）
-  var lo = Math.min(0.5, Math.floor(Math.min.apply(null, sc.map(function(r){ return r.ci80[0]; })) * 10 - 1e-9) / 10);
-  var hi = Math.max(0.5, Math.ceil(Math.max.apply(null, sc.map(function(r){ return r.ci80[1]; })) * 10 + 1e-9) / 10);
-  // 凡例はグラフの上に（区間のグラフの基準線の名前は最後の行に重なるので、ここに出す）
-  var key = '<p class="lr-key" aria-hidden="true"><span><i class="lr-k-dot"></i>今の見立て</span><span><i class="lr-k-iv"></i>80% の幅</span><span><i class="lr-k-ref"></i>半々（50%）</span></p>';
-  var chart = key + chartIntervals(sc.map(function(r){ return { label: narrow ? short(r) : label(r), lo: r.ci80[0], mid: r.postMean, hi: r.ci80[1], tip: tipOf(r) }; }),
-    { ref: 0.5, min: Math.max(0, lo), max: Math.min(1, hi), label: '当たりの確かさ', labelW: narrow ? 136 : 220 });
-  var table = lrTable([['情報源', 'wrap colmin'], ['当たり', 'num', 112, '押した向きが実績の動きと合った回数 / 数えた回数'], ['確かさ', 'num', 96, '今の見立ての当たる割合'], ['80% の幅', 'num', 128, '10 回に 8 回はこの間に入る見込み']].concat(full ? [['今の重み', 'num', 96, '予測に効かせている重み（1.00 = 変えていない）']] : []),
-    sc.map(function(r){ return [{ h: esc(label(r)), tip: tipOf(r) }, r.hit + ' / ' + r.n, lrPct(r.postMean), lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1])].concat(full ? [wTxt(r)] : []); }));
+  // 横の目盛りは、幅と基準のある所だけに寄せる（0.1 刻み）
+  var lo = Math.floor(Math.min.apply(null, sc.map(function(r){ return Math.min(r.ci80[0], lrBase(r)); })) * 10 - 1e-9) / 10;
+  var hi = Math.ceil(Math.max.apply(null, sc.map(function(r){ return Math.max(r.ci80[1], lrBase(r)); })) * 10 + 1e-9) / 10;
+  // 凡例はグラフの上に。縦の印は行ごとの基準（人や話題ごとに、押した向きと計画が違うので 1 本の線にしない）
+  var key = '<p class="lr-key" aria-hidden="true"><span><i class="lr-k-dot"></i>今の見立て</span><span><i class="lr-k-iv"></i>80% の幅</span><span><i class="lr-k-ref"></i>いつも同じ向き</span></p>';
+  var chart = key + chartIntervals(sc.map(function(r){ return { label: narrow ? short(r) : label(r), lo: r.ci80[0], mid: r.postMean, hi: r.ci80[1], ref: lrBase(r), tip: tipOf(r) }; }),
+    { min: Math.max(0, lo), max: Math.min(1, hi), label: '当たりの確かさ', labelW: narrow ? 136 : 220 });
+  var mark = function(r){ var v = lrVsBase(r); return v ? ' <span class="chip" tabindex="0" data-tip="' + esc(LR_VS_BASE[v]) + '">' + (v === 'above' ? '上回る' : '下回る') + '</span>' : ''; };
+  var table = lrTable([['情報源', 'wrap colmin'], ['当たり', 'num', 112, '押した向きが実績の動きと合った回数 / 数えた回数'],
+    ['基準', 'num', 96, 'いつも同じ向きと言った場合に当たる割合（同じ計画で、実績がその向きに外れた月の割合）'], ['確かさ', 'num', 96, '今の見立ての当たる割合'],
+    ['80% の幅', 'num', 128, '10 回に 8 回はこの間に入る見込み。左の端が基準より上なら、いつも同じ向きと言うよりも当たっています']].concat(full ? [['今の重み', 'num', 96, '予測に効かせている重み（1.00 = 変えていない）']] : []),
+    sc.map(function(r){ return [{ h: esc(label(r)) + mark(r), tip: tipOf(r) }, r.hit + ' / ' + r.n, lrPct(lrBase(r)), lrPct(r.postMean), lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1])].concat(full ? [wTxt(r)] : []); }));
   var right = (full ? '' : '<span class="chip" tabindex="0" data-tip="閲覧の人には、情報源の種類ごとにまとめて出しています。人や話題ごとの当たりは、予算策定担当以上の人に出します">種類ごと</span>')
-    + lrMore('当たり = 押した向き（上げる・下げる）が、過去の売上だけの予測から見た実績の動きと同じだった月。確かさはベータ分布の事後分布（事前分布は全計画から作った見立て、無ければ Beta(2, 2)）で、点は平均、線は 10%〜90% 点です');
-  return lrCard('当たりの確かさ', '入力・見解・AI が押した向きが、実績の動きと合っていた割合です。点は今の見立て、線は 80% の確かさの幅。少ない回数で高く見えないよう、幅の左の端が高い順に並べています。半々（50%）より右なら、当てずっぽうより当たっています',
+    + lrMore('当たり = 押した向き（上げる・下げる）が、過去の売上だけの予測から見た実績の動きと同じだった月。基準 = 押した月ごとに、その向きへ実績が外れた月の割合'
+      + '（同じ計画の比べられた月から。月が少なければ全計画の割合に寄せる）の平均。過去の売上だけの予測が低めなら、いつも上げると言うだけで半分より多く当たるので、半々ではなく基準と比べます。'
+      + '確かさはベータ分布の事後分布（事前分布の中心は、基準に全計画から作った見立ての上乗せを足した所。無ければ基準）で、点は平均、線は 10%〜90% 点です');
+  return lrCard('当たりの確かさ', '入力・見解・AI が押した向きが、実績の動きと合っていた割合です。点は今の見立て、線は 80% の確かさの幅、縦の印はいつも同じ向きと言った場合に当たる割合（基準）。'
+    + '幅の左の端が印より右のときだけ、いつも同じ向きと言うよりも当たっています。少ない回数で高く見えないよう、幅の左の端と基準の差が大きい順に並べています',
     chartOrTable('lrScore', chart, table), right);
 }
 /** 判断の履歴（四半期の見直し案と、人の判断。新しい順）。判断した人は、サーバーが渡すとき（予算策定担当以上）だけ */
@@ -4136,6 +4186,8 @@ function lrUpliftCard(d){
 // ---- 当たりの記録（版 10 の 3-4。人 × 四半期・AI 調査 1 回 × 四半期で 1 件。サーバーが見る人に合わせて絞る: 名前は予算策定担当以上と本人だけ） ----
 function lrHitAny(h){ return !!h && ((h.people || []).length > 0 || h.hidden > 0); }
 function lrResearchAny(r){ return !!r && ((r.research || []).length > 0 || r.hidden > 0); }
+/** 四半期ごとの当たりに添える基準（「（いつも同じ向きなら 75%）」。無ければ空） */
+function lrBaseNote(b){ return isNum(b) ? '（いつも同じ向きなら ' + lrPct(b) + '）' : ''; }
 /** 押しの向き（↑ ↓ と符号。色で向きを分けない） */
 function lrPush(v){ return isNum(v) ? (v > 0 ? '↑ ' : v < 0 ? '↓ ' : '') + lrSPct(v) : '-'; }
 function lrHitWord(h){ return h === 1 ? '当たり' : h === 0 ? '外れ' : '-'; }
@@ -4149,7 +4201,8 @@ function lrHitCard(h){
   if (!lrHitAny(h)) return '';
   var ps = h.people || [], max = 10, shown = S.lr.more.hits ? ps : ps.slice(0, max);
   var tipOf = function(p){ return p.name + '\n当たり ' + p.hit + ' / ' + p.n + ' 四半期' + (isNum(p.rate) ? '（新しいほど重く ' + lrPct(p.rate) + '）' : '')
-    + '\n' + (p.quarters || []).slice(0, 8).map(function(q){ return lrQ(q.quarter) + ' ' + q.clientName + ' ' + lrPush(q.push) + ' ' + lrHitWord(q.hit); }).join('\n')
+    + (isNum(p.base) ? '\nいつも同じ向きなら ' + lrPct(p.base) + (isNum(p.expected) ? '（当たるはずの数 ' + p.expected.toFixed(1) + '）' : '') : '')
+    + '\n' + (p.quarters || []).slice(0, 8).map(function(q){ return lrQ(q.quarter) + ' ' + q.clientName + ' ' + lrPush(q.push) + ' ' + lrHitWord(q.hit) + lrBaseNote(q.base); }).join('\n')
     + ((p.quarters || []).length > 8 ? '\nほか ' + (p.quarters.length - 8) + ' 件' : ''); };
   // 同じ名前の行が 2 つ以上（別の人として数えた行。つないでいない同じ名前の人など）なら、名前の後ろにメーカーを小さく添えて見分ける
   var nameN = {};
@@ -4161,12 +4214,16 @@ function lrHitCard(h){
     return ms.length ? ' <span class="meta">' + esc(ms[0] + (ms.length > 1 ? ' ほか ' + (ms.length - 1) : '')) + '</span>' : '';
   };
   var rows = shown.map(function(p){
-    return [{ h: esc(p.name) + makerNote(p) + (p.own ? ' <span class="chip">自分</span>' : ''), tip: tipOf(p) }, p.hit + ' / ' + p.n, { h: lrPct(p.rate), tip: '新しい四半期ほど重く数えた当たる割合（四半期ごとに 0.8 倍）' }, p.makers];
+    return [{ h: esc(p.name) + makerNote(p) + (p.own ? ' <span class="chip">自分</span>' : ''), tip: tipOf(p) }, p.hit + ' / ' + p.n, { h: lrPct(p.rate), tip: '新しい四半期ほど重く数えた当たる割合（四半期ごとに 0.8 倍）' },
+      { h: lrPct(p.base), tip: 'いつも同じ向きと言った場合に当たる割合（割合と同じ重み）' }, p.makers];
   });
-  var cols = [['人', 'wrap colmin'], ['当たり', 'num', 112, '押した向きが当たった四半期 / 数えた四半期'], ['割合', 'num', 96, '新しい四半期ほど重く数えた当たる割合'], ['メーカー', 'num lr-hm', 96, '数えたメーカーの数']];   // スマホはメーカーの数を隠す（カーソルに四半期ごと）
+  // スマホはメーカーの数を隠す（カーソルに四半期ごと）
+  var cols = [['人', 'wrap colmin'], ['当たり', 'num', 112, '押した向きが当たった四半期 / 数えた四半期'], ['割合', 'num', 96, '新しい四半期ほど重く数えた当たる割合'],
+    ['基準', 'num', 96, 'いつも同じ向きと言った場合に当たる割合（同じ計画で、実績がその向きに外れた四半期の割合）。割合がこれより高くて、はじめて読みが当たっていると言えます'], ['メーカー', 'num lr-hm', 96, '数えたメーカーの数']];
   var body = ps.length ? '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>' + (ps.length > max ? lrMoreBtn('hits', ps.length - max) : '')
     : '<p class="meta" tabindex="0" data-tip="人ごとの中身は、予算策定担当以上の人に出します（本人の分は本人にも）">当たりの記録 ' + h.hidden + ' 件</p>';
-  return lrCard('人ごとの当たり', '入力で押した向き（上げる・下げる）が、締まった四半期の実績が過去の売上だけの予測から外れた向きと合っていたかです。1 人を四半期に 1 回だけ数えます。名前の順で、順位は付けません',
+  return lrCard('人ごとの当たり', '入力で押した向き（上げる・下げる）が、締まった四半期の実績が過去の売上だけの予測から外れた向きと合っていたかです。1 人を四半期に 1 回だけ数えます。'
+    + '基準は、いつも同じ向きと言った場合に当たる割合です。名前の順で、順位は付けません',
     body, lrHidChip(ps.length ? h.hidden : 0, 'ほかの人の当たり', true));
 }
 /** 調査ごとの当たり: AI 調査 1 回ごと（新しい順）。その回を使った予測の押しが、四半期の実績の外れの向きと合っていたか */
@@ -4174,10 +4231,12 @@ function lrResearchCard(r){
   if (!lrResearchAny(r)) return '';
   var xs = r.research || [], max = 10, shown = S.lr.more.research ? xs : xs.slice(0, max);
   var rows = shown.map(function(x){
-    var t = (x.quarters || []).map(function(q){ return lrQ(q.quarter) + ' ' + lrPush(q.push) + ' ' + lrHitWord(q.hit); }).join('\n');
-    return [lrDate(x.date) || '-', { h: esc(x.clientName) + ' <span class="meta">FY' + esc(x.fy) + '</span>', tip: t }, { h: x.hit + ' / ' + x.n, tip: t }];
+    var t = (x.quarters || []).map(function(q){ return lrQ(q.quarter) + ' ' + lrPush(q.push) + ' ' + lrHitWord(q.hit) + lrBaseNote(q.base); }).join('\n');
+    return [lrDate(x.date) || '-', { h: esc(x.clientName) + ' <span class="meta">FY' + esc(x.fy) + '</span>', tip: t }, { h: x.hit + ' / ' + x.n, tip: t },
+      { h: isNum(x.expected) ? x.expected.toFixed(1) + ' / ' + x.n : '-', tip: 'いつも同じ向きと言った場合に当たるはずの四半期の数' }];
   });
-  var cols = [['調べた日', '', 128], ['メーカー', 'wrap colmin'], ['当たり', 'num', 112, 'AI が押した向きが当たった四半期 / 数えた四半期']];
+  var cols = [['調べた日', '', 128], ['メーカー', 'wrap colmin'], ['当たり', 'num', 112, 'AI が押した向きが当たった四半期 / 数えた四半期'],
+    ['基準', 'num', 112, 'いつも同じ向きと言った場合に当たるはずの四半期の数（同じ計画で、実績がその向きに外れた四半期の割合から）']];
   var body = xs.length ? '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>' + (xs.length > max ? lrMoreBtn('research', xs.length - max) : '')
     : '<p class="meta" tabindex="0" data-tip="調査ごとの中身は、予算策定担当以上の人に出します">当たりの記録 ' + r.hidden + ' 件</p>';
   return lrCard('調査ごとの当たり', 'AI 調査 1 回ごとに、その調査を使った予測の押しの向きが、締まった四半期の実績が過去の売上だけの予測から外れた向きと合っていたかです',
@@ -4305,30 +4364,39 @@ function lrPendingCard(pend){
 }
 /** 小さなグラフの幅（2 つ並べる。スマホは 1 つ） */
 function lrHalfW(){ var w = chW(); return (window.innerWidth || 1280) <= 760 ? Math.max(220, w) : Math.max(240, Math.floor((w - 12) / 2) - 34); }
-/** 重みの学び: 情報源の種類ごとに、当たる割合の見立てが四半期ごとに細くなる様子（破線 = 最初の見立て・実線 = 学んだ後。古いほど薄い） */
+/**
+ * 重みの学び: 情報源の種類ごとに、当たる割合の見立てが四半期ごとに細くなる様子（破線 = 最初の見立て・実線 = 学んだ後。古いほど薄い）。
+ * 縦の線は、その種類の基準（いつも同じ向きと言った場合に当たる割合。サーバーの base。四半期の行は、その時点までの基準）
+ */
 function lrCurveCard(curves){
   if (!curves.length) return '';
   var w = lrHalfW(), rowsT = [];
   var range = function(ci){ return ci ? lrPct(ci[0]) + '〜' + lrPct(ci[1]) : '-'; };
   var panels = curves.map(function(c){
-    var qs = c.quarters, k = qs.length, lab = lrSrc(c.type, c.label), last = qs[k - 1], pr = c.prior;
+    var qs = c.quarters, k = qs.length, lab = lrSrc(c.type, c.label), last = qs[k - 1], pr = c.prior, base = lrBase(c);
     // 曲線に名前を付けない（グラフごとの凡例を出さない）。凡例は上に 1 つだけ（lr-key）
     var list = [{ alpha: pr.alpha0, beta: pr.beta0, dashed: true, tone: 'navy',
-      tip: lab + '\n最初の見立て（' + (pr.from === 'pool' ? '全計画から作った見立て' : 'まだ全計画の見立てが無いので半々') + '）\n当たる割合 ' + lrPct(pr.mean) + '（80% の幅 ' + range(pr.ci80) + '）' }];
-    rowsT.push([esc(lab), '最初の見立て', '-', '-', lrPct(pr.mean), range(pr.ci80)]);
+      tip: lab + '\n最初の見立て（' + (pr.from === 'pool' ? '全計画から作った見立て' : 'まだ全計画の見立てが無いので、いつも同じ向きと同じだけ') + '）\n当たる割合 ' + lrPct(pr.mean) + '（80% の幅 ' + range(pr.ci80) + '）' }];
+    rowsT.push([esc(lab), '最初の見立て', '-', '-', lrPct(base), lrPct(pr.mean), range(pr.ci80)]);
     qs.forEach(function(q, i){
+      var qb = isNum(q.base) ? q.base : base;
       list.push({ alpha: q.alpha, beta: q.beta, opacity: k === 1 ? 1 : 0.25 + 0.75 * i / (k - 1),
-        tip: lab + '\n' + lrQ(q.quarter) + 'までに学んだ後' + (i === k - 1 ? '（最新）' : '') + '\n回数 ' + q.cumN + '（この四半期 ' + q.n + '）・当たり ' + q.cumHit + '\n当たる割合 ' + lrPct(q.mean) + '（80% の幅 ' + range(q.ci80) + '）' });
-      rowsT.push([esc(lab), esc(lrQ(q.quarter)), q.cumN, q.cumHit, lrPct(q.mean), range(q.ci80)]);
+        tip: lab + '\n' + lrQ(q.quarter) + 'までに学んだ後' + (i === k - 1 ? '（最新）' : '') + '\n回数 ' + q.cumN + '（この四半期 ' + q.n + '）・当たり ' + q.cumHit
+          + '\nいつも同じ向きなら ' + lrPct(qb) + '\n当たる割合 ' + lrPct(q.mean) + '（80% の幅 ' + range(q.ci80) + '）' });
+      rowsT.push([esc(lab), esc(lrQ(q.quarter)), q.cumN, q.cumHit, lrPct(qb), lrPct(q.mean), range(q.ci80)]);
     });
-    return '<div class="lr-panel"><div class="lr-ph"><h3>' + esc(lab) + '</h3><span class="meta" tabindex="0" data-tip="' + esc(lab + '\n当たり ' + (last.cumHit || 0) + ' / ' + (last.cumN || 0) + ' 回（' + lrQ(last.quarter) + 'まで）\n今の見立て ' + lrPct(last.mean) + '（80% の幅 ' + range(last.ci80) + '）') + '">当たり ' + (isNum(c.hit) ? c.hit : last.cumHit || 0) + ' / ' + (isNum(c.n) ? c.n : last.cumN || 0) + ' 回・今 ' + lrPct(last.mean) + '</span></div>'
-      + chartDensity(list, { w: w, h: 180, ref: 0.5, label: lab + 'の当たる割合の見立て' }) + '</div>';
+    var lastBase = isNum(last.base) ? last.base : base, vs = lrVsBase({ ci80: last.ci80, base: lastBase });
+    return '<div class="lr-panel"><div class="lr-ph"><h3>' + esc(lab) + '</h3><span class="meta" tabindex="0" data-tip="' + esc(lab + '\n当たり ' + (last.cumHit || 0) + ' / ' + (last.cumN || 0) + ' 回（' + lrQ(last.quarter) + 'まで）\nいつも同じ向きなら ' + lrPct(lastBase) + '\n今の見立て ' + lrPct(last.mean) + '（80% の幅 ' + range(last.ci80) + '）\n' + LR_VS_BASE[vs]) + '">当たり ' + (isNum(c.hit) ? c.hit : last.cumHit || 0) + ' / ' + (isNum(c.n) ? c.n : last.cumN || 0) + ' 回・今 ' + lrPct(last.mean) + '・基準 ' + lrPct(lastBase) + '</span></div>'
+      + chartDensity(list, { w: w, h: 180, ref: lastBase, label: lab + 'の当たる割合の見立て' }) + '</div>';
   }).join('');
-  var key = '<p class="lr-key" aria-hidden="true"><span><i class="lr-k-dash"></i>最初の見立て</span><span><i class="lr-k-ln lite"></i><i class="lr-k-ln"></i>学んだ後（四半期ごと。濃いほど新しい）</span><span><i class="lr-k-ref"></i>半々（50%）</span></p>';
-  var table = lrTable([['情報源', 'wrap colmin'], ['時点', '', 160], ['回数', 'num', 88, 'その時点までに数えた回数'], ['当たり', 'num', 88], ['確かさ', 'num', 96, '当たる割合の見立ての平均'], ['80% の幅', 'num', 128, '10 回に 8 回はこの間に入る見込み']], rowsT);
-  return lrCard('重みの学び', '入力・見解・AI の押した向きが当たる割合を、四半期ごとに学び直した見立てです。山の位置が当たる割合、山が細いほど確かです。半々（50%）より右なら、当てずっぽうより当たっています',
+  var key = '<p class="lr-key" aria-hidden="true"><span><i class="lr-k-dash"></i>最初の見立て</span><span><i class="lr-k-ln lite"></i><i class="lr-k-ln"></i>学んだ後（四半期ごと。濃いほど新しい）</span><span><i class="lr-k-ref"></i>いつも同じ向き</span></p>';
+  var table = lrTable([['情報源', 'wrap colmin'], ['時点', '', 160], ['回数', 'num', 88, 'その時点までに数えた回数'], ['当たり', 'num', 88],
+    ['基準', 'num', 96, 'いつも同じ向きと言った場合に当たる割合（その時点までの押した月から）'], ['確かさ', 'num', 96, '当たる割合の見立ての平均'], ['80% の幅', 'num', 128, '10 回に 8 回はこの間に入る見込み']], rowsT);
+  return lrCard('重みの学び', '入力・見解・AI の押した向きが当たる割合を、四半期ごとに学び直した見立てです。山の位置が当たる割合、山が細いほど確かです。'
+    + '縦の線はいつも同じ向きと言った場合に当たる割合で、80% の幅の左の端がこの線より右なら、いつも同じ向きと言うよりも当たっています',
     chartOrTable('lrCurve', key + '<div class="lr-mult">' + panels + '</div>', table),
-    lrMore('破線 = 事前分布（全計画から作った見立て。無ければ Beta(2, 2)）。実線 = 四半期ごとに当たり・外れを足した事後分布 Beta(α + 当たり, β + 外れ)。80% の幅は 10%〜90% 点です'));
+    lrMore('破線 = 事前分布（中心は基準に、全計画から作った見立ての上乗せを足した所。無ければ基準）。実線 = 四半期ごとに当たり・外れを足した事後分布 Beta(α + 当たり, β + 外れ)。'
+      + '基準 = 押した月ごとに、その向きへ実績が外れた月の割合（同じ計画から。月が少なければ全計画の割合に寄せる）の平均。80% の幅は 10%〜90% 点です'));
 }
 /**
  * 偏りの縮め: 計画ごとの読みのクセを、全計画の平均の方へ寄せた値（予測には効かせず、見比べるだけ）。

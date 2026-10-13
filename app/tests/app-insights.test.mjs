@@ -229,17 +229,31 @@ const people = env.call('apiPeopleLearning()');
   assert.deepEqual([tk.n, tk.hit], [5, 4], '甲 2/2 + 乙 2/3');
   assert.deepEqual(tk.plans.map((p) => [p.clientName, p.n, p.hit, p.appliedR]).sort(), [['乙製薬', 3, 2, 0.9], ['甲製薬', 2, 2, 1.1]]);
   close(tk.appliedR, 1.0, 1e-9, '今の信頼度（計画の平均）');
-  // 事前分布: 一番新しい POOL_PRIOR（μ = 1.2 / 2 = 0.6・強さ 10 → Beta(6, 4)）。事後 Beta(10, 5)
-  assert.deepEqual([tk.prior.alpha0, tk.prior.beta0, tk.prior.from], [6, 4, 'pool']);
-  assert.deepEqual([tk.alpha, tk.beta], [10, 5]);
-  close(tk.postMean, 10 / 15);
+  // 基準（いつも同じ向きと言った場合に当たる割合。2026-10-13）: 比べられた月の外れの向きは 甲 [上 1（4 月）・下 1（5 月）。6 月は外れ 0]・
+  // 乙 [上 2（4・7 月）・下 1（5 月）]。全計画の上の割合 3/5。3 か月ぶん寄せる: 甲 上 (1 + 3 × 0.6) / 5 = 0.56、乙 上 (2 + 1.8) / 6
+  const upA = 2.8 / 5, upB = 3.8 / 6;
+  // 鷹野: 甲 4 月 上（0.56）・5 月 下（0.44）、乙 3 か月とも上（0.633）。基準で当たるはずの数 2.9（割合 0.58）
+  close(tk.expected, upA + (1 - upA) + 3 * upB, 1e-12);
+  close(tk.base, (upA + (1 - upA) + 3 * upB) / 5, 1e-12);
+  assert.deepEqual(tk.plans.map((p) => [p.clientName, Math.round(p.expected * 1e9) / 1e9]).sort(), [['乙製薬', 1.9], ['甲製薬', 1]]);
+  // 事前分布: 一番新しい POOL_PRIOR（μ = 1.2 / 2 = 0.6・強さ 10）を基準に合わせる: 中心 = 基準 0.58 + (0.6 − 0.5) = 0.68 → Beta(6.8, 3.2)。事後 Beta(10.8, 4.2)
+  close(tk.prior.alpha0, 6.8, 1e-9); close(tk.prior.beta0, 3.2, 1e-9);
+  assert.equal(tk.prior.from, 'pool');
+  close(tk.alpha, 10.8, 1e-9); close(tk.beta, 4.2, 1e-9);
+  close(tk.postMean, 10.8 / 15);
   assert.ok(tk.ci80[0] < tk.postMean && tk.postMean < tk.ci80[1]);
+  assert.equal(tk.vsBase, tk.ci80[0] > tk.base ? 'above' : '', 'いつも同じ向きより当たっていると言うのは、80% の区間の下の端が基準より上のときだけ');
   assert.deepEqual([get('opinion', '田中').n, get('opinion', '田中').hit], [1, 0]);
+  close(get('opinion', '田中').base, 1 - upB, 1e-12, '田中は乙の 4 月に下と言った（下の基準）');
   const sato = get('factor_product', '佐藤');
-  assert.deepEqual([sato.n, sato.hit, sato.alpha, sato.beta, sato.prior.from, sato.appliedR], [2, 0, 2, 4, 'default', null], '事前分布が無ければ Beta(2, 2)');
+  // 佐藤: 甲 4 月 下（外れ・基準 0.44）・5 月 上（外れ・基準 0.56）。基準の割合 0.5 → 事前分布が無ければ基準を中心に強さ 4 = Beta(2, 2)
+  assert.deepEqual([sato.n, sato.hit, sato.prior.from, sato.appliedR], [2, 0, 'default', null]);
+  close(sato.base, 0.5, 1e-12);
+  close(sato.alpha, 2, 1e-9); close(sato.beta, 4, 1e-9);
   assert.deepEqual([get('ai_topic', 'Market').n, get('ai_topic', 'Market').hit], [2, 1]);
+  close(get('ai_topic', 'Market').expected, 2 * upA, 1e-12, 'Market は甲の 4・5 月に上と言った');
   assert.equal(S.length, 4);
-  assert.ok(S.every((s, i) => i === 0 || s.ci80[0] <= S[i - 1].ci80[0]), '80% の区間の下の端が高い順');
+  assert.ok(S.every((s, i) => i === 0 || s.ci80[0] - s.base <= S[i - 1].ci80[0] - S[i - 1].base + 1e-12), '80% の区間の下の端と基準の差が大きい順');
   assert.equal(S[0].key, '鷹野');
 }
 {
@@ -273,8 +287,18 @@ const ai = env.call('apiAiLearning()');
   // 信頼度の学び: 種類ごとに、四半期ごとに積み上げた事後（Beta(α0 + 当たり, β0 + 外れ)）
   assert.deepEqual(ai.curves.map((c) => c.type), ['factor_product', 'factor_client', 'opinion', 'ai_topic', 'vertex_forecast']);
   const op = ai.curves.find((c) => c.type === 'opinion');
-  assert.deepEqual([op.prior.alpha0, op.prior.beta0, op.prior.from], [6, 4, 'pool']);
-  assert.deepEqual(op.quarters.map((q) => [q.quarter, q.n, q.hit, q.cumN, q.alpha, q.beta]), [['FY2026-Q1', 5, 3, 5, 9, 6], ['FY2026-Q2', 1, 1, 6, 10, 6]]);
+  // 基準: 見解の押した 6 か月（鷹野 5・田中 1）の基準の平均。事前分布の中心 = 基準 + (μ 0.6 − 0.5)（人と話題ごとの当たりと同じ）
+  const upA = 2.8 / 5, upB = 3.8 / 6;
+  const opExp = upA + (1 - upA) + 3 * upB + (1 - upB);
+  close(op.base, opExp / 6, 1e-12);
+  close(op.expected, opExp, 1e-12);
+  close(op.prior.alpha0, (opExp / 6 + 0.1) * 10, 1e-9); close(op.prior.beta0, (1 - opExp / 6 - 0.1) * 10, 1e-9);
+  assert.equal(op.prior.from, 'pool');
+  close(op.prior.mu, 0.6, 1e-12, 'mu は POOL_PRIOR のまま');
+  assert.deepEqual(op.quarters.map((q) => [q.quarter, q.n, q.hit, q.cumN]), [['FY2026-Q1', 5, 3, 5], ['FY2026-Q2', 1, 1, 6]]);
+  op.quarters.forEach((q) => { close(q.alpha, op.prior.alpha0 + (q.quarter === 'FY2026-Q1' ? 3 : 4), 1e-9); close(q.beta, op.prior.beta0 + 2, 1e-9); });
+  close(op.quarters[0].base, (upA + (1 - upA) + 2 * upB + (1 - upB)) / 5, 1e-12, 'その時点までの基準（Q1 は 7 月の乙を含まない）');
+  close(op.quarters[1].base, opExp / 6, 1e-12);
   assert.deepEqual([op.n, op.hit], [6, 4]);
   const width = (ci) => ci[1] - ci[0];
   assert.ok(width(op.quarters[1].ci80) < width(op.quarters[0].ci80) && width(op.quarters[0].ci80) < width(op.prior.ci80), '数えるほど区間が狭くなる');
@@ -593,10 +617,14 @@ const ai = env.call('apiAiLearning()');
   // 当たりは種類ごと（人や話題をまとめる）
   assert.deepEqual(sum.scoreboard.map((s) => [s.type, s.n, s.hit, s.sources]).sort(), [['ai_topic', 2, 1, 1], ['factor_product', 2, 0, 1], ['opinion', 6, 4, 2]]);
   const op = sum.scoreboard.find((s) => s.type === 'opinion');
-  assert.deepEqual([op.alpha, op.beta, op.prior.from], [10, 6, 'pool'], 'Beta(6, 4) に 4 当たり・2 外れ');
+  // 事前分布は種類の基準（AI の学びの曲線と同じ）に合わせる: Beta(α0, β0) に 4 当たり・2 外れ
+  const opCurve = aiSum.curves.find((c) => c.type === 'opinion');
+  close(op.base, opCurve.base, 1e-12);
+  close(op.alpha, opCurve.prior.alpha0 + 4, 1e-9); close(op.beta, opCurve.prior.beta0 + 2, 1e-9);
+  assert.equal(op.prior.from, 'pool');
   assert.ok(sum.scoreboard.every((s) => !('appliedR' in s)), '閲覧の人には今の信頼度を出さない（1 人だけの種類ではその人の値になる。2026-10-07）');
   close(full.scoreboard.find((s) => s.type === 'opinion' && s.key === '鷹野').appliedR, 1.0, 1e-9, '予算策定担当以上には人ごとの今の信頼度を出す（鷹野: 甲 1.1・乙 0.9 の平均）');
-  assert.ok(sum.scoreboard.every((s, i) => i === 0 || s.ci80[0] <= sum.scoreboard[i - 1].ci80[0]));
+  assert.ok(sum.scoreboard.every((s, i) => i === 0 || s.ci80[0] - s.base <= sum.scoreboard[i - 1].ci80[0] - sum.scoreboard[i - 1].base + 1e-12));
   // 判断の記録: 判断した人は無し。信頼度の対象は種類まで
   const pb1 = sum.decisions.find((x) => x.proposalId === 'P-B-1');
   assert.deepEqual([pb1.target, pb1.targetLabel, pb1.status, pb1.applied], ['reliability:opinion', '見解の信頼度', '承認', true]);
@@ -803,7 +831,7 @@ const ai = env.call('apiAiLearning()');
   assert.deepEqual(ai.curves.find((c) => c.type === 'opinion').quarters.map((q) => [q.quarter, q.n, q.hit]), [['FY2026-Q1', 1, 1], ['FY2026-Q2', 2, 1]]);
   // 振り返り: 今の版で測った 6 月だけ（前の版の 4 月の行は、人の記入があっても出さない）
   assert.deepEqual([pl.lessons.map((l) => l.ym), pl.summary.months, pl.openActions.map((l) => l.ym)], [['2026/06'], 1, ['2026/06']]);
-  // 控え（{ rows, noPre, cur, from }）から読んでも同じ。前の形の控え（cur や from が無い）は使わずに数え直す
+  // 控え（{ rows, dirs, noPre, cur, from }）から読んでも同じ。前の形の控え（dirs・cur・from が無い）は使わずに数え直す
   for (const k of Object.keys(e8.cache)) if (!k.includes('EVD_')) delete e8.cache[k];
   const again = e8.call('apiPeopleLearning()');
   assert.deepEqual([again.lessons, again.scoreboard, again.noPreMonth], [pl.lessons, pl.scoreboard, pl.noPreMonth]);
@@ -813,28 +841,38 @@ const ai = env.call('apiAiLearning()');
     return e8.call('apiPeopleLearning()');
   };
   const b2At = D(2026, 9, 1).getTime();   // 今の版の B-2 が初めて動いた時刻（6 月の振り返りの行は 10/06 に書いた）
-  const empty = fromCache({ rows: [], noPre: [], cur: [], from: null });
+  const empty = fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: [], from: null });
   assert.deepEqual([empty.lessons, empty.scoreboard, empty.noPreMonth, empty.summary.scoredMonths], [[], [], 0, 0], '今の形の控えはそのまま使う（振り返りの月も控えから）');
-  const cached = fromCache({ rows: [], noPre: [], cur: [['2026/06', 1100, 1000]], from: b2At });
+  const cached = fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: [['2026/06', 1100, 1000]], from: b2At });
   assert.deepEqual([cached.lessons.map((l) => [l.ym, l.pred, l.actual]), cached.scoreboard, cached.summary.scoredMonths], [[['2026/06', 1100, 1000]], [], 1],
     '振り返りの月と数字・初めの B-2 の時刻も控えから（[月, 予測, 実績]・from）');
-  assert.deepEqual(fromCache({ rows: [], noPre: [], cur: [['2026/06', 900, 1000]], from: b2At }).lessons, [], '控えの数字と違う行は出さない');
-  assert.deepEqual(fromCache({ rows: [], noPre: [], cur: [['2026/06', 1100, 1000]], from: D(2026, 10, 7).getTime() }).lessons, [],
+  assert.deepEqual(fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: [['2026/06', 900, 1000]], from: b2At }).lessons, [], '控えの数字と違う行は出さない');
+  assert.deepEqual(fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: [['2026/06', 1100, 1000]], from: D(2026, 10, 7).getTime() }).lessons, [],
     '控えの時刻（今の版の B-2 が初めて動いた時刻）より前に書いた行は出さない');
-  const noB2 = fromCache({ rows: [], noPre: [], cur: [['2026/06', 1100, 1000]], from: null });
+  const noB2 = fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: [['2026/06', 1100, 1000]], from: null });
   assert.deepEqual([noB2.lessons, noB2.summary.scoredMonths], [[], 1], '今の版の B-2 の時刻が無ければ出さない');
-  const old = fromCache({ rows: [], noPre: [] });
+  const old = fromCache({ rows: [], dirs: [0, 0], noPre: [] });
   assert.deepEqual([old.lessons, old.scoreboard, old.noPreMonth], [pl.lessons, pl.scoreboard, pl.noPreMonth], '前の形の控え（cur が無い）は数え直す');
-  const noFrom = fromCache({ rows: [], noPre: [], cur: [] });
+  const noFrom = fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: [] });
   assert.deepEqual([noFrom.lessons, noFrom.scoreboard, noFrom.noPreMonth, noFrom.summary.scoredMonths], [pl.lessons, pl.scoreboard, pl.noPreMonth, 3],
     '前の形の控え（from が無い。cur の実績は B-4 の形にする前のもの）も数え直す');
-  const monthsOnly = fromCache({ rows: [], noPre: [], cur: ['2026/06', '2026/07', '2026/08'], from: b2At });
+  const monthsOnly = fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: ['2026/06', '2026/07', '2026/08'], from: b2At });
   assert.deepEqual([monthsOnly.lessons, monthsOnly.scoreboard, monthsOnly.noPreMonth], [pl.lessons, pl.scoreboard, pl.noPreMonth],
     '前の形の控え（cur が月だけ）も数え直す');
-  const timed = fromCache({ rows: [], noPre: [], cur: [['2026/06', Date.parse('2026-10-06T03:00:00Z')], ['2026/07', 0]], from: b2At });
+  const timed = fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: [['2026/06', Date.parse('2026-10-06T03:00:00Z')], ['2026/07', 0]], from: b2At });
   assert.deepEqual([timed.lessons, timed.scoreboard, timed.noPreMonth, timed.summary.scoredMonths], [pl.lessons, pl.scoreboard, pl.noPreMonth, 3],
     '前の形の控え（[月, B-2 が書いた時刻] の 2 つ組。時刻を予測と読まない）も数え直す');
-  assert.deepEqual(fromCache({ rows: [], noPre: [], cur: [], from: '2026-09-01' }).summary.scoredMonths, 3, '時刻が数でない控えも数え直す');
+  assert.deepEqual(fromCache({ rows: [], dirs: [0, 0], noPre: [], cur: [], from: '2026-09-01' }).summary.scoredMonths, 3, '時刻が数でない控えも数え直す');
+  // 当たりの基準（2026-10-13）の前の形の控え（dirs が無い・行が [月, 種類, 人や話題, 当たり] の 4 つ組）は数え直す（基準を付けられないため）
+  const noDirs = fromCache({ rows: [['2026/06', 'opinion', '鷹野', 1]], noPre: [], cur: [['2026/06', 1100, 1000]], from: b2At });
+  assert.deepEqual([noDirs.scoreboard, noDirs.noPreMonth], [pl.scoreboard, pl.noPreMonth], 'dirs の無い控えは数え直す');
+  const fourCols = fromCache({ rows: [['2026/06', 'opinion', '鷹野', 1]], dirs: [2, 1], noPre: [], cur: [['2026/06', 1100, 1000]], from: b2At });
+  assert.deepEqual(fourCols.scoreboard, pl.scoreboard, '行が 4 つ組の控えは数え直す');
+  // 今の形の控えなら、基準はその [上, 下] から付ける（全計画の割合はこの 1 計画だけ → 寄せても同じ割合）
+  const withDirs = fromCache({ rows: [['2026/06', 'opinion', '鷹野', 1, 1], ['2026/08', 'opinion', '鷹野', 0, -1]], dirs: [2, 1], noPre: [], cur: [], from: b2At });
+  const wt = withDirs.scoreboard.find((x) => x.key === '鷹野');
+  assert.deepEqual([wt.n, wt.hit], [2, 1]);
+  close(wt.expected, 2 / 3 + 1 / 3, 1e-12, '上の基準 2/3・下の基準 1/3');
   // 行は消さない
   assert.equal(e8.table('ENG_EVAL_LOG').filter((r) => r.plan_id === id).length, 5 * 3);
   assert.equal(e8.table('ENG_EVAL_LOG').filter((r) => r.plan_id === id && r.evaluation_policy_version === V2).length, 2 * 3);

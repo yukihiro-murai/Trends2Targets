@@ -17,6 +17,10 @@
  *   人の判断で入れるもの
  *     - 情報源の信頼度の事前分布（ベータ二項の経験ベイズ）: 全計画の RELIABILITY_EVIDENCE（当たった数 / 数）から作り、
  *       各計画の POOL_PRIOR に入れる。旧来の C-1（四半期レビューの提案）が事前分布として使う（予測に効くのは、提案を人が承認してから）。
+ *       当たる割合は基準を引いたもの（0.5 + (当たり − 基準で当たるはずの数) ÷ 数。基準 = いつも同じ向きと言った場合に当たる割合。
+ *       2026-10-13 村井さん承認。旧来の C-1 が RELIABILITY_EVIDENCE の note に「expected=基準で当たるはずの数」を書く。その無い行は、
+ *       基準を引けないので読み飛ばす（消さない）。合わせて、全計画の「実績が統計だけの予測より上に外れた」割合（hit_base）も書く
+ *       （旧来の C-1 が、月の少ない計画の基準をこの割合へ寄せる）。
  *       締まった月で数えた行だけを使う（D4。appEvidenceClosed_。締まっていない月で数えた行は消さずに読み飛ばす）。
  *       今の検証の版の B-2 がその計画で初めて動いた後に数えた行だけを使う（D6。appEvidencePolicyFrom_。それより前の C-1 は、
  *       月が始まった後の予測で測った前の版の行で数えた。消さずに読み飛ばす）
@@ -427,17 +431,27 @@ function appEvidencePolicyFrom_(ids) {
   return out;
 }
 
+/** RELIABILITY_EVIDENCE の note の「expected=数」（旧来の C-1 が書く、基準で当たるはずの数。2026-10-13 から）。無ければ null */
+function appEvidenceExpected_(r) {
+  const m = /(?:^|[\s;])expected=(-?\d+(?:\.\d+)?)(?:$|[\s;])/.exec(String(r && r.note || ''));
+  return m ? Number(m[1]) : null;
+}
+
 /**
  * 全計画の当たった数から、情報源ごとの事前分布を作る（書かない。画面で見比べる）。
  * 締まった月で数えた行（appEvidenceClosed_）で、その計画で今の版の B-2 が初めて動いた後に数えた行（appEvidencePolicyFrom_）だけを使う。
- * 今の版の B-2 がまだ動いていない計画の行は使わない。使わなかった行の数は skippedEvidence（行は消さない）
+ * 今の版の B-2 がまだ動いていない計画の行は使わない。使わなかった行の数は skippedEvidence（行は消さない）。
+ * 当たる割合は基準を引いたもの（hitRate = 0.5 + (当たり − 基準で当たるはずの数) ÷ 数。いつも同じ向きと言うだけなら 0.5 → pooledR = 1.0）。
+ * 基準で当たるはずの数の無い行（2026-10-13 より前の C-1 が数えた行）は使わない（noBaseEvidence）。
+ * hitBase = 全計画の「実績が統計だけの予測より上に外れた」割合（{ share, months, plans }。比べられた月が無ければ null。appPoolHitBase_）
  */
 function appPoolPreview_() {
   const plans = appReadTable_('PLANS').filter(p => p.state !== 'ARCHIVED');
   const names = appClientNameMap_();
-  const per = {};   // type → [{ planId, n, hit }]
+  const per = {};   // type → [{ planId, n, hit, expected }]
   const current = {};
   let skipped = 0;
+  let noBase = 0;
   let from = {};
   try { from = appEvidencePolicyFrom_(plans.map(p => p.plan_id)); } catch (e) { Logger.log('今の版の B-2 の時刻を読めません（どの行も使いません）: ' + (e && e.message ? e.message : e)); }
   plans.forEach(p => {
@@ -451,39 +465,69 @@ function appPoolPreview_() {
       if (!appEvidenceClosed_(r)) { skipped++; return; }   // 締まっていない月で数えた行は読み飛ばす（D4）
       const at = appEvidenceMs_(r.computed_at);
       if (since === null || at < since) { skipped++; return; }   // 今の版の B-2 の前に、前の版の C-1 が数えた行は読み飛ばす（D6）
-      const o = sum[k] = sum[k] || { n: 0, hit: 0 }; o.n += n; o.hit += h;
+      const ex = appEvidenceExpected_(r);
+      if (ex === null) { noBase++; return; }   // 基準を引けない行（2026-10-13 より前の C-1 が数えた）は読み飛ばす
+      const o = sum[k] = sum[k] || { n: 0, hit: 0, expected: 0 }; o.n += n; o.hit += h; o.expected += ex;
     });
-    Object.keys(sum).forEach(k => { (per[k] = per[k] || []).push({ planId: p.plan_id, client: names[p.client_id] || p.client_label, fy: p.fy, n: sum[k].n, hit: sum[k].hit }); });
+    Object.keys(sum).forEach(k => { (per[k] = per[k] || []).push({ planId: p.plan_id, client: names[p.client_id] || p.client_label, fy: p.fy, n: sum[k].n, hit: sum[k].hit, expected: sum[k].expected }); });
     current[p.plan_id] = {};
     t.POOL_PRIOR.forEach(r => { current[p.plan_id][String(r.pool_scope)] = { value: appNum_(r.pooled_value), precision: appNum_(r.precision), nClients: appNum_(r.n_clients) }; });
   });
+  // 基準を引いた当たる割合（0〜1 に収める）
+  const over = (hit, expected, n) => Math.min(1, Math.max(0, 0.5 + (hit - expected) / n));
   const types = APP_SOURCE_TYPES.map(type => {
     const xs = (per[type] || []).filter(x => x.n >= APP_POOL_MIN_SAMPLES);
-    const N = xs.reduce((s, x) => s + x.n, 0), Hh = xs.reduce((s, x) => s + x.hit, 0);
-    const out = { type: type, label: APP_SOURCE_LABELS[type] || type, plans: xs.length, n: N, hit: Hh, ok: xs.length >= APP_POOL_MIN_PLANS && N > 0 };
+    const N = xs.reduce((s, x) => s + x.n, 0), Hh = xs.reduce((s, x) => s + x.hit, 0), E = xs.reduce((s, x) => s + x.expected, 0);
+    const out = { type: type, label: APP_SOURCE_LABELS[type] || type, plans: xs.length, n: N, hit: Hh, expected: E, ok: xs.length >= APP_POOL_MIN_PLANS && N > 0 };
     if (!out.ok) { out.note = '計画が ' + APP_POOL_MIN_PLANS + ' つ以上（それぞれ ' + APP_POOL_MIN_SAMPLES + ' 件以上）になると作れます'; return out; }
-    const mu = Hh / N;
-    // 計画どうしのばらつき（二項のばらつきを除いた分）から、事前分布の強さ（α + β）を決める
-    const wv = xs.reduce((s, x) => s + x.n * Math.pow(x.hit / x.n - mu, 2), 0) / N;
+    const mu = over(Hh, E, N);
+    // 計画どうしのばらつき（二項のばらつきを除いた分）から、事前分布の強さ（α + β）を決める（基準を引いた割合で）
+    const wv = xs.reduce((s, x) => s + x.n * Math.pow(over(x.hit, x.expected, x.n) - mu, 2), 0) / N;
     const nbar = N / xs.length;
     const between = Math.max(0, wv - mu * (1 - mu) / nbar);
     const precision = between > 0 ? Math.min(APP_POOL_PRECISION_MAX, Math.max(APP_POOL_PRECISION_MIN, mu * (1 - mu) / between - 1)) : APP_POOL_PRECISION_MAX;
-    Object.assign(out, { hitRate: mu, alpha: mu * precision, beta: (1 - mu) * precision, precision: Math.round(precision * 10) / 10,
+    Object.assign(out, { hitRate: mu, rawHitRate: Hh / N, baseRate: E / N, alpha: mu * precision, beta: (1 - mu) * precision, precision: Math.round(precision * 10) / 10,
       pooledR: Math.round(Math.min(1.5, Math.max(0, 2 * mu)) * 1000) / 1000, between: between,
-      perPlan: xs.map(x => ({ client: x.client, fy: x.fy, n: x.n, hitRate: x.hit / x.n,
-        posterior: (x.hit + mu * precision) / (x.n + precision) })) });   // その計画の当たる割合の事後の平均（参考）
+      perPlan: xs.map(x => ({ client: x.client, fy: x.fy, n: x.n, hitRate: over(x.hit, x.expected, x.n), rawHitRate: x.hit / x.n, baseRate: x.expected / x.n,
+        posterior: (over(x.hit, x.expected, x.n) * x.n + mu * precision) / (x.n + precision) })) });   // その計画の基準を引いた当たる割合の事後の平均（参考）
     return out;
   });
-  return { types: types, plans: plans.length, current: current, ready: types.some(t => t.ok), skippedEvidence: skipped };
+  return { types: types, plans: plans.length, current: current, ready: types.some(t => t.ok), skippedEvidence: skipped, noBaseEvidence: noBase,
+    hitBase: appPoolHitBase_(plans.map(p => p.plan_id)) };
+}
+
+/**
+ * 全計画の「実績が統計だけの予測より上に外れた」割合（当たりの基準を寄せる先。{ share（0〜1）, months, plans }）。
+ * 人の学びと同じ数え方（appInsightEvidence_ の計画ごとの [上, 下]。締まった月を、その月が始まる前の予測で）。比べられた月が無ければ null
+ */
+function appPoolHitBase_(ids) {
+  if (!ids.length) return null;
+  try {
+    const dirs = {};
+    appInsightEvidence_(ids, appInsightTables_(ids), null, null, null, dirs);
+    const used = ids.filter(id => dirs[id] && dirs[id][0] + dirs[id][1] > 0);
+    const months = used.reduce((s, id) => s + dirs[id][0] + dirs[id][1], 0);
+    return months ? { share: Math.round(appHitBaseShare_(dirs) * 10000) / 10000, months: months, plans: used.length } : null;
+  } catch (e) {
+    Logger.log('全計画の外れの向きを数えられません（基準は計画ごとの割合のまま）: ' + (e && e.message ? e.message : e));
+    return null;
+  }
 }
 
 /**
  * 全計画の POOL_PRIOR に事前分布を書く（PLAN.RUN と同じく、計算用ブックで旧来の表の形のまま書き、控えを置いてから保存）。
- * 計画が多いときは、1 回の実行の目安（4 分）を過ぎたら残りの計画を続きの処理に回す。値が同じ行は書き直さない（更新日も変えない）
+ * 計画が多いときは、1 回の実行の目安（4 分）を過ぎたら残りの計画を続きの処理に回す。値が同じ行は書き直さない（更新日も変えない）。
+ * 情報源ごとの行（pool_scope = reliability:<種類>・param_key = reliability_r）に加えて、全計画の外れの向きの割合
+ * （pool_scope = hit_base・param_key = up_share・precision = 寄せる強さの月の数。旧来の C-1 の当たりの基準。appPoolPreview_ の hitBase）を書く
  */
 function appPoolApply_(ctx, p) {
   const t0 = new Date().getTime();
-  const rowsFor = p && p.rowsFor ? p.rowsFor : appPoolPreview_().types.filter(t => t.ok).map(t => ({ scope: 'reliability:' + t.type, value: t.pooledR, precision: t.precision, nClients: t.plans }));
+  let rowsFor = p && p.rowsFor;
+  if (!rowsFor) {
+    const pv = appPoolPreview_();
+    rowsFor = pv.types.filter(t => t.ok).map(t => ({ scope: 'reliability:' + t.type, param: 'reliability_r', value: t.pooledR, precision: t.precision, nClients: t.plans }));
+    if (rowsFor.length && pv.hitBase) rowsFor.push({ scope: 'hit_base', param: 'up_share', value: pv.hitBase.share, precision: APP_HIT_BASE_MONTHS, nClients: pv.hitBase.plans });
+  }
   if (!rowsFor.length) throw new Error('事前分布を作れる情報源がまだありません（計画が ' + APP_POOL_MIN_PLANS + ' つ以上要ります）。');
   const remaining = p && p.remaining ? p.remaining.slice() : appReadTable_('PLANS').filter(x => x.state !== 'ARCHIVED' && !appYearIsFrozen_(x.fy)).map(x => x.plan_id);
   const done = (p && p.done) || [];
@@ -505,11 +549,12 @@ function appPoolApply_(ctx, p) {
       const vals = last >= 2 ? sh.getRange(2, 1, last - 1, header.length).getValues() : [];
       let changed = 0;
       rowsFor.forEach(x => {
-        const i = vals.findIndex(v => String(v[col('pool_scope')]) === x.scope && String(v[col('param_key')]) === 'reliability_r');
+        const param = x.param || 'reliability_r';   // 前の版の続きの処理（param の無い行）は信頼度の行
+        const i = vals.findIndex(v => String(v[col('pool_scope')]) === x.scope && String(v[col('param_key')]) === param);
         const same = i >= 0 && Number(vals[i][col('pooled_value')]) === x.value && Number(vals[i][col('precision')]) === x.precision && Number(vals[i][col('n_clients')]) === x.nClients;
         if (same) return;
-        const row = header.map(h => ({ pool_scope: x.scope, param_key: 'reliability_r', pooled_value: x.value, precision: x.precision, n_clients: x.nClients,
-          updated_at: new Date(), updated_by: ctx.actor, note: '新アプリ: 全計画のベータ二項の経験ベイズ' })[h]);
+        const row = header.map(h => ({ pool_scope: x.scope, param_key: param, pooled_value: x.value, precision: x.precision, n_clients: x.nClients,
+          updated_at: new Date(), updated_by: ctx.actor, note: param === 'up_share' ? '新アプリ: 全計画の外れの向きの割合（当たりの基準）' : '新アプリ: 全計画のベータ二項の経験ベイズ（基準を引いた当たり）' })[h]);
         if (i >= 0) vals[i] = row; else vals.push(row);
         changed++;
       });

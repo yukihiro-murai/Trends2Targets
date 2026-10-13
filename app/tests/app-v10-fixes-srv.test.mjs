@@ -530,9 +530,10 @@ const NEW_TABLES = ['INPUT_LOG', 'AI_RESEARCH_LOG', 'LAYER_EFFECTS', 'HIT_RECORD
   const PA = E.seedPlan(inputBook(E, '甲製薬', fy, []));
   const PB = E.seedPlan(inputBook(E, '乙製薬', fy, []));
   const yms = Array.from({ length: 12 }, (_, i) => { const mo = 4 + i; return (mo > 12 ? fy + 1 : fy) + '/' + String(mo > 12 ? mo - 12 : mo).padStart(2, '0'); });
+  const VER = E.run('APP_BACKTEST_CALC_VERSION');   // 今の数え方の回（前の数え方の回はまとめに入れない。Backtest.js の appBacktestCard_）
   const run = (planId, btId, cutFy, counted, at) => ['STAT_ONLY', 'LIVE', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL'].flatMap((m) => yms.map((ym, i) => ({ plan_id: planId,
     point_id: btId + '-' + m + '-' + i, bt_id: btId, cutoff_ym: cutFy + '/04', target_ym: ym, horizon: i + 1, method: m, p10: m === 'STAT_ONLY' ? 80 : null, p50: 100 + i, p90: m === 'STAT_ONLY' ? 120 : null,
-    actual: 110, real_months: counted ? 48 : 36, counted, engine_sha256: 'e', seed: 's', calc_version: 'BT-1', computed_at: at, computed_by: OWNER })));
+    actual: 110, real_months: counted ? 48 : 36, counted, engine_sha256: 'e', seed: 's', calc_version: VER, computed_at: at, computed_by: OWNER })));
   const put = (rows) => E.call(`appWithLock_(() => appJournalRun_(${CTX}, 'テスト', __p, appLogOps_('BACKTEST', __r)))`, { __p: rows[0].plan_id, __r: rows });
   put(run(PA, 'BT-A-NOW', fy, true, '2026-10-01T10:00:00+0900'));
   let card = E.call('appBacktestCard_(__f)', { __f: fy });

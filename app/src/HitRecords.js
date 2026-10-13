@@ -21,6 +21,10 @@
  * - 本人かどうかと 1 人のまとめは、読むときの有効なつなぎで、その四半期の終わりの日に効くメールで決める（appPersonEmailOf_）。
  *   行の person_email は書いたときの控え（そのときのつなぎ）で、見せる判定とまとめには使わない（外したつなぎ・期間の外のつなぎが効かないように）。
  * - 移行の写しの行の computed_by は仕組み（APP_V10_BACKFILL_ACTOR）。写しを動かした操作の人ではない。
+ * - 当たりの基準（2026-10-13 村井さん承認）: 統計だけの予測には補正を入れないので、偏りがあると「いつも上」と言うだけで当たる割合が
+ *   50% を超える（例: 統計だけの予測が 10% 低め・月のぶれ 10% なら 84%）。そこで当たりは 50% ではなく、押した向きごとの基準
+ *   = 「いつも同じ向きと言った場合に当たる割合」（同じ計画の、比べられた月（四半期）のうち実績がその向きに外れた割合。月が少なければ
+ *   全計画の割合に寄せる。appHitBaseRates_）と比べる。記録の hit は押した向きと外れた向きが同じかのまま（基準は読むときに計算する。列は足さない）。
  */
 const APP_HIT_CALC = 'HIT-V1';                 // 数え方の版（hit_id に入れる。数え方を変えたら上げて足す）
 const APP_HIT_CALC_BACKFILL = 'HIT-V1+BACKFILL';   // 移行で作った行の calc_version（hit_id は APP_HIT_CALC で作るので、後の B-2 と重ならない）
@@ -29,9 +33,67 @@ const APP_HIT_PERSON_TYPES = ['factor_product', 'factor_client', 'opinion'];   /
 const APP_HIT_KIND = { PERSON: 'PERSON', AI: 'AI_RESEARCH', QUARTER: 'QUARTER' };
 const APP_HIT_BACKFILL_PROP = 'APP_V10_HIT_BACKFILL';   // 移行の写しを済ませた計画（{ 計画の ID: 1 }。1 回の目安を過ぎたら続きから）
 const APP_HIT_TABLES = ['EVAL_LOG', 'PROCESS_STATUS', 'AI_IMPACT_HISTORY', 'SUBJECTIVE_IMPACT_HISTORY'];
+const APP_HIT_BASE_MONTHS = 3;   // 基準を全計画の割合へ寄せる強さ（月の数。1 四半期ぶん。四半期で数える当たりの記録では 1 四半期）
 
 /** 移行の写し 1 回の目安（ミリ秒。写しは誰かの操作の初めに動くので短く。テストで差し替える） */
 function appHitBackfillBudgetMs_() { return 20000; }
+
+// ---- 当たりの基準（いつも同じ向きと言った場合に当たる割合） ----
+
+/**
+ * 全計画の「実績が統計だけの予測より上に外れた」割合（counts = { 計画の ID: [上, 下] }。比べられた月（四半期）の数。
+ * 外れの無かった月は入れない）。比べられた月が 1 つも無ければ 0.5
+ */
+function appHitBaseShare_(counts) {
+  let up = 0, all = 0;
+  Object.keys(counts || {}).forEach(id => { const c = counts[id] || [0, 0]; up += Number(c[0] || 0); all += Number(c[0] || 0) + Number(c[1] || 0); });
+  return all > 0 ? up / all : 0.5;
+}
+
+/**
+ * 計画の向きごとの基準（{ up, down }。いつも上・いつも下と言った場合に当たる割合）。c = その計画の [上, 下] の数、
+ * share = 全計画の上の割合（appHitBaseShare_）、k = 寄せる強さ（月か四半期の数）。月が少ないほど全計画の割合に寄る:
+ * up = (上 + k × share) / (上 + 下 + k)。数も強さも 0 なら半々
+ */
+function appHitBaseRates_(c, share, k) {
+  const up = Number((c || [])[0] || 0), down = Number((c || [])[1] || 0), w = Math.max(0, Number(k) || 0);
+  const s = typeof share === 'number' && isFinite(share) ? Math.min(1, Math.max(0, share)) : 0.5;
+  const den = up + down + w;
+  const pUp = den > 0 ? (up + w * s) / den : 0.5;
+  return { up: pUp, down: 1 - pUp };
+}
+
+/** 押した向き（符号）の基準。向きが無ければ null */
+function appHitBaseOf_(rates, dir) {
+  const d = Math.sign(Number(dir) || 0);
+  return !rates || !d ? null : d > 0 ? rates.up : rates.down;
+}
+
+/**
+ * 当たりの記録（HIT_RECORDS）の四半期の印から、計画ごとの [上, 下]（3 か月そろって向きが決まった四半期の数）。
+ * rows = appHitAll_ の行（計画・種類・情報源・四半期ごとに一番新しい行）、want = { 計画の ID: true }（省くと全部）
+ */
+function appHitQuarterCounts_(rows, want) {
+  const out = {};
+  (rows || []).forEach(r => {
+    if (r.source_kind !== APP_HIT_KIND.QUARTER || Number(r.n_months) !== 3 || (want && !want[r.plan_id])) return;
+    const d = Math.sign(Number(r.actual_dir) || 0);
+    if (!d) return;
+    const c = out[r.plan_id] = out[r.plan_id] || [0, 0];
+    c[d > 0 ? 0 : 1]++;
+  });
+  return out;
+}
+
+/** 当たりの記録の行（人・AI 調査）に基準を付ける（base = その四半期に押した向きの基準。計画の四半期の印が無ければ全計画の割合）。読むときだけ */
+function appHitWithBase_(rows, counts) {
+  const share = appHitBaseShare_(counts);
+  const rates = {};
+  return rows.map(r => {
+    const rr = rates[r.plan_id] = rates[r.plan_id] || appHitBaseRates_(counts[r.plan_id], share, APP_HIT_BASE_MONTHS / 3);
+    return Object.assign({}, r, { base: appHitBaseOf_(rr, appNum_(r.push)) });
+  });
+}
 
 // ---- 四半期 ----
 
@@ -340,7 +402,10 @@ function appHitVisible_(ctx, rows) {
 /**
  * 人の学びの「人ごとの当たり」（Api.js の apiPeopleLearning が、見る人によらない控えの外で足す）。返り値:
  *   people: [{ name, own（本人の行だけで見せている）, n（数えた四半期）, hit, rate（古さの重みを掛けた当たる割合。数えた四半期が無ければ null）,
- *             makers（メーカーの数）, quarters: [{ quarter, clientName, fy, push, hit }] }]（名前の順。順位は作らない）
+ *             expected（基準で当たるはずの数 = 押した四半期の基準の合計）, base（rate と同じ重みを掛けた基準の割合。無ければ null）,
+ *             makers（メーカーの数）, quarters: [{ quarter, clientName, fy, push, hit, base }] }]（名前の順。順位は作らない）
+ *   基準 = いつも同じ向きと言った場合に当たる割合（同じ計画の、3 か月そろった四半期のうち実績がその向きに外れた割合。四半期が少なければ
+ *   全計画の割合に寄せる。appHitWithBase_）
  *   hidden: 見せない人の行の数、quarters: 数えた四半期の数（計画 × 四半期。見る人によらない）
  * メーカーをまたいだ 1 人は、読むときの有効なつなぎで、その四半期の終わりの日に効くメールでまとめる（行の person_email は書いたときの控えなので使わない。
  * つながらない行は名前でまとめる）。メールは画面に送らない
@@ -359,7 +424,8 @@ function appHitPeopleData_(ctx) {
   const all = appHitAll_();
   const plans = {};
   appInsightPlans_().forEach(p => { plans[p.planId] = p; });
-  const rows = all.rows.filter(r => plans[r.plan_id] && r.source_kind === APP_HIT_KIND.PERSON);
+  const counts = appHitQuarterCounts_(all.rows, plans);
+  const rows = appHitWithBase_(all.rows.filter(r => plans[r.plan_id] && r.source_kind === APP_HIT_KIND.PERSON), counts);
   const vis = appHitVisible_(ctx, rows);
   const links = appPersonLinks_();
   const cur = appHitQuarterIndex_(appInsightQuarter_(Utilities.formatDate(new Date(), APP_TZ, 'yyyy/MM')));
@@ -377,12 +443,16 @@ function appHitPeopleData_(ctx) {
     const scored = g.rows.filter(r => r.hit === 0 || r.hit === 1);
     const w = scored.map(r => appHitWeight_(r.quarter, cur));
     const sw = w.reduce((a, b) => a + b, 0);
+    const withBase = scored.every(r => typeof r.base === 'number');
     const makers = {};
     g.rows.forEach(r => { makers[r.client_id] = true; });
     return { name: Object.keys(g.names).sort().join('・'), own: g.own, n: scored.length, hit: scored.filter(r => r.hit === 1).length,
-      rate: sw > 0 ? scored.reduce((s, r, i) => s + w[i] * r.hit, 0) / sw : null, makers: Object.keys(makers).length,
+      rate: sw > 0 ? scored.reduce((s, r, i) => s + w[i] * r.hit, 0) / sw : null,
+      expected: withBase ? scored.reduce((s, r) => s + r.base, 0) : null,
+      base: withBase && sw > 0 ? scored.reduce((s, r, i) => s + w[i] * r.base, 0) / sw : null, makers: Object.keys(makers).length,
       quarters: g.rows.slice().sort((a, b) => String(b.quarter).localeCompare(String(a.quarter)) || String(plans[a.plan_id].clientName).localeCompare(String(plans[b.plan_id].clientName), 'ja'))
-        .map(r => ({ quarter: r.quarter, clientName: plans[r.plan_id].clientName, fy: plans[r.plan_id].fy, push: appNum_(r.push), hit: r.hit === 0 || r.hit === 1 ? r.hit : null })) };
+        .map(r => ({ quarter: r.quarter, clientName: plans[r.plan_id].clientName, fy: plans[r.plan_id].fy, push: appNum_(r.push), hit: r.hit === 0 || r.hit === 1 ? r.hit : null,
+          base: typeof r.base === 'number' ? r.base : null })) };
   }).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   const quarters = all.rows.filter(r => plans[r.plan_id] && r.source_kind === APP_HIT_KIND.QUARTER && Number(r.n_months) === 3).length;
   return { people: people, hidden: vis.counts[APP_HIT_KIND.PERSON] || 0, quarters: quarters };
@@ -390,7 +460,8 @@ function appHitPeopleData_(ctx) {
 
 /**
  * AI の学びの「調査ごとの当たり」（Api.js の apiAiLearning が足す）。AI 調査 1 回（A-4）ごとの、数えた四半期の当たり。返り値:
- *   research: [{ planId, clientName, fy, date（A-4 の日 'yyyy-MM-dd'）, n, hit, quarters: [{ quarter, push, hit }] }]（新しい順）
+ *   research: [{ planId, clientName, fy, date（A-4 の日 'yyyy-MM-dd'）, n, hit, expected（基準で当たるはずの数。人ごとの当たりと同じ）,
+ *               quarters: [{ quarter, push, hit, base }] }]（新しい順）
  *   hidden: 見せない行の数（予算策定担当以上でない人には、件数だけ。当たりの記録の見せ方と同じ）
  */
 function appHitResearchView_(ctx) {
@@ -401,15 +472,17 @@ function appHitResearchData_(ctx) {
   const all = appHitAll_();
   const plans = {};
   appInsightPlans_().forEach(p => { plans[p.planId] = p; });
-  const vis = appHitVisible_(ctx, all.rows.filter(r => plans[r.plan_id] && r.source_kind === APP_HIT_KIND.AI));
+  const counts = appHitQuarterCounts_(all.rows, plans);
+  const vis = appHitVisible_(ctx, appHitWithBase_(all.rows.filter(r => plans[r.plan_id] && r.source_kind === APP_HIT_KIND.AI), counts));
   const by = {};
   vis.rows.forEach(r => { (by[r.plan_id + '\u0001' + r.source_key] = by[r.plan_id + '\u0001' + r.source_key] || []).push(r); });
   const research = Object.keys(by).map(k => {
     const xs = by[k], p = plans[xs[0].plan_id];
     const scored = xs.filter(r => r.hit === 0 || r.hit === 1);
     return { planId: p.planId, clientName: p.clientName, fy: p.fy, date: all.a4[xs[0].source_key] || '', n: scored.length, hit: scored.filter(r => r.hit === 1).length,
+      expected: scored.every(r => typeof r.base === 'number') ? scored.reduce((s, r) => s + r.base, 0) : null,
       quarters: xs.slice().sort((a, b) => String(a.quarter).localeCompare(String(b.quarter))).map(r => ({ quarter: r.quarter, push: appNum_(r.push),
-        hit: r.hit === 0 || r.hit === 1 ? r.hit : null })) };
+        hit: r.hit === 0 || r.hit === 1 ? r.hit : null, base: typeof r.base === 'number' ? r.base : null })) };
   }).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.clientName).localeCompare(String(b.clientName), 'ja'));
   return { research: research, hidden: vis.counts[APP_HIT_KIND.AI] || 0 };
 }

@@ -1,18 +1,22 @@
 #!/usr/bin/env node
 /*
  * app-v10-backtest.test.mjs — 物差し（表の版 10 の 3-7・決定 9 (b)。Backtest.js）。本物の旧来の計算（A-1・A-2・A-3・B-1・A-9）をモックの上で動かして確かめる。
- *   1. 統計だけ（STAT_ONLY）は、人の入力の無い本番の A-9 の中身（runForecastFYCore_）と差 0（同じ種・同じ「今」）。
- *      物差しの種は、売上と CONFIG の中身・区切り・旧来の計算の版から決まる（記録した種で動かし直すと同じ数字）
+ *   1. 統計だけ（STAT_ONLY）の中身は、人の入力の無い本番の A-9 の中身（runForecastFYCore_）と差 0（同じ種・同じ「今」）。
+ *      物差しの種は、売上と CONFIG の中身・区切り・旧来の計算の版から決まる（記録した種で動かし直すと同じ数字）。
+ *      記録する統計だけは、区切りの「今」（4/1）に締まっていた月（2 月まで。3 月は 4/5 に締まる）の売上だけで動かす: 3 月の売上を 0 円にして
+ *      「今」を 3/31 に置いた本番の A-9 と差 0（2026-10-13）
  *   2. 本番の A-9（FORECAST.RUN）と、同じ入力・種・「今」で中身を直接呼んだ結果は差 0（1 と合わせて、統計だけ = 人の入力の無い本番）。
- *      季節加重は本番の OUTPUT の Seasonal Weighted Total と差 0
- *   3. 単純な方法（前年同月・2 年平均）が合成の売上で正しい。本番の予測（LIVE）は、その月が始まる前の最後の回
+ *      季節加重の式は本番の OUTPUT の Seasonal Weighted Total と差 0
+ *   3. 単純な方法（前年同月・2 年平均）が合成の売上で正しい（4/1 に締まっていない 3 月を使う前年同月・2 年平均は空）。本番の予測（LIVE）は、
+ *      その月が始まる前の最後の回で、horizon はその回から何か月先か。同じ時点の単純な方法（前年同月 × 伸び）は、その回の時点で締まった年度の月の伸び
  *   4. 締まっていない月は実績を空にし、数えない
  *   5. 48 か月がそろわない区切りは数えない（前の年度の区切り・取引が途中から始まった）。取引が始まる前の 0 円は本物の月と数えない
  *   6. 続きの処理に分けても結果が同じ。人の入力を変えても統計だけの種と数字は同じ
- *   7. 予測の数字・OUTPUT・計算用の表は変わらない（BACKTEST に 60 行を足すだけ）
+ *   7. 予測の数字・OUTPUT・計算用の表は変わらない（BACKTEST に 72 行を足すだけ）
  *   8. 所有者だけ（apiOwnerTask の runBacktest）。締めた年度の計画は断る。区切りの年度を確かめる
- *   9. 分析のまとめ: 方法ごとの外れ幅・偏り・帯に入った割合と 95% の幅。点が 30 より少ない・1 社だけなら比べない
- *  10. 分析の画面の物差しのカード（計画ごとに一番新しい回だけ・中の記号と金額を出さない）
+ *   9. 分析のまとめ: 方法ごとの外れ幅・偏り・帯に入った割合と 95% の幅（メーカーごとに平均してから、メーカーの数の t 分布で。1 社だけなら幅なし）。
+ *      点が 30 より少ない・1 社だけなら比べない。統計だけは 4/1 の単純な方法と、本番は同じ時点の単純な方法と比べる
+ *  10. 分析の画面の物差しのカード（計画ごとに今の数え方の一番新しい回だけ・中の記号と金額を出さない・何か月先かを出す）
  * 数字はテスト用の作りもの。本物の Apps Script での確認の代わりではない。
  *
  *   node app/tests/app-v10-backtest.test.mjs
@@ -79,7 +83,8 @@ function backtest(planId, fy) {
   if (st.status !== 'DONE') return { st, rows: [] };
   return { st, rows: bt().filter((r) => r.bt_id === st.result.btId) };
 }
-const of = (rows, method) => rows.filter((r) => r.method === method).sort((a, b) => a.horizon - b.horizon);
+/** 方法の 12 か月（月の順。本番の horizon は月の順と限らないので、月で並べる） */
+const of = (rows, method) => rows.filter((r) => r.method === method).sort((a, b) => String(a.target_ym).localeCompare(String(b.target_ym)));
 /** 予測を動かす（「今」= asOfMs。画面からは渡せない項目なので待ち行列に直接入れる。app-forecast-seed と同じ） */
 function forecast(planId, asOfMs) {
   let id = env.run(`appWithLock_(() => appEnqueueJob_('FORECAST.RUN', { planId: __p, confirms: ['extreme'], asOfMs: __t }, __by, '').id)`, { __p: planId, __t: asOfMs, __by: OWNER });
@@ -95,23 +100,33 @@ function forecast(planId, asOfMs) {
 }
 const CUT = ym(FY, 4);
 const T = env.run('appBacktestAsOf_(__c)', { __c: CUT });   // 区切りの「今」（年度の 4 月 1 日の正午）
+const CLOSED = env.run('appBacktestClosed_(__c)', { __c: CUT });   // 4/1 に締まっていた月（48 か月の窓。3 月は 4/5 に締まる）
+const STAT_T = env.run('appBacktestStatAsOf_(__c, __k)', { __c: CUT, __k: CLOSED });   // 統計だけの旧来の「今」（3/31 の正午）
 /**
  * 計算用ブックを全部組み立て、旧来の A-9 の中身（runForecastFYCore_）を、runPhase1Forecast と同じく売上の表を作り直してから、種と「今」を決めて直接呼ぶ。
- * 同じブックの上で物差しの統計だけ（appBacktestStatRun_）も動かす（seed が渡されたとき）
+ * 同じブックの上で物差しの統計だけ（appBacktestStatRun_）も動かす。closed（省ける）= 48 か月の窓の [締まっていたか]: 統計だけには渡し、
+ * 本番の A-9 は SALES_MONTHLY のその月（B 列から）を 0 円にしてから動かす。live.seasonal = 本番の OUTPUT と同じ式の季節加重
  */
-function cores(planId, seed, asOfMs) {
+function cores(planId, seed, asOfMs, closed) {
   return env.call(`(() => {
     APP_STORE_CACHE_ = {};
     const plan = appPlanOf_(__p);
     const s = appWorkScratch_(plan);
     let st = null;
     do { st = appScratchBuildStep_(s, plan.plan_id, null, st && st.state, Date.now() + 60000); } while (!st.complete);
-    const stat = appBacktestStatRun_(s, { fy: ${FY}, asOfMs: __t, seed: __s });
+    const stat = appBacktestStatRun_(s, { fy: ${FY}, asOfMs: __t, seed: __s, closed: __k || undefined });
     const eng = appLegacyEngine_(appLegacyServices_(s, { asOfMs: __t, seed: 'x', actor: '' }));
     const client = eng.normalizeClientName_(String(s.getSheetByName('CONFIG').getRange('B2').getValue()).trim());
-    const live = appWithSeededRandom_(__s, () => { eng.syncSalesFromSalesInput_(${FY}, client); return eng.runForecastFYCore_(${FY}, client); });
-    return { stat: stat, live: { p10: live.mixed.p10, p50: live.mixed.p50, p90: live.mixed.p90, months: live.months.length } };
-  })()`, { __p: planId, __t: asOfMs, __s: seed });
+    const live = appWithSeededRandom_(__s, () => {
+      eng.syncSalesFromSalesInput_(${FY}, client);
+      const sm = s.getSheetByName('SALES_MONTHLY');
+      (__k || []).forEach((ok, k) => { if (!ok) for (let r = 2; r <= sm.getLastRow(); r++) sm.getRange(r, 2 + k).setValue(0); });
+      return eng.runForecastFYCore_(${FY}, client);
+    });
+    const seasonal = eng.forecastSeasonalWeighted48_({ adjustedBaseSeries48: live.adjustedBaseSeries48, seriesStart: live.seriesStart, lastClosedMonthStart: live.lastClosedMonthStart,
+      spotBackgroundExpectedByMonth: live.spotBackgroundByMonth, knownSpotExpectedByMonth: live.knownSpotExpectedByMonth, tuning: eng.readModelTuningFromConfig_() }).totalByMonth;
+    return { stat: stat, live: { p10: live.mixed.p10, p50: live.mixed.p50, p90: live.mixed.p90, months: live.months.length, seasonal: seasonal } };
+  })()`, { __p: planId, __t: asOfMs, __s: seed, __k: closed || null });
 }
 
 // ==== 1. 統計だけは、人の入力の無い本番の中身と差 0。物差しの種は中身と区切りから決まる ====
@@ -126,10 +141,10 @@ let first;
   first = backtest(planA);
   assert.equal(first.st.status, 'DONE', first.st.error);
   const r = first.st.result;
-  assert.deepEqual([r.rows, r.written, r.skipped, r.cutoffYm, r.realMonths], [60, 60, false, CUT, 48]);
-  assert.equal(first.rows.length, 60, '12 か月 × 5 方法');
-  assert.deepEqual([...new Set(first.rows.map((x) => x.method))].sort(), ['LAST_YEAR', 'LIVE', 'SEASONAL', 'STAT_ONLY', 'TWO_YEAR']);
-  assert.ok(first.rows.every((x) => x.plan_id === planA && x.cutoff_ym === CUT && x.calc_version === 'BT-1' && x.computed_by === OWNER && /^[a-f0-9]{64}$/.test(x.engine_sha256)));
+  assert.deepEqual([r.rows, r.written, r.skipped, r.cutoffYm, r.realMonths], [72, 72, false, CUT, 48]);
+  assert.equal(first.rows.length, 72, '12 か月 × 6 方法');
+  assert.deepEqual([...new Set(first.rows.map((x) => x.method))].sort(), ['LAST_YEAR', 'LAST_YEAR_PACE', 'LIVE', 'SEASONAL', 'STAT_ONLY', 'TWO_YEAR']);
+  assert.ok(first.rows.every((x) => x.plan_id === planA && x.cutoff_ym === CUT && x.calc_version === 'BT-2' && x.computed_by === OWNER && /^[a-f0-9]{64}$/.test(x.engine_sha256)));
   assert.ok(first.rows.every((x) => /^BTP-[0-9A-F]{24}$/.test(x.point_id)), '点の印は回・方法・月から決まる');
   assert.deepEqual(of(first.rows, 'STAT_ONLY').map((x) => x.target_ym), fyYms(FY));
   assert.deepEqual(of(first.rows, 'STAT_ONLY').map((x) => x.horizon), Array.from({ length: 12 }, (_, i) => i + 1));
@@ -138,8 +153,8 @@ let first;
     return appBacktestSeed_(plan, appBacktestInputHash_(plan.plan_id), __c, { version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256 }); })()`, { __p: planA, __c: CUT });
   assert.equal(r.seed, seed);
   assert.ok(first.rows.every((x) => x.seed === seed && x.engine_sha256 === env.run('appLegacyEngine_(appLegacyServices_({}, { asOfMs: 0, seed: "x" })).SOURCE_SHA256')));
-  // 記録した種で動かし直すと同じ数字（統計だけ・季節加重）
-  const again = cores(planA, seed, T).stat;
+  // 記録した種で動かし直すと同じ数字（統計だけ・季節加重。4/1 に締まっていた月だけ・旧来の「今」は 3/31）
+  const again = cores(planA, seed, STAT_T, CLOSED).stat;
   const st0 = of(first.rows, 'STAT_ONLY');
   assert.deepEqual([st0.map((x) => x.p10), st0.map((x) => x.p50), st0.map((x) => x.p90)], [again.p10, again.p50, again.p90]);
   assert.deepEqual(of(first.rows, 'SEASONAL').map((x) => x.p50), again.seasonal);
@@ -147,6 +162,26 @@ let first;
   // 監査: 組み立てと計算・保存
   assert.ok(env.audit().some((a) => a.action === 'MEASURE.BACKTEST.BUILD' && a.phase === 'END' && a.result === 'OK'));
   assert.ok(env.audit().some((a) => a.action === 'MEASURE.BACKTEST.CALC' && a.phase === 'END' && a.result === 'OK' && a.entity_id === r.btId));
+}
+
+// ==== 1b. 4/1 に締まっていた月だけ（2026-10-13）: 3 月は 4/5 に締まるので使わない。旧来の「今」は 3/31（3 月を締まっていない月として補う） ====
+{
+  assert.deepEqual([CLOSED.length, CLOSED.filter((x) => !x).length, CLOSED[47]], [48, 1, false], '48 か月のうち、4/1 に締まっていないのは 3 月だけ');
+  const jstDay = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 16);
+  assert.equal(jstDay(STAT_T), (FY) + '-03-31T12:00', '旧来の「今」は 3 月の終わりの日の正午（日本の時刻）');
+  assert.equal(env.run('appBacktestStatAsOf_(__c, __k)', { __c: CUT, __k: CLOSED.map(() => true) }), T, '全部締まっていれば区切りの「今」');
+  // 記録した統計だけ = 3 月の売上を 0 円にして「今」を 3/31 に置いた本番の A-9 の中身（差 0）。季節加重も OUTPUT と同じ式で差 0
+  const c = cores(planA, first.st.result.seed, STAT_T, CLOSED);
+  const st0 = of(first.rows, 'STAT_ONLY');
+  for (const k of ['p10', 'p50', 'p90']) assert.deepEqual(st0.map((x) => x[k]), c.live[k], k + ': 統計だけ = 3 月を除いた本番の A-9（差 0）');
+  assert.deepEqual(of(first.rows, 'SEASONAL').map((x) => x.p50), c.live.seasonal, '季節加重 = 3 月を除いた本番の OUTPUT の式（差 0）');
+  // 前提: 3 月の売上を使うと数字が変わる（直す前は 4/1 に 3 月の売上を使っていた）
+  const leak = cores(planA, first.st.result.seed, T);
+  assert.notDeepEqual(leak.stat.p50, st0.map((x) => x.p50), '3 月を使った統計だけは別の数字');
+  // 単純な方法も 4/1 に締まっていた月だけ: 年度の 3 月（i = 11）の前年同月は 4/1 にはまだ締まっていない 3 月なので空・2 年平均も空
+  const ly = of(first.rows, 'LAST_YEAR'), two = of(first.rows, 'TWO_YEAR');
+  assert.deepEqual([ly[11].p50, ly[11].counted, two[11].p50, two[11].counted], [null, false, null, false]);
+  assert.ok(ly.slice(0, 11).every((x) => typeof x.p50 === 'number') && two.slice(0, 11).every((x) => typeof x.p50 === 'number'));
 }
 
 // ==== 2. 本番の A-9 = 同じ入力・種・「今」で中身を直接呼んだ結果（差 0）。季節加重 = 本番の OUTPUT ====
@@ -167,11 +202,12 @@ let runT;
   const seasonal = env.call(`(() => { const rows = {}; appReadPlanTable_('ENG_ROWS', __p).filter(r => r.sheet === 'OUTPUT' && Number(r.col_from) === 1)
     .forEach(s => { rows[Number(s.row_no)] = JSON.parse(s.cells_json); }); const out = [];
     for (let r = 29; r <= 40; r++) { const x = rows[r][5]; out.push(appCellDecode_(x.charAt(0), x.slice(1))); } return out; })()`, { __p: planA });
-  assert.deepEqual(of(first.rows, 'SEASONAL').map((x) => x.p50), seasonal, '季節加重 = 本番の OUTPUT の Seasonal Weighted Total（差 0）');
+  assert.deepEqual(c.stat.seasonal, seasonal, '季節加重の式 = 本番の OUTPUT の Seasonal Weighted Total（同じ「今」・同じ売上で差 0）');
+  assert.deepEqual(c.live.seasonal, seasonal, '（テストの式も OUTPUT と同じ）');
 }
 
 // ==== 3. 単純な方法と実績が合成の売上どおり。本番の予測は、その月が始まる前の最後の回 ====
-let second;
+let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
 {
   const runMar = forecast(planA, Date.UTC(FY, 2, 20, 1));   // 年度が始まる前（3/20）の回
   second = backtest(planA);
@@ -180,6 +216,7 @@ let second;
   const ly = of(second.rows, 'LAST_YEAR'), two = of(second.rows, 'TWO_YEAR');
   yms.forEach((t, i) => {
     const [y, m] = split(t);
+    if (i === 11) { assert.deepEqual([ly[i].p50, two[i].p50], [null, null], '3 月の前年同月は 4/1 に締まっていない'); return; }
     assert.equal(ly[i].p50, total(A, y - 1, m), t + ': 前年同月');
     assert.equal(two[i].p50, (total(A, y - 2, m) + total(A, y - 1, m)) / 2, t + ': 2 年平均');
   });
@@ -198,6 +235,30 @@ let second;
     const src = monthOf(i === 0 ? runMar.run_id : runT.run_id, yms[i]);
     assert.deepEqual([x.p10, x.p50, x.p90], [Number(src.p10), Number(src.p50), Number(src.p90)], yms[i] + ': 月が始まる前の最後の回');
   });
+  // horizon: 本番はその回から何か月先か（4 月は 3/20 の回から 1・5 月から後は 4/1 の回から 1〜11）。統計だけは 4/1 から 1〜12
+  assert.deepEqual(live.map((x) => x.horizon), [1].concat(Array.from({ length: 11 }, (_, i) => i + 1)), '本番の何か月先（前は i + 1 と記録していた）');
+  assert.deepEqual(of(second.rows, 'STAT_ONLY').map((x) => x.horizon), Array.from({ length: 12 }, (_, i) => i + 1));
+  // 同じ時点の単純な方法（前年同月 × 伸び）: 回の時点（3/20・4/1）では年度の月はまだ締まっていないので、前年同月のまま。horizon は本番と同じ。
+  // 年度の 3 月の前年同月（前の年度の 3 月）は 4/1 の回の時点では締まっていないので空
+  const pace = of(second.rows, 'LAST_YEAR_PACE');
+  yms.forEach((t, i) => { const [y, m] = split(t); assert.equal(pace[i].p50, i === 11 ? null : total(A, y - 1, m), t + ': 締まった年度の月が無ければ前年同月'); });
+  assert.deepEqual(pace.map((x) => x.horizon), live.map((x) => x.horizon));
+  // 年度の途中の回（7/20）を足す: 8 月から後の本番はこの回（何か月先 1〜8）、7 月は 4/1 の回のまま（3 か月先）。
+  // 前年同月 × 伸びは、7/20 に締まっていた年度の月（4〜6 月。6 月は 7/5 に締まった）の実績 ÷ 前年の同じ月々
+  const runJul = forecast(planA, Date.UTC(FY, 6, 20, 1));   // 7/20 10:00（日本の時刻）
+  mid = backtest(planA);
+  assert.equal(mid.st.status, 'DONE', mid.st.error);
+  const live2 = of(mid.rows, 'LIVE'), pace2 = of(mid.rows, 'LAST_YEAR_PACE');
+  assert.deepEqual(live2.map((x) => x.horizon), [1, 1, 2, 3, 1, 2, 3, 4, 5, 6, 7, 8]);
+  live2.slice(4).forEach((x, k) => assert.equal(x.p50, Number(monthOf(runJul.run_id, yms[k + 4]).p50), yms[k + 4] + ': 7/20 の回'));
+  const ratio = [4, 5, 6].reduce((s, m) => s + total(A, FY, m), 0) / [4, 5, 6].reduce((s, m) => s + total(A, FY - 1, m), 0);
+  yms.forEach((t, i) => {
+    const [y, m] = split(t);
+    const want = i >= 4 ? total(A, y - 1, m) * ratio : total(A, y - 1, m);
+    assert.ok(Math.abs(pace2[i].p50 - want) < 1e-6, t + ': 前年同月 × 伸び ' + pace2[i].p50 + ' / ' + want);
+  });
+  assert.deepEqual(pace2.map((x) => x.horizon), live2.map((x) => x.horizon));
+  assert.deepEqual(of(mid.rows, 'STAT_ONLY').map((x) => x.p50), of(second.rows, 'STAT_ONLY').map((x) => x.p50), '統計だけは本番の回によらない');
   // 人の入力を足しても、統計だけの種と数字は変わらない（売上と CONFIG の中身だけを見る）
   assert.equal(second.st.result.seed, first.st.result.seed);
   for (const m of ['STAT_ONLY', 'SEASONAL', 'LAST_YEAR', 'TWO_YEAR']) assert.deepEqual(of(second.rows, m).map((x) => [x.p10, x.p50, x.p90]), of(first.rows, m).map((x) => [x.p10, x.p50, x.p90]), m);
@@ -229,7 +290,7 @@ let second;
   assert.deepEqual([prev.st.result.cutoffYm, prev.st.result.realMonths, prev.st.result.counted], [ym(FY - 1, 4), 36, 0]);
   assert.ok(prev.rows.every((x) => x.real_months === 36 && !x.counted));
   of(prev.rows, 'STAT_ONLY').forEach((x) => { const [y, m] = split(x.target_ym); assert.equal(x.actual, total(A, y, m), '実績はある（数えないだけ）'); });
-  of(prev.rows, 'LAST_YEAR').forEach((x) => { const [y, m] = split(x.target_ym); assert.equal(x.p50, total(A, y - 1, m)); });
+  of(prev.rows, 'LAST_YEAR').forEach((x, i) => { const [y, m] = split(x.target_ym); assert.equal(x.p50, i === 11 ? null : total(A, y - 1, m), '3 月の前年同月は区切りの 4/1 に締まっていない'); });
   assert.ok(of(prev.rows, 'LIVE').every((x) => x.p50 === null), '前の年度の月の本番の予測は無い');
   // 取引が年度の 4 年前の 7 月から: 窓の 4〜6 月は本物の月でない（途中の売上の無い月は本物と数える）
   const b = backtest(planB);
@@ -258,10 +319,10 @@ let second;
   assert.equal(third.st.status, 'DONE', third.st.error);
   assert.equal(third.st.result.timing.steps, 3, '組み立てを 3 回に分けた（CONFIG・SALES_INPUT・SALES_MONTHLY）');
   const strip = (rows) => rows.map((x) => [x.method, x.target_ym, x.horizon, x.p10, x.p50, x.p90, x.actual, x.real_months, x.counted, x.seed]);
-  assert.deepEqual(strip(third.rows), strip(second.rows), '分けても分けなくても同じ点');
+  assert.deepEqual(strip(third.rows), strip(mid.rows), '分けても分けなくても同じ点（同じ予測の回の後）');
   const after = keep();
   for (const name of Object.keys(before)) assert.equal(after[name], before[name], name + ' は変わらない（予測の数字・OUTPUT・計算用の表）');
-  assert.equal(bt().length, n0 + 60, 'BACKTEST に 60 行を足しただけ');
+  assert.equal(bt().length, n0 + 72, 'BACKTEST に 72 行を足しただけ');
   assert.equal(env.call('appLogTruncatedCells_("BACKTEST")'), 0, '切り詰めたセルは無い');
 }
 
@@ -276,7 +337,7 @@ let second;
   for (let i = 0; i < 10; i++) env.fireTriggers('triggerRunJob');
   env.props.OWNER_TASK = JSON.stringify({ action: 'jobStatus', jobId: full.result.jobId });
   const done = env.call('apiOwnerTask()').result;
-  assert.deepEqual([done.status, done.kind, done.result.rows, done.result.planId], ['DONE', 'MEASURE.BACKTEST_CALC', 60, planB], '組み立て → 計算と保存（続きをたどった結果）');
+  assert.deepEqual([done.status, done.kind, done.result.rows, done.result.planId], ['DONE', 'MEASURE.BACKTEST_CALC', 72, planB], '組み立て → 計算と保存（続きをたどった結果）');
   // 区切りの年度
   env.props.OWNER_TASK = JSON.stringify({ action: 'runBacktest', planId: planA, cutoffFy: '20x5' });
   assert.throws(() => env.call('apiOwnerTask()'), /cutoffFy（区切りの年度）は 4 桁の数/);
@@ -301,26 +362,41 @@ let second;
   assert.equal(bt().length, n0);
 }
 
-// ==== 9. 分析のまとめ: 外れ幅・偏り・帯に入った割合と 95% の幅。30 点・2 社に足りなければ比べない ====
+// ==== 9. 分析のまとめ: 外れ幅・偏り・帯に入った割合と 95% の幅（メーカーごとに平均してから、メーカーの数の t 分布で）。30 点・2 社に足りなければ比べない ====
 {
   const sum = (rows, clients) => env.call('appBacktestSummary_(__r, __c)', { __r: rows, __c: clients || {} });
-  const pt = (plan, i, method, p50, actual, band) => ({ plan_id: plan, target_ym: 'M' + i, method, p50, actual, counted: true,
+  const pt = (plan, i, method, p50, actual, band) => ({ plan_id: plan, target_ym: 'M' + i, method, p50, actual, counted: true, horizon: (i % 12) + 1,
     p10: band ? p50 * 0.9 : null, p90: band ? p50 * 1.1 : null });
-  // 小さな例で式を確かめる
+  // t 分布の 97.5% 点（自由度 1・2・10・30）
+  const t975 = (df) => env.call('appBacktestT975_(__d)', { __d: df });
+  [[1, 12.706204736174698], [2, 4.302652729749464], [10, 2.228138851986274], [30, 2.042272456301238]].forEach(([df, v]) => assert.ok(Math.abs(t975(df) - v) < 1e-6, 'df ' + df + ': ' + t975(df)));
+  assert.equal(t975(0), null);
+  // 小さな例（1 社）: 値は出すが、95% の幅は出さない（メーカーが 2 より少ない）
   const small = [pt('P1', 1, 'STAT_ONLY', 110, 100, true), pt('P1', 2, 'STAT_ONLY', 90, 100, true), pt('P1', 3, 'STAT_ONLY', 100, 0, true),
     Object.assign(pt('P1', 4, 'STAT_ONLY', 100, 100, true), { counted: false })];
   const s = sum(small);
   const st0 = s.methods.find((m) => m.method === 'STAT_ONLY');
   assert.deepEqual([st0.n, st0.pctN, st0.makers, st0.coverN], [3, 2, 1, 3], '数えない点は入れない。実績 0 円の点は外れ幅に入れない');
   assert.ok(Math.abs(st0.mape - 0.1) < 1e-12 && Math.abs(st0.bias) < 1e-12);
-  const half = 1.959963984540054 * Math.sqrt(0.02) / Math.sqrt(2);   // 偏り [+0.1, −0.1] の標本の標準偏差 √0.02
-  assert.ok(Math.abs(st0.biasLo + half) < 1e-12 && Math.abs(st0.biasHi - half) < 1e-12, '偏りの 95% の幅');
+  assert.deepEqual([st0.mapeLo, st0.mapeHi, st0.biasLo, st0.biasHi, st0.coverLo, st0.coverHi], [null, null, null, null, null, null], '1 社だけなら幅を出さない');
   assert.ok(Math.abs(st0.cover - 1 / 3) < 1e-12, '帯に入った割合（110 の幅 99〜121 に 100 は入る。90 の幅 81〜99・実績 0 円は外）');
-  const w = env.call('appWilson_(1, 3, 1.959963984540054)');
-  assert.deepEqual([st0.coverLo, st0.coverHi], w, 'Wilson の 95%');
+  assert.deepEqual([st0.horizonMin, st0.horizonMax], [2, 4], '何か月先（最小・最大）');
   assert.equal(s.methods.find((m) => m.method === 'LAST_YEAR').n, 0);
   assert.equal(s.ready, false);
-  // 統計だけがはっきり小さい外れ: 29 点は待つ・30 点でも 1 社なら待つ・30 点 2 社なら言う
+  // 2 社: メーカーごとの平均（甲 偏り +0.1・−0.1 → 0、乙 +0.2・+0.2 → 0.2）の平均 0.1。幅 = t(1) × メーカーの平均の標準偏差 ÷ √2
+  const two = sum([pt('P1', 1, 'STAT_ONLY', 110, 100, true), pt('P1', 2, 'STAT_ONLY', 90, 100, true), pt('P2', 1, 'STAT_ONLY', 120, 100, true), pt('P2', 2, 'STAT_ONLY', 120, 100, true)],
+    { P1: 'C1', P2: 'C2' }).methods[0];
+  assert.equal(two.makers, 2);
+  assert.ok(Math.abs(two.bias - 0.1) < 1e-12, 'メーカーごとの平均の平均（点の平均でも同じ 0.1）');
+  const half = t975(1) * Math.sqrt(((0 - 0.1) ** 2 + (0.2 - 0.1) ** 2) / 1) / Math.sqrt(2);
+  assert.ok(Math.abs(two.biasLo - (0.1 - half)) < 1e-9 && Math.abs(two.biasHi - (0.1 + half)) < 1e-9, '偏りの 95% の幅（メーカーの数で）');
+  const naive = 1.959963984540054 * Math.sqrt([0.1, -0.1, 0.2, 0.2].reduce((a, v) => a + (v - 0.1) ** 2, 0) / 3) / 2;
+  assert.ok(half > naive * 5, '点を独立とみなした幅（' + naive.toFixed(3) + '）よりずっと広い（' + half.toFixed(3) + '）');
+  assert.deepEqual([two.coverLo, two.coverHi].map((v) => v >= 0 && v <= 1), [true, true], '割合の幅は 0〜1 に収める');
+  // 1 社にだけ点が多くても、メーカーを同じ重さで平均する
+  const lop = sum([pt('P1', 1, 'STAT_ONLY', 110, 100), pt('P1', 2, 'STAT_ONLY', 110, 100), pt('P1', 3, 'STAT_ONLY', 110, 100), pt('P2', 1, 'STAT_ONLY', 130, 100)], { P1: 'C1', P2: 'C2' }).methods[0];
+  assert.ok(Math.abs(lop.mape - 0.2) < 1e-12, '(0.1 + 0.3) / 2（点の平均なら 0.15）');
+  // 統計だけがはっきり小さい外れ: 29 点は待つ・30 点でも 1 社なら「差を言えない」・30 点 2 社なら言う
   const many = (n, makers) => {
     const rows = [];
     for (let i = 0; i < n; i++) {
@@ -332,15 +408,27 @@ let second;
   const clients = { P0: 'C0', P1: 'C1' };
   const v29 = sum(many(29, 2), clients), v30one = sum(many(30, 1), clients), v30 = sum(many(30, 2), clients);
   assert.deepEqual([v29.ready, v29.compare[0].verdict], [false, 'wait'], '29 点はまだ');
-  assert.deepEqual([v30one.ready, v30one.compare[0].verdict, v30one.makers], [false, 'wait', 1], '1 社だけはまだ');
+  assert.deepEqual([v30one.ready, v30one.compare[0].verdict, v30one.makers, v30one.compare[0].lo], [false, 'oneMaker', 1, null], '1 社だけは差を言えない（幅も出さない）');
   assert.deepEqual([v30.ready, v30.points, v30.makers, v30.minPoints, v30.minMakers], [true, 30, 2, 30, 2]);
   const c0 = v30.compare.find((c) => c.method === 'STAT_ONLY');
-  assert.deepEqual([c0.vs, c0.n, c0.makers, c0.verdict], ['LAST_YEAR', 30, 2, 'smaller'], '外れ幅のいちばん小さい単純な方法と比べる');
+  assert.deepEqual([c0.vs, c0.n, c0.makers, c0.verdict], ['LAST_YEAR', 30, 2, 'smaller'], '外れ幅のいちばん小さい 4/1 の単純な方法と比べる');
   assert.ok(c0.hi < 0 && c0.lo < c0.diff && c0.diff < c0.hi);
-  assert.equal(v30.compare.find((c) => c.method === 'LIVE').verdict, 'wait', '本番の点が無ければ言わない');
-  // 差が 0 をまたぐなら「はっきりしない」
+  const cl = v30.compare.find((c) => c.method === 'LIVE');
+  assert.deepEqual([cl.vs, cl.verdict], ['LAST_YEAR_PACE', 'wait'], '本番は同じ時点の単純な方法と比べる（点が無ければ言わない）');
+  // 差が 0 をまたぐなら「はっきりしない」（メーカーで向きが違う）
   const mixed = many(30, 2).map((r) => (r.method === 'STAT_ONLY' ? Object.assign({}, r, { p50: r.actual * (Number(r.target_ym.slice(1)) % 2 ? 1.35 : 1.05) }) : r));
   assert.equal(sum(mixed, clients).compare[0].verdict, 'unclear');
+  // 本番と同じ時点の単純な方法: 本番は 4/1 の単純な方法とは比べない（前年同月の外れが小さくても、相手は前年同月 × 伸び）
+  const liveRows = [];
+  for (let i = 0; i < 40; i++) {
+    const p = 'P' + (i % 4), a = 1000 + i;
+    liveRows.push(pt(p, i, 'LIVE', a * (1.05 + 0.002 * (i % 3)), a, true), pt(p, i, 'LAST_YEAR_PACE', a * (1.15 + 0.003 * (i % 4)), a), pt(p, i, 'LAST_YEAR', a * 1.01, a),
+      pt(p, i, 'STAT_ONLY', a * 1.3, a, true));
+  }
+  const lv = sum(liveRows, { P0: 'C0', P1: 'C1', P2: 'C2', P3: 'C3' });
+  const lc = lv.compare.find((c) => c.method === 'LIVE');
+  assert.deepEqual([lc.vs, lc.n, lc.makers, lc.verdict], ['LAST_YEAR_PACE', 40, 4, 'smaller'], '本番 − 前年同月 × 伸び');
+  assert.deepEqual([lv.compare[0].vs, lv.compare[0].verdict], ['LAST_YEAR', 'larger'], '統計だけは 4/1 の前年同月より外れが大きい');
 }
 
 // ==== 10. 分析の画面の物差し: 計画ごとに一番新しい回だけ。割合と点の数だけ（金額・中の記号を出さない） ====
@@ -354,7 +442,9 @@ let second;
   assert.equal(b.points, expected, '甲の一番新しい回の数えた点だけ（乙は 48 か月がそろわない）');
   assert.equal(b.makers, expected ? 1 : 0);
   assert.equal(b.ready, false, '1 社・30 点未満');
-  assert.ok(b.compare.every((c) => c.verdict === 'wait'));
+  assert.ok(b.compare.every((c) => c.verdict === (c.n ? 'oneMaker' : 'wait')), '1 社だけなので差を言えない（点が無ければ待つ）');
+  assert.ok(b.methods.every((m) => m.mapeLo === null && m.biasLo === null && m.coverLo === null), '1 社だけなら 95% の幅を出さない');
+  assert.equal(b.oldCalcRuns, 0);
   const keys = new Set();
   const walk = (o) => { if (o && typeof o === 'object') Object.keys(o).forEach((k) => { keys.add(k); walk(o[k]); }); };
   walk(b);
@@ -366,6 +456,16 @@ let second;
   env.as(OWNER);
   // 物差しを動かしていない年度は出さない
   assert.equal(env.call('apiCrossMaker(__in)', { __in: { fy: FY - 1 } }).backtest, null);
+  // 前の数え方（BT-1: 4/1 に 3 月の売上を使った・本番と時点の違う方法と比べた）の回は、新しくても数えない（行は消さない）
+  {
+    const src = bt().filter((r) => r.plan_id === planA && r.bt_id === lastA.bt_id);
+    const old = src.map((r, i) => Object.assign({}, r, { bt_id: 'BT-OLD', point_id: 'BTP-' + String(i).padStart(24, '0'), calc_version: 'BT-1', computed_at: '2099-01-01T00:00:00+0900',
+      p50: r.p50 === null ? null : r.p50 * 2 }));
+    env.run('appWithLock_(() => appInsertRows_("BACKTEST", __r))', { __r: old.map((r) => { const o = Object.assign({}, r); delete o._row; return o; }) });
+    env.run('APP_STORE_CACHE_ = {}');
+    const y = env.call('apiCrossMaker(__in)', { __in: { fy: FY } }).backtest;
+    assert.deepEqual([y.plans, y.points, y.oldCalcRuns, y.methods[0].mape], [2, b.points, 1, b.methods[0].mape], '前の数え方の回は入れず、数だけ出す');
+  }
 
   // 画面（UI.html の script を vm で読む）
   const js = uiHtml.slice(uiHtml.indexOf('<script>') + 8, uiHtml.lastIndexOf('</script>'))
@@ -383,10 +483,16 @@ let second;
   };
   const card = clean(render(x));
   assert.match(card, /<h2>物差し<span class="tip"/);
-  assert.match(card, /<p class="note" data-tip="点が 30 以上・2 社以上になると比べます（今は \d+ 点・[01] 社）">まだ判断できません<\/p>/);
-  for (const name of ['統計だけ', '本番', '前年同月', '2 年平均', '季節加重']) assert.ok(card.includes('>' + name + '</td>'), name);
-  assert.match(card, /<th class="num"[^>]*>外れ幅<\/th><th class="num"[^>]*>偏り<\/th><th class="num"[^>]*>帯に入る<\/th><th class="num"[^>]*>点<\/th>/);
-  assert.match(card, />\d+\.\d% <span class="note">\d+\.\d%〜\d+\.\d%<\/span><\/td>/, '外れ幅に 95% の幅を添える');
+  assert.match(card, /<p class="note" data-tip="点が 30 以上・2 社以上になると比べます（今は \d+ 点・1 社）">1 社だけなので差を言えません<\/p>/);
+  for (const name of ['統計だけ', '本番', '前年同月', '2 年平均', '季節加重', '前年同月 × 伸び']) assert.ok(card.includes('>' + name + '</td>'), name);
+  // 並びは比べる組ごと（4/1 の予測 → 各月の前の予測）
+  const order = ['統計だけ', '前年同月', '2 年平均', '季節加重', '本番', '前年同月 × 伸び'].map((n) => card.indexOf('>' + n + '</td>'));
+  assert.deepEqual(order.slice().sort((a, c) => a - c), order, '統計だけと 4/1 の単純な方法、本番と同じ時点の単純な方法を並べる');
+  assert.match(card, /<th class="num"[^>]*>外れ幅<\/th><th class="num"[^>]*>偏り<\/th><th class="num"[^>]*>帯に入る<\/th><th class="num"[^>]*>何か月先<\/th><th class="num"[^>]*>点<\/th>/);
+  assert.match(card, /<td class="num" data-tip="年度の初め（4\/1）から 1〜12 か月先（平均 [\d.]+ か月）">1〜12<\/td>/, '統計だけは 4/1 から 1〜12 か月先');
+  assert.match(card, /<td class="num" data-tip="各月が始まる前の最後の本番の予測の時点から [\d〜]+ か月先（平均 [\d.]+ か月）">[\d〜]+<\/td>/, '本番は各月の前の回から');
+  assert.match(card, /1 社だけなので、幅を出せません（幅はメーカーごとの平均のばらつきから出します）/, '幅を出せない理由');
+  assert.match(card, /時点の違う予測どうしは、情報の差だけで外れに差が出るので比べません/);
   assert.match(card, /data-tip="単純な方法には幅がありません">-<\/td>/);
   // 30 点・2 社の例（はっきり小さい）では言う。本番の点が無ければ本番はまだ
   const ready = { fy: '2026', backtest: Object.assign({ fy: '2026', plans: 2 }, env.call('appBacktestSummary_(__r, __c)', { __r: (() => {
@@ -396,7 +502,12 @@ let second;
     return rows; })(), __c: { P0: 'C0', P1: 'C1' } })) };
   const said = clean(render(ready));
   assert.match(said, />統計だけ：単純な方法より外れが小さい・本番：まだ判断できません<\/p>/);
-  assert.match(said, /外れ幅の差（統計だけ − 前年同月） -?\d+\.\d%（95% の幅 -?\d+\.\d%〜-?\d+\.\d%・30 点・2 社）/);
+  assert.match(said, /外れ幅の差（統計だけ − 前年同月。どちらも 4\/1 の予測） -?\d+\.\d%（95% の幅 -?\d+\.\d%〜-?\d+\.\d%・30 点・2 社）/);
+  assert.match(said, />\d+\.\d% <span class="note">\d+\.\d%〜\d+\.\d%<\/span><\/td>/, '2 社なら外れ幅に 95% の幅を添える');
+  // 前の数え方の回だけ: 動かし直すよう言う（表は出さない）
+  const old = clean(render({ fy: '2026', backtest: Object.assign({ fy: '2026', plans: 0, oldCalcRuns: 2 }, env.call('appBacktestSummary_([], {})')) }));
+  assert.match(old, /<p class="note">数え方を直す前の回だけです（2 回）。所有者が物差しを動かし直すと、ここに出ます。<\/p>/);
+  assert.doesNotMatch(old, /<table/);
   assert.equal(render({ fy: '2026', backtest: null }), '', '物差しが無ければカードを出さない');
   assert.equal(render({ fy: '2026' }), '', '古いサーバー（backtest が無い）でも描ける');
   // 分析の俯瞰の最後に出る
