@@ -119,4 +119,35 @@ const B1 = new Date(2026, 6, 6, 10), B2old = new Date(2026, 5, 6, 11), B2now = n
   close(lv.accuracy.bias, (Math.pow(0.5, 1 / 4) * -5 + 10) / (Math.pow(0.5, 1 / 4) * 105 + 90), 1e-12, '偏り（新しい月ほど重い）');
 }
 
+// ==== 3. 締まった月の境目: B-1 の後・B-2 の前でも、計画の一覧・振り返り（検証）・AI の学びの推移が同じ月数（提案 9） ====
+{
+  const { env, seed } = pipelineEnv();
+  // 7/06 に実績を取り込んだ（B-1）が、当たり具合の計算（B-2）はまだ。前の組（6/06 の B-1 → B-2）は旧来の RUN_LOG の記録にある
+  const idR = seed('旧ログ製薬', { b1: B1, b2: B2old, extraCompare: [['2026/06', 40, 100]],
+    runLog: [['importActualEvalMonthly', new Date(2026, 5, 6, 10)], ['updatePhase1EvaluationReport', B2old], ['importActualEvalMonthly', B1]] });
+  // 前の組を PLAN_ACTIONS（新アプリで動かした回）から見つける計画
+  const idA = seed('記録製薬', { b1: B1, b2: B2old, extraCompare: [['2026/06', 40, 100]] });
+  env.run(`appWithLock_(() => appInsertRows_('PLAN_ACTIONS', __r))`, { __r: [
+    ['ACT-1', 'IMPORT.ACTUALS', '2026-06-06T10:00:00+0900'], ['ACT-2', 'EVAL.REPORT', '2026-06-06T11:00:00+0900'], ['ACT-3', 'IMPORT.ACTUALS', '2026-07-06T10:00:00+0900']]
+    .map(([aid, action, asOf]) => ({ action_id: aid, plan_id: idA, action, status: 'DONE', as_of: asOf, started_at: asOf, finished_at: asOf, actor_email: OWNER })) });
+  const ps = Object.fromEntries(env.call('apiPortfolio()').plans.map((p) => [p.planId, p]));
+  const ai = env.call('apiAiLearning()');
+  assert.deepEqual(ai.timeline.map((t) => [t.ym, t.n]), [['2026/04', 2], ['2026/05', 2]], 'AI の学びの推移: 締まった 4・5 月（両方の計画）');
+  for (const [id, what] of [[idR, 'RUN_LOG'], [idA, 'PLAN_ACTIONS']]) {
+    const p = ps[id];
+    const lv = env.call('apiLearningView(__in)', { __in: { planId: id } });
+    assert.deepEqual([p.mapeMonths, p.scoredMonths, p.k], [2, 2, 2], what + ': 計画の一覧は締まった 4・5 月');
+    assert.deepEqual([lv.accuracy.n, lv.scoredMonths, lv.accuracy.cutoffYm, lv.accuracy.months.map((m) => m.month)], [2, 2, '2026/06', ['2026/04', '2026/05']],
+      what + ': 振り返り（検証）も同じ 2 か月（前は 0 か月）');
+    close(lv.accuracy.mape, p.mape, 1e-12, what + ': 外れ幅も同じ');
+    // 分析（メーカーを横に並べる）の精度も同じ境目
+    const cm = env.call('apiCrossMaker(__in)', { __in: { fy: 2026 } }).plans.find((x) => x.planId === id);
+    assert.equal(cm.accuracy.n, 2, what + ': 分析の精度も 2 か月');
+  }
+  // B-2 が済めば、7/06 の B-1 の境目（4〜6 月）
+  assert.equal(J(env.run(`appPlanCutoff_('${idR}', [{ step_key: 'step2_status', status: 'success', last_run_date: __b1 }, { step_key: 'step5_status', status: 'success', last_run_date: __b2 }])`, { __b1: B1, __b2: B2now })), '2026/07');
+  // 記録の無い初めての取り込みは '' のまま（前と同じ）
+  assert.equal(J(env.run(`appPlanCutoff_('X-none', [{ step_key: 'step2_status', status: 'success', last_run_date: __b1 }])`, { __b1: B1 })), '');
+}
+
 console.log('app-accuracy-measure: all tests passed');

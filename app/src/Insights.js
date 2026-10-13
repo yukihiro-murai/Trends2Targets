@@ -148,10 +148,16 @@ function appInsightPlans_() {
     .sort((x, y) => y.fy.localeCompare(x.fy) || String(x.clientName).localeCompare(String(y.clientName), 'ja'));
 }
 
-/** 計画ごとの締まった月の境目（{ 計画の ID: 'yyyy/MM' か '' }。status = 計画ごとの PROCESS_STATUS の行。appLandingCutoff_） */
+/**
+ * 計画ごとの締まった月の境目（{ 計画の ID: 'yyyy/MM' か '' }。status = 計画ごとの PROCESS_STATUS の行。appLandingCutoff_）。
+ * 計画の一覧と同じく、B-1 の後に B-2 がまだの計画は、消さずに足す記録（appPortfolioStepHist_）から最後に成功した B-2 の前の B-1 の境目で数える
+ * （2026-10-13。記録はその計画の分だけ 1 回で読む）
+ */
 function appInsightCutoffs_(ids, status) {
+  const pending = ids.filter(id => appLandingPendingCutoff_(status[id] || []) !== '');
+  const hist = pending.length ? appPortfolioStepHist_(pending) : {};
   const out = {};
-  ids.forEach(id => { out[id] = appLandingCutoff_(status[id] || []); });
+  ids.forEach(id => { out[id] = appLandingCutoff_(status[id] || [], hist[id] || []); });
   return out;
 }
 
@@ -198,12 +204,16 @@ function appInsightAccuracies_(ids, tab) {
   const has = ids.filter(id => Object.prototype.hasOwnProperty.call(keys, id));
   const hits = appInsightCacheGet_(has.map(id => keys[id]));
   const found = id => !!(hits[keys[id]] && hits[keys[id]].found);
-  const few = appInsightFew_(has.filter(id => !found(id)), ids);
+  const missing = has.filter(id => !found(id));
+  const few = appInsightFew_(missing, ids);
+  // 締まった月の境目は計画の一覧と同じ（B-1 の後に B-2 がまだの間は、前の B-1 → B-2 の組の境目。appInsightCutoffs_）
+  let cut = {};
+  if (missing.length) { try { cut = appInsightCutoffs_(missing, tab('PROCESS_STATUS', few)); } catch (e) { Logger.log('締まった月の境目を読めません: ' + (e && e.message ? e.message : e)); } }
   const accs = {};
   has.forEach(id => {
     if (found(id)) { accs[id] = hits[keys[id]].value; return; }
     try {
-      const v = appAccuracyOf_(id, tab('EVAL_LOG', few)[id] || [], appLandingCutoff_(tab('PROCESS_STATUS', few)[id] || []));
+      const v = appAccuracyOf_(id, tab('EVAL_LOG', few)[id] || [], typeof cut[id] === 'string' ? cut[id] : appLandingCutoff_(tab('PROCESS_STATUS', few)[id] || []));
       try { appJobPutResult_(keys[id], v); } catch (e) { /* 控えられなくても返す */ }
       accs[id] = v;
     } catch (e) { Logger.log('精度を出せない計画: ' + id + ' ' + (e && e.message ? e.message : e)); }

@@ -186,6 +186,18 @@ function appAccuracyAll_(planIds) {
 }
 
 /**
+ * 計画の締まった月の境目（appLandingCutoff_。stRows = その計画の PROCESS_STATUS の行）。計画の一覧（appPortfolioData_）と同じく、
+ * 実績の取り込み（B-1）の後に当たり具合の計算（B-2）がまだの間は、消さずに足す記録（appPortfolioStepHist_）を渡して、最後に成功した
+ * B-2 の前の B-1 の境目で数え続ける（2026-10-13。前は記録を渡さず、その間は締まった月が 0 か月になり、計画の一覧とずれていた）。
+ * 記録を読むのは、B-1 の後に B-2 がまだの計画だけ
+ */
+function appPlanCutoff_(planId, stRows) {
+  const st = stRows || [];
+  const hist = appLandingPendingCutoff_(st) !== '' ? (appPortfolioStepHist_([planId])[planId] || []) : [];
+  return appLandingCutoff_(st, hist);
+}
+
+/**
  * 計画の精度（影）。leak = 予測が実績とまったく同じ月（締まった後に予測し直した月。旧来の検証が拾ってしまう）。evalRows は appEvalMonths_ と同じ。
  * 締まった月の、今の検証の版の行だけで測る（D4〜D6。appEvalRowCurrent_）。cutoffYm（締まった月の境目。appLandingCutoff_）を省くと、
  * その計画の PROCESS_STATUS を読んで決める。scoredMonths = 今の決まりで B-2 が測った月の数（appEvalScoredMonths_。実績 0 円の月も数える。
@@ -194,7 +206,7 @@ function appAccuracyAll_(planIds) {
 function appAccuracyOf_(planId, evalRows, cutoffYm) {
   const need = (evalRows ? [] : ['EVAL_LOG']).concat(typeof cutoffYm === 'string' ? [] : ['PROCESS_STATUS']);
   const t = need.length ? appEngTableObjects_(planId, need) : {};
-  const cutoff = typeof cutoffYm === 'string' ? cutoffYm : appLandingCutoff_(t.PROCESS_STATUS);
+  const cutoff = typeof cutoffYm === 'string' ? cutoffYm : appPlanCutoff_(planId, t.PROCESS_STATUS);
   const scoredMonths = appEvalScoredMonths_(evalRows || t.EVAL_LOG, cutoff).length;
   const ms = appEvalMonths_(planId, evalRows || t.EVAL_LOG, cutoff).map(m => {
     const err = (m.p50 - m.actual) / Math.abs(m.actual);
