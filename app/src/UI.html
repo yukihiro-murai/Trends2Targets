@@ -21,6 +21,8 @@
   --navy:#0F3557; --navy-2:#0B2A47; --text:#22374C; --muted:#52687D;
   --primary:#00A0E9; --primary-dark:#0F5788; --primary-soft:#E5F6FD; --primary-soft-2:#F2FAFE; --primary-line:#9AD8F4;
   --line:#D9E4EE; --line-soft:#E8EFF6; --line-strong:#C8D7E5; --soft:#E8F1F8; --gray:#EDF1F5;
+  /* 入力欄と枠のボタン（btn-ghost）の枠: 部品の境目は地の色と 3:1 以上（白 3.46・画面の地 3.22・水色の吹き出し 3.12・エラーのカード 3.08）。ほかの線（表・カード・押せない部品）は --line のまま */
+  --line-ctl:#788CA1; --line-ctl-hover:#52687D;
   --ok-bg:#E5F6FD; --ok-fg:#0F5788; --warn-bg:#FFF4E2; --warn-fg:#8A5300; --error:#9E3A2E; --error-bg:#FBEFED; --focus:#0A84C1;
   /* グラフの色: 予算を上回る＝暖色・予算ぐらい＝灰・予算を下回る＝寒色（ほかは 1 色。色だけに頼らず、名前・説明・表も付ける） */
   --warm:#D9622B; --neutral:#8A97A5; --cool:#0F5788; --grid:var(--line);
@@ -129,8 +131,9 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 .btn:hover:not(:disabled){background:var(--navy-2);box-shadow:0 4px 12px rgba(15,53,87,.18)}
 .btn:active:not(:disabled){transform:scale(.98)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
-.btn-ghost{background:#fff;color:var(--navy);border:1.5px solid var(--line-strong)}
-.btn-ghost:hover:not(:disabled){background:var(--primary-soft-2);border-color:var(--primary-line);box-shadow:none}
+.btn-ghost{background:#fff;color:var(--navy);border:1.5px solid var(--line-ctl)}
+.btn-ghost:hover:not(:disabled){background:var(--primary-soft-2);border-color:var(--primary);box-shadow:none}
+.btn-ghost:disabled{border-color:var(--line-strong)}   /* 押せないボタンの見た目は今までどおり（淡い枠を半分の濃さで） */
 /* ボタンの幅は 格子の 1 マス 160px（8 字まで）。表の中・ホームの一覧の小さいボタンは 128px（6 字まで）。並んだボタンの頭が格子にそろう */
 .btn-sm{height:var(--h-btn-sm);min-width:var(--w-btn-sm);padding:0 12px;font-size:var(--fs-m)}
 .btn-icon{height:var(--h-btn-sm);width:var(--h-btn-sm);min-width:0;padding:0;font-size:18px;line-height:1}
@@ -154,8 +157,8 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 .row.nowrap{flex-wrap:nowrap}
 .field{display:flex;flex-direction:column;gap:var(--s1)}
 .field label{font-size:var(--fs-s);color:var(--muted)}
-.inp{height:var(--h-input);padding:0 14px;border:1.5px solid var(--line);border-radius:var(--radius-s);width:var(--w-inp);max-width:100%;background:#fff;font-size:var(--fs-b);transition:border-color var(--ease),box-shadow var(--ease)}   /* 狭い画面では、欄が枠からはみ出さない */
-.inp:hover{border-color:var(--line-strong)}
+.inp{height:var(--h-input);padding:0 14px;border:1.5px solid var(--line-ctl);border-radius:var(--radius-s);width:var(--w-inp);max-width:100%;background:#fff;font-size:var(--fs-b);transition:border-color var(--ease),box-shadow var(--ease)}   /* 狭い画面では、欄が枠からはみ出さない */
+.inp:hover{border-color:var(--line-ctl-hover)}
 .inp:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(0,160,233,.16)}
 .inp:focus-visible{outline:2px solid var(--focus);outline-offset:2px}   /* キーボードで選んだときは、ボタンと同じ濃い線 */
 .inp::placeholder{color:#6E7F91}
@@ -682,13 +685,14 @@ function call(fn, args, ok, fail){
  * 読むだけの入口を呼び、S.ld[key] に 読み込み中 { loading, start }・失敗 { error, at }・読めた { at, ms } を残す。onOk(r) で状態に入れる（描き直しは call がする）。
  * fn: 入口の名前（READS にあるもの）か、function(ok, fail){ call(入口の名前, [...], ok, fail); }（名前は引用符で書く）。
  *     関数の形だと入口の名前が call の第 1 引数としてそのまま残り、app-contract が「画面から呼ぶ入口」として確かめられる（この画面のコードは関数の形で書く）。
- * 同じ key を読み直したら、前の応答は捨てる。失敗は通知を出さず、slot(key…) がその場所に理由と「もう一度読み込む」を出す
+ * 同じ key を読み直したら、前の応答は捨てる。失敗は通知を出さず、slot(key…) がその場所に理由と「もう一度読み込む」を出す。
+ * tag: 何を読んでいるか（計画の ID など。S.ld[key].tag に残る）。読み込み中に「古い」の印（crossStale）が付いたら、届いた中身も古いとみなす
  */
-function load(key, fn, args, onOk){
+function load(key, fn, args, onOk, tag){
   if (typeof fn === 'string' && !READS[fn]) throw new Error('load() は読むだけの入口に使います: ' + fn);
-  var t = { loading: true, start: Date.now() };
+  var t = { loading: true, start: Date.now(), tag: tag };
   S.ld[key] = t;
-  var ok = function(r){ if (S.ld[key] !== t) return; S.ld[key] = { at: Date.now(), ms: Date.now() - t.start }; if (onOk) onOk(r); };
+  var ok = function(r){ if (S.ld[key] !== t) return; S.ld[key] = { at: t.stale ? 0 : Date.now(), ms: Date.now() - t.start, tag: tag }; if (onOk) onOk(r); };
   var fail = function(e){ if (S.ld[key] !== t) return false; S.ld[key] = { error: errText((e && e.message) || String(e)), at: Date.now() }; render(); return false; };
   if (typeof fn === 'function') fn(ok, fail); else call(fn, args || [], ok, fail);
 }
@@ -703,6 +707,10 @@ function slot(key, label, retryJs){
 function ldBusy(key){ return !!(S.ld[key] && S.ld[key].loading); }
 /** ms ミリ秒以内に読めたか（読み直すかどうかの目安） */
 function ldFresh(key, ms){ var x = S.ld[key]; return !!(x && !x.loading && !x.error && Date.now() - x.at < ms); }
+/** 読んだ中身の控え（どの画面も同じ決まり）: 10 分以内に読み、「古い」の印（crossStale）が無ければ、画面やタブを開き直しても読み直さない */
+var LD_KEEP = 600000;
+/** 画面・タブを開いたときに読むか: 中身が無い（has が偽）・10 分より古い・古いの印・失敗のとき。読み込み中は重ねて読まない（「もう一度読み込む」は読む関数を直接呼ぶ） */
+function ldNeed(key, has){ return !ldBusy(key) && !(has && ldFresh(key, LD_KEEP)); }
 
 // ---- 時間のかかる処理（裏で動かし、数秒ごとに状態を尋ねる。通信が長く続いて切れるのを避ける） ----
 var JOB_LABEL = {
@@ -726,8 +734,12 @@ function jobLabel(j){
  * 開いている計画なら読み直す（saved: 保存した操作。保存しなかったほかの欄の入力中の値は消さない）。ほかの画面の控えは古いとみなす（次に開いたとき読み直す）
  */
 function jobReload(planId, saved){ crossStale(); if (planId && S.fc.planId === planId) loadForecast(planId, true, saved || {}); }
-/** 自分の保存・実行の後は、分析・学び（10 分は読み直さない控え）を古いとみなす。開いている間はそのまま出し、次に開いたとき読み直す */
-function crossStale(){ ['an', 'lrPeople', 'lrAi'].forEach(function(k){ var x = S.ld[k]; if (x && !x.loading && !x.error) x.at = 0; }); }
+/**
+ * 保存・処理の終わり・公式版を出す / 承認の後は、読んだ中身の控え（LD_KEEP）を古いとみなす（ホーム・メーカー・計画の一覧・根拠・振り返り・公式版・分析・学び）。
+ * 開いている間はそのまま出し、次に開いたとき読み直す。読み込み中のものは、届いた中身を古いとみなす（load の t.stale）
+ */
+var LD_STALE = ['home', 'mk', 'fcPlans', 'fcBasis', 'fcLearn', 'fcVer', 'an', 'lrPeople', 'lrAi'];
+function crossStale(){ LD_STALE.forEach(function(k){ var x = S.ld[k]; if (!x || x.error) return; if (x.loading) x.stale = true; else x.at = 0; }); }
 var JOB_DONE = {
   // 旧来の計算が入力の確認を求めたとき（極端な入力値など）は、内容を見せて、続けるときだけもう一度動かす（計算の処理が返す）
   'FORECAST.RUN_CALC': function(r, payload){ JOB_DONE['FORECAST.RUN'](r, payload); },
@@ -752,8 +764,8 @@ var JOB_DONE = {
 /** 処理が止まった・失敗した・見失った・始められなかったとき（kind ごと。知らせの前に呼ぶ）: function(状態 { status, error }, payload) */
 var JOB_FAIL = {};
 function jobFail(kind, st, payload){ try { (JOB_FAIL[kind] || function(){})(st || {}, payload || {}); } catch (e) { if (window.console) console.error('job fail', e); } }
-/** 計画が増えた・年度を締めたとき: 一覧の控えを捨て、今の画面を読み直す（開いている計画の入力中の欄は消さない） */
-function listsChanged(){ S.pf = null; S.fc.plans = null; if (S.an) { S.an.data = null; S.an.plans = null; } if (S.lr) { S.lr.people = null; S.lr.ai = null; } go(S.view); }
+/** 計画が増えた・年度を締めたとき: 一覧の控えを捨て（ホームなどの控えは古いとみなし）、今の画面を読み直す（開いている計画の入力中の欄は消さない） */
+function listsChanged(){ S.pf = null; S.fc.plans = null; if (S.an) { S.an.data = null; S.an.plans = null; } if (S.lr) { S.lr.people = null; S.lr.ai = null; } crossStale(); go(S.view); }
 function startJob(kind, payload){
   // すでに動いている・始めている途中・画面からの保存の途中なら何もしない（保存の途中に始めると、通信が受け付けられず「始めている途中」のまま残るため）
   if (S.job || S.starting || S.writing) { jobFail(kind, { status: 'BUSY' }, payload); return; }
@@ -777,7 +789,8 @@ function jobBoxIntoView(){
 function pollJob(){
   var j = S.job;
   if (!j) return;
-  var done = function(){ S.job = null; busy(0); refreshJobBox(); };
+  // 処理が終わった・止まった: 中身が変わったかもしれないので、読んだ中身の控えを古いとみなす（次に開いたとき読み直す）
+  var done = function(){ S.job = null; busy(0); crossStale(); refreshJobBox(); };
   google.script.run.withSuccessHandler(function(st){
     if (!S.job || S.job.id !== j.id) return;
     if (st.jobId && st.jobId !== j.id) { j.id = st.jobId; j.kind = st.kind || j.kind; }   // 終わった続きの処理は、サーバーがたどって返す
@@ -908,6 +921,8 @@ function loading(sub, extra, id, head){ return '<div class="card loading"' + (id
 function yen(n){ return n === null || n === undefined ? '-' : Math.round(n).toLocaleString('ja-JP'); }
 /** 金額＋単位（値が無ければ「-」だけ。「- 円」にしない） */
 function yenU(n){ return n === null || n === undefined ? '-' : yen(n) + ' 円'; }
+/** 表の金額の列の幅: 格子の 1 マス（--col 160px）。年度合計（2,790,000,000 円 など）も 1 行に入る */
+var YEN_COL = 160;
 /** グラフの目盛り・札・数字のまとめの短い金額（1.2億・21.0億・3,400万・8,000） */
 function yenShort(n){
   if (!isNum(n)) return '-';
@@ -1598,8 +1613,9 @@ function chartArrows(rows, opts){
 // ==== REGION: HOME ====
 // ホーム: 全体の合計だけ（個社の数字・名前は出さない。名前は空模様のツールチップだけ。2026-10-06 村井さん）。
 // 並び: よみ（気になる順の数）→ 数字（年間予算・着地の推定・暫定実績・外れ幅）→ 見通しの空模様（8 つ）→ 学びの進み → データからわかること
-function homeEnter(){ if (B.setUp && B.allowed) homeLoad(); }
-/** ホームの中身を読む（開いた直後は初期データの B.home を使い、ホームに戻るたびに新しくする）。読めたら学びの進み（apiAiLearning。学びの画面と同じ読み込み）を読む */
+/** ホームを開く: 中身が無い・10 分より古い・古いの印があるときだけ読む（戻るたびには読まない。LD_KEEP） */
+function homeEnter(){ if (B.setUp && B.allowed && ldNeed('home', !!B.home)) homeLoad(); }
+/** ホームの中身を読む（開いた直後は初期データの B.home を使う）。読めたら学びの進み（apiAiLearning。学びの画面と同じ読み込み）を読む */
 function homeLoad(){ load('home', function(ok, fail){ call('apiHome', [], ok, fail); }, null, function(r){ B.home = r; if (S.view === 'home') lrNeed('ai'); }); }
 /** 学びの進みは、ホームを描いた後に読む（まだ一度も読んでいないときだけ。失敗したら、このカードの「もう一度読み込む」で読み直す） */
 function homeLearnKick(){
@@ -1916,8 +1932,9 @@ function yomiSays(h){
 
 // ==== REGION: MAKERS ====
 // メーカー: 年度の計画があるメーカーを並べ、空模様・予算策定の状態・年度の数字を見せる（計画を作るのは所有者がエディタから。2026-10-06 村井さん）
-/** メーカーの画面を開く: ホームの初期データ（同じ項目）ですぐ描き、計画の一覧を読んで差し替える */
-function mkEnter(){ if (!ldBusy('mk')) load('mk', function(ok, fail){ call('apiPortfolio', [], ok, fail); }, null, function(r){ S.pf = r.plans; }); }
+/** メーカーの画面を開く: ホームの初期データ（同じ項目）ですぐ描き、計画の一覧を読んで差し替える（読んだ一覧は 10 分・古いの印まで控える。LD_KEEP） */
+function mkEnter(){ if (ldNeed('mk', !!S.pf)) mkLoad(); }
+function mkLoad(){ load('mk', function(ok, fail){ call('apiPortfolio', [], ok, fail); }, null, function(r){ S.pf = r.plans; }); }
 function mkPlans(){ return S.pf || (B.home && B.home.plans) || null; }
 var MK_STATES = { none: ['未着手', 'off'], draft: ['策定中', ''], pending: ['承認待ち', 'warn'], official: ['承認済み', 'ok'] };
 function mkState(p){ return p.pendingNo ? 'pending' : p.officialNo ? 'official' : !p.runs && (p.p50 === null || p.p50 === undefined) ? 'none' : 'draft'; }
@@ -1930,7 +1947,7 @@ function mkFy(){
 }
 function viewMakers(){
   var plans = mkPlans();
-  if (!plans) return '<h1>メーカー</h1>' + (slot('mk', 'メーカーを読み込んでいます', 'mkEnter()') || loading('メーカーを読み込んでいます'));
+  if (!plans) return '<h1>メーカー</h1>' + (slot('mk', 'メーカーを読み込んでいます', 'mkLoad()') || loading('メーカーを読み込んでいます'));
   var fys = mkFys(), fy = mkFy();
   // 測る専用の計画は後ろに分けて並べる（状態の数・合計には入れない）
   var rows = plans.filter(function(p){ return String(p.fy) === fy; }).sort(function(a, b){ return (planMeasure(a) ? 1 : 0) - (planMeasure(b) ? 1 : 0) || String(a.clientName).localeCompare(String(b.clientName), 'ja'); });
@@ -1989,7 +2006,8 @@ function mkTable(rows){
   var cnt = function(n){ return n < all ? '<div class="note">' + n + ' メーカー分</div>' : ''; };
   var foot = !all ? '' : '<tr class="total"><td>合計</td><td colspan="2"' + (ms.length ? ' data-tip="' + esc('測る専用の ' + ms.length + ' メーカーは入れていません') + '"' : '') + '>' + all + ' メーカー</td><td class="num">' + yen(tot.budget) + cnt(nB) + '</td><td class="num">' + yen(tot.actual) + '</td>'
     + '<td class="num" data-tip="' + esc(homeRangeTip(r, all)) + '">' + yen(r ? r.landing : null) + cnt(r ? r.n : 0) + '</td><td class="mk-open"></td></tr>';
-  // 列の幅（左右の余白 8px）: 空模様 144・ステータス 128（同じ幅の札 112）・数字 128。残りをメーカーの名前に（1280px の画面で 7 文字）
+  // 列の幅（左右の余白 8px）: 空模様 144・ステータス 128（同じ幅の札 112）・数字 128。残りをメーカーの名前に（1280px の画面で 7 文字）。
+  // 数字を金額の 1 マス（YEN_COL）にすると、決まった列が 904px になり 1280px の画面で表ごと横に送る（「開く」が隠れる）ため、ここは 128 のまま（2026-10-13）
   return '<table class="tbl mk"><colgroup><col><col style="width:144px"><col style="width:128px"><col style="width:128px"><col style="width:128px"><col style="width:128px"><col class="mk-open" style="width:152px"></colgroup>'
     + '<thead><tr><th class="colmin"' + colMinStyle(rows.map(function(p){ return p.clientName; })) + '>メーカー</th><th data-tip="締まった月の実績と予測から推定した着地を、予算と比べた見通しです">空模様</th><th data-tip="未着手 = まだ予測がない・策定中 = 予測はあるが公式版をまだ出していない・承認待ち = 出した版を承認者が確認中・承認済み = 公式版が承認された">ステータス</th><th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">年間予算</th><th class="num" data-tip="締まった月（月末から 5 日たってから取り込んだ月）の実績の合計">暫定実績</th><th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th><th class="mk-open"><span class="sr">開く</span></th></tr></thead><tbody>'
     + body + foot + rest + '</tbody></table>';
@@ -2001,9 +2019,9 @@ function mkTable(rows){
 S.fc = { plans: null, planId: '', data: null, view: null, tab: 'forecast', inputKind: 'product', draft: {}, draftPlan: '', inputDirty: {}, budget: {}, ins: {}, dec: {}, rvChain: null };
 var FC_TABS = [['forecast','予測と予算'],['basis','根拠'],['input','入力'],['review','振り返り'],['version','公式版'],['steps','進み']];
 var INPUT_KINDS = [['product','製品'],['client','メーカー全体'],['opinions','見解'],['devspot','スポット案件']];
-/** 予測を開く: 計画の一覧と、選んである計画の中身を同時に読む（一覧を待たない） */
+/** 予測を開く: 計画の一覧と、選んである計画の中身を同時に読む（一覧を待たない）。一覧は 10 分・古いの印まで読み直さない（LD_KEEP） */
 function fcEnter(){
-  fcLoadPlans();
+  if (ldNeed('fcPlans', !!S.fc.plans)) fcLoadPlans();
   var f = S.fc;
   if (!f.planId) return;
   var loaded = f.view && f.data && f.view.plan && f.view.plan.planId === f.planId;
@@ -2031,7 +2049,7 @@ function loadForecast(planId, force, saved){
     else if (w === 'budget') { f.budget = {}; f.budBasis = null; }
     else if (w === 'ins') f.ins = {};
   }
-  fcTabData(f.tab);
+  fcTabData(f.tab, force);
   load('fcLatest', function(ok, fail){ call('apiForecastLatest', [{ planId: planId }], ok, fail); }, null, function(r){ if (S.fc.planId === planId) S.fc.data = r; });
   load('fcView', function(ok, fail){ call('apiPlanView', [{ planId: planId }], ok, fail); }, null, function(r){ if (S.fc.planId === planId) S.fc.view = r; });
   setTimeout(fcWaitTick, 1000);
@@ -2068,8 +2086,19 @@ function fcSwitch(planId){
   ask(FC_DIRTY_MSG + '保存せずに、ほかのメーカーを開きますか？（入力は消えます）', '開く', function(){ fcDropDrafts(); loadForecast(planId); }, true);
   render();   // 選ぶ欄を今のメーカーに戻しておく（「やめる」のとき）
 }
-/** タブに要る中身を読む（根拠・振り返り・公式版は、開くたびに新しくする） */
-function fcTabData(t){ if (t === 'version') fcLoadVersions(); if (t === 'basis') fcLoadBasis(); if (t === 'review') fcLoadLearning(); }
+/** タブに要る中身（根拠・振り返り・公式版）: [読み込みの key, S.fc の置き場所] */
+var FC_TAB_LD = { basis: ['fcBasis', 'basis'], review: ['fcLearn', 'learn'], version: ['fcVer', 'ver'] };
+/**
+ * タブに要る中身を読む。同じ計画のものを 10 分以内に読んでいて、古いの印（crossStale）が無ければ読み直さない。同じ計画を読み込み中なら重ねない。
+ * force: 保存・実行の後に計画を読み直すとき（いつも読む）
+ */
+function fcTabData(t, force){
+  var x = FC_TAB_LD[t];
+  if (!x) return;
+  var f = S.fc, have = f[x[1]], ld = S.ld[x[0]];
+  if (!force && (ld && ld.loading ? ld.tag === f.planId : !!have && have.planId === f.planId && ldFresh(x[0], LD_KEEP))) return;
+  if (t === 'basis') fcLoadBasis(); else if (t === 'review') fcLoadLearning(); else fcLoadVersions();
+}
 function viewForecast(){
   var f = S.fc, d = f.data, v = f.view;
   if (!f.planId) {
@@ -2297,7 +2326,8 @@ function fcForecastTab(d, v){
     { x: ms.map(function(m){ return fcMon(m.month); }), band: ms.map(function(m){ return { lo: m.p10, hi: m.p90 }; }), bandLabel: qName('p10') + '〜' + qName('p90'), yFmt: yenShort, h: 280, label: measure ? '月ごとの見通し' : '月ごとの見通しと最終予算' });
   var bud = function(m, total){ return measure ? '' : total ? '<td class="num">' + yen(m.adopted) + '</td><td class="num">' + yen(m.uplift) + '</td><td class="num">' + yen(m.final) + '</td>'
     : '<td class="num">' + cell(m, 'adopted') + '</td><td class="num">' + cell(m, 'uplift') + '</td><td class="num">' + yen(m.final) + '</td>'; };
-  var table = '<table class="tbl scroll' + (canBudget ? ' edit' : '') + '"><colgroup><col style="width:96px"><col><col><col>' + (measure ? '' : '<col style="width:150px"><col style="width:150px"><col>') + '</colgroup>'
+  // 列: 月 96・下振れ〜上振れ（残りを分ける）・採用予測と上乗せ（入れる欄。金額の 1 マス YEN_COL）・最終予算（残りを分ける）
+  var table = '<table class="tbl scroll' + (canBudget ? ' edit' : '') + '"><colgroup><col style="width:96px"><col><col><col>' + (measure ? '' : '<col style="width:' + YEN_COL + 'px"><col style="width:' + YEN_COL + 'px"><col>') + '</colgroup>'
     + '<thead><tr><th>月</th>' + qTh('p10') + qTh('p50') + qTh('p90') + (measure ? '' : '<th class="num" data-tip="予算のもとにする予測（月ごと）">採用予測</th><th class="num" data-tip="採用予測に足す分（マイナスもできます）">上乗せ</th><th class="num" data-tip="採用予測 + 上乗せ">最終予算</th>') + '</tr></thead><tbody>'
     + ms.map(function(m){ return '<tr><td>' + esc(m.month) + '</td><td class="num">' + yen(m.p10) + '</td><td class="num">' + yen(m.p50) + '</td><td class="num">' + yen(m.p90) + '</td>' + bud(m) + '</tr>'; }).join('')
     // 年度合計の行の下振れ・中心・上振れ: 本番の計画は上の数字の箱と同じ値（旧来の計算の年度合計はカーソルで）。本番でなければ今までどおり
@@ -2577,7 +2607,7 @@ function fcBudDraftLine(closed, lv){
 }
 
 // ---- 根拠（何が予測を押したか。中の言葉は出さない: 話題・向き・種類・AI の見立て） ----
-function fcLoadBasis(){ var id = S.fc.planId; S.fc.basis = null; load('fcBasis', function(ok, fail){ call('apiForecastBasis', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.basis = r; }); }
+function fcLoadBasis(){ var id = S.fc.planId; S.fc.basis = null; load('fcBasis', function(ok, fail){ call('apiForecastBasis', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.basis = r; }, id); }
 var FC_TOPIC = { market: '市場', competitor: '競合', channel: '販路', dx: 'DX' };
 function fcTopic(t){ var s = String(t == null ? '' : t).trim(); return FC_TOPIC[s.toLowerCase()] || s; }
 var FC_DIR = { up: 1, positive: 1, increase: 1, '上昇': 1, '上向き': 1, down: -1, negative: -1, decrease: -1, '低下': -1, '下向き': -1, flat: 0, neutral: 0, stable: 0, '横ばい': 0 };
@@ -2949,7 +2979,7 @@ function fcInLogTip(e){
 }
 
 // ---- 振り返り（検証と四半期の見直しをまとめた: 精度の天気 → 精度の推移 → 人の記入 → AI の見直し案 → 更新。2026-10-06 村井さん） ----
-function fcLoadLearning(){ var id = S.fc.planId; S.fc.learn = null; load('fcLearn', function(ok, fail){ call('apiLearningView', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.learn = r; }); }
+function fcLoadLearning(){ var id = S.fc.planId; S.fc.learn = null; load('fcLearn', function(ok, fail){ call('apiLearningView', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.learn = r; }, id); }
 function fcReviewTab(d, v){
   var boot = v.boot || {}, e = boot.eval || {}, q = boot.quarterly || {}, lr = S.fc.learn, canPlan = fcCan('plan');
   var acc = lr && lr.planId === S.fc.planId ? lr.accuracy || { months: [] } : null;
@@ -3157,7 +3187,7 @@ function rvChainGet(planId){
 var VER_STATE = { SUBMITTED: ['承認待ち', 'warn'], APPROVED: ['承認済み', 'ok'], REJECTED: ['却下', 'ng'], SUPERSEDED: ['置き換え済み', 'off'], WITHDRAWN: ['取り下げ', 'off'] };
 /** 版の状態の札。表の状態の列（col: true）は、ほかの表の状態の列と同じ幅（.chip.st）にそろえる */
 function verChip(st, col){ var x = VER_STATE[st] || ['-', 'off']; return '<span class="chip ' + (col ? 'st ' : '') + x[1] + '">' + x[0] + '</span>'; }
-function fcLoadVersions(){ var id = S.fc.planId; S.fc.ver = null; load('fcVer', function(ok, fail){ call('apiVersionList', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.ver = r; }); }
+function fcLoadVersions(){ var id = S.fc.planId; S.fc.ver = null; load('fcVer', function(ok, fail){ call('apiVersionList', [{ planId: id }], ok, fail); }, null, function(r){ if (S.fc.planId === id) S.fc.ver = r; }, id); }
 function verWho(email, at){ return email ? esc(fcWho(email)) + '<div class="note">' + esc(fcDate(at, true).slice(5)) + '</div>' : '-'; }
 function verDiff(a, b){ return !isNum(a) || !isNum(b) ? '-' : (a - b > 0 ? '+' : '') + yen(a - b); }
 /**
@@ -3350,7 +3380,7 @@ function fcStepsTab(d, v){
 S.an = { tab: 'overview', fy: '', data: null, view: 'chart' };
 var AN_TABS = [['overview', '俯瞰'], ['market', '市場']];
 /** 分析を開く: 中身が無い・10 分より古いときだけ読む（サーバーも日ごとに控える） */
-function anEnter(){ if (!S.an.data || !ldFresh('an', 600000)) anLoad(); }
+function anEnter(){ if (ldNeed('an', !!S.an.data)) anLoad(); }
 function anLoad(){
   var fy = S.an.fy;
   load('an', function(ok, fail){ call('apiCrossMaker', [{ fy: fy }], ok, fail); }, null, function(r){ if (String(S.an.fy || '') === String(fy || '')) { S.an.data = r; S.an.fy = String(r.fy); anLoadPlans(r); } });
@@ -3541,7 +3571,7 @@ function anBulletCard(plans){
   if (!use.length) return '';
   use.sort(anByRatio);
   var rows = use.map(function(p){ var b = planBudget(p); return { label: p.clientName, low: p.landingP10, mid: p.landing, high: p.landingP90, target: isNum(b) && b > 0 ? b : null, tone: tone(p.ratio), tip: anPlanTip(p) }; });
-  var tbl = anTable(['', 152, 152, 152, 152, 112], '<th>メーカー</th>' + qTh('p10') + '<th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th>' + qTh('p90')
+  var tbl = anTable(['', YEN_COL, YEN_COL, YEN_COL, YEN_COL, 112], '<th>メーカー</th>' + qTh('p10') + '<th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th>' + qTh('p90')
     + '<th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">予算</th><th class="num" data-tip="着地の推定 ÷ 予算">予算比</th>',
     use.map(function(p){ var b = planBudget(p); return '<tr>' + anNameTd(p) + '<td class="num">' + yenU(p.landingP10) + '</td><td class="num">' + yenU(p.landing) + '</td><td class="num">' + yenU(p.landingP90) + '</td><td class="num">' + (isNum(b) ? yenU(b) : '-') + '</td><td class="num">' + anPct(p.ratio) + '</td></tr>'; }).join(''));
   return anCard('着地の推定と予算', '灰の帯は 80% の幅（下振れ〜上振れ）、太い縦棒は着地の推定、▼ の付いた点線は予算です。着地の推定 ÷ 予算の大きい順。\n縦棒の色: 予算の 110% 以上は橙・90% 以下は紺・そのあいだは灰',
@@ -3658,7 +3688,7 @@ function anRevCard(plans){
   // 本番の回のある計画があれば、本番の回の値は月の合計（中心ではない）と、前回からは同じ作り方の値どうしで比べることを見出しの説明に添える
   var liveNote = anyLive ? '。本番の回は月ごとの中心の合計です' : '';
   var chgTh = '<th class="num" data-tip="' + esc('直近の 2 回の予測の、年間の中心の変わり方' + (anyLive ? '（同じ作り方の値どうしで比べます。本番の回は月ごとの中心の合計）' : '')) + '">前回から</th>';
-  var withSpark = anTable(['', 152, 112, 152, 112], '<th>メーカー</th><th data-tip="' + esc('古い順。右の点が最新。どのメーカーも同じ縦の範囲（最初の予測からの変わり方）で描いています' + liveNote) + '">流れ</th>' + chgTh + '<th class="num" data-tip="最新の予測の年間の中心（予測と予算の画面と同じ）">最新の中心</th><th class="num" data-tip="このアプリで動かした予測の回数（最近の 12 回まで）">回数</th>',
+  var withSpark = anTable(['', 152, 112, YEN_COL, 112], '<th>メーカー</th><th data-tip="' + esc('古い順。右の点が最新。どのメーカーも同じ縦の範囲（最初の予測からの変わり方）で描いています' + liveNote) + '">流れ</th>' + chgTh + '<th class="num" data-tip="最新の予測の年間の中心（予測と予算の画面と同じ）">最新の中心</th><th class="num" data-tip="このアプリで動かした予測の回数（最近の 12 回まで）">回数</th>',
     use.map(function(x){ var p = x[0], rs = x[1];
       return '<tr>' + anNameTd(p) + '<td>' + chartSpark(rel(rs), { w: 120, h: 32, min: smin, max: smax, tip: p.clientName + ' の見直し' + (marked(rs) ? '' : '（年間の中心）') + '\n' + list(rs), label: p.clientName + ' の見直しの流れ' }) + '</td>'
         + chg(rs) + latest(p, rs) + '<td class="num">' + rs.length + ' 回</td></tr>'; }).join(''));
@@ -3785,7 +3815,7 @@ var LR_TABS = [['people', '人の学び'], ['ai', 'AI の学び']];
 var LR_KEY = { people: 'lrPeople', ai: 'lrAi' };
 function lrEnter(){ lrNeed(S.lr.tab); }
 /** タブの中身が無い・10 分より古いときだけ読む */
-function lrNeed(t){ if ((!S.lr[t] || !ldFresh(LR_KEY[t], 600000)) && !ldBusy(LR_KEY[t])) lrLoad(t); }
+function lrNeed(t){ if (ldNeed(LR_KEY[t], !!S.lr[t])) lrLoad(t); }
 function lrLoad(t){
   if (t === 'ai') load('lrAi', function(ok, fail){ call('apiAiLearning', [], ok, fail); }, null, function(r){ S.lr.ai = r; });
   else load('lrPeople', function(ok, fail){ call('apiPeopleLearning', [], ok, fail); }, null, function(r){ S.lr.people = r; });
@@ -4333,6 +4363,7 @@ function lrLandingCard(x){
 // ---- 起動（区切りの外。最後に置く） ----
 render();
 if (B.setUp && B.allowed && !B.home) homeLoad();   // 初期データにホームの中身が無ければ読む（失敗したらホームに理由と「もう一度読み込む」）
+else if (B.home) S.ld.home = { at: Date.now(), ms: 0 };   // 初期データのホームは、今読んだものとして控える（ほかの画面から戻ってもすぐには読み直さない。LD_KEEP）
 if (B.activeJob) { if (/^(PLAN\.(EDIT|RUN)|FORECAST\.RUN)/.test(B.activeJob.kind)) { if (B.activeJob.payload && B.activeJob.payload.planId) S.fc.planId = B.activeJob.payload.planId; go('forecast'); } render(); watchJob(B.activeJob); }
 </script>
 </body>
