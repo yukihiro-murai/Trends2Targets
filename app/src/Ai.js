@@ -15,6 +15,8 @@
  *   - 手で始める A-4 は計画ごとに 1 日 3 回まで（appAiManualCheck_。自動の調べは AutoResearch.js の上限で数える）
  *   - 同じ計画の A-4 が 6 時間以内に失敗・途中で止まったときは、その回（actionId と時刻）を引き継ぎ、控えた答えを使う（appAiRunStart_）。
  *     引き継いだ回では、前に控えた失敗の答え（2xx 以外）は使わずに問い合わせ直す（権限を直した後も前の 403 を返さない）
+ *   - 全計画の問い合わせ先（Vertex のモデル名・プロジェクト・リージョン）を所有者がまとめて替える（appVertexConfigPreview_・appSetVertexConfig_。
+ *     OwnerTask.js の vertexConfigPreview・setVertexConfig）
  */
 const APP_AI_CALC_BUDGET_MS = 3 * 60 * 1000;   // 1 回の計算で新しく問い合わせてよい時間（1 回の問い合わせに 1 分ほどかかっても 6 分に収まる）
 /** 区切りの時刻（テストで差し替える） */
@@ -197,4 +199,143 @@ function appAiRunStart_(planId, nowMs) {
   const run = { actionId: appId_('ACT'), asOfMs: nowMs };
   try { appJobPutResult_(key, run); } catch (e) { Logger.log('A-4 の回を控えられません（引き継ぎはしない）: ' + (e && e.message ? e.message : e)); }
   return { actionId: run.actionId, asOfMs: nowMs, freshAfterMs: 0, resumed: false };
+}
+
+// ---- 問い合わせ先（Vertex のモデル名・リージョン・プロジェクト）を全計画まとめて替える（所有者。OwnerTask.js） ----
+
+/** 替えられる項目と CONFIG のキー（旧来の readVertexConfig_ が読む） */
+const APP_VERTEX_KEYS = { project: 'VERTEX_PROJECT_ID', location: 'VERTEX_LOCATION', model: 'VERTEX_GEMINI_MODEL' };
+/** 値の形（問い合わせ先の URL に入るので、英小文字・数字・「.」「-」だけ） */
+const APP_VERTEX_CHECKS = {
+  model: [/^[a-z0-9][a-z0-9.\-]{2,60}$/, 'model（モデル名）は英小文字・数字・「.」「-」の 3〜61 字で入れてください（例: "gemini-3.8-flash"）。'],
+  location: [/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/, 'location（リージョン）は英小文字で始まる英小文字・数字・「-」で入れてください（例: "global"・"asia-northeast1"）。'],
+  project: [/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/, 'project（Google Cloud のプロジェクト ID）は英小文字で始まる 6〜30 字の英小文字・数字・「-」で入れてください。']
+};
+const APP_VERTEX_SET_BUDGET_MS = 4 * 60 * 1000;   // 新しい計画に書き始めてよい時間（エディタからの実行は 6 分まで。残りは結果の remaining）
+
+/** 頼まれた値（{ model, location?, project? }）を確かめ、書く値（{ 項目: 値 }）にする。形が違えば止める */
+function appVertexConfigWant_(t) {
+  if (t.model === undefined) throw new Error('setVertexConfig にはモデル名（model）を入れてください（例: "gemini-3.8-flash"）。');
+  const want = {};
+  ['model', 'location', 'project'].forEach(f => {
+    if (t[f] === undefined) return;
+    if (typeof t[f] !== 'string' || !APP_VERTEX_CHECKS[f][0].test(t[f])) throw new Error(APP_VERTEX_CHECKS[f][1]);
+    want[f] = t[f];
+  });
+  return want;
+}
+
+/** setVertexConfig の項目を、何もする前に確かめる（OwnerTask.js の check） */
+function appVertexConfigCheck_(t) {
+  appVertexConfigWant_(t);
+  if (t.planIds === undefined) return;
+  if (!Array.isArray(t.planIds) || !t.planIds.length || t.planIds.some(x => typeof x !== 'string' || !x.trim())) {
+    throw new Error('planIds は計画の ID（listPlans の planId）の配列で入れてください（省くと、年度を締めていない全計画）。');
+  }
+}
+
+/** CONFIG の A 列のキー（旧来の configKeyOf_ と同じ: 「（」「(」より前） */
+function appVertexKeyOf_(label) {
+  const s = String(label === null || label === undefined ? '' : label).trim();
+  const i = s.search(/[（(]/);
+  return (i >= 0 ? s.slice(0, i) : s).trim();
+}
+
+/**
+ * 組み立てた CONFIG から、3 つの項目の行（0 始まり。同じキーが何行あっても全部）と今の値（旧来と同じく最後の行の値）。
+ * { rows: { 項目: [行] }, values: { 項目: 値 } }
+ */
+function appVertexConfigOf_(dec) {
+  const out = { rows: { project: [], location: [], model: [] }, values: { project: '', location: '', model: '' } };
+  if (!dec) return out;
+  dec.values.forEach((r, i) => {
+    const k = appVertexKeyOf_(r[0]);
+    Object.keys(APP_VERTEX_KEYS).forEach(f => {
+      if (k !== APP_VERTEX_KEYS[f]) return;
+      out.rows[f].push(i);
+      out.values[f] = String(r[1] === null || r[1] === undefined ? '' : r[1]).trim();
+    });
+  });
+  return out;
+}
+
+/**
+ * vertexConfigPreview: 計画ごとの今の問い合わせ先（VERTEX_PROJECT_ID・VERTEX_LOCATION・VERTEX_GEMINI_MODEL）と、
+ * 年度を締めていない計画での値ごとの数（summary）。書かない
+ */
+function appVertexConfigPreview_() {
+  const names = appClientNameMap_();
+  const plans = appReadTable_('PLANS').slice().sort((a, b) => (a.plan_id < b.plan_id ? -1 : a.plan_id > b.plan_id ? 1 : 0)).map(p => {
+    const row = { planId: p.plan_id, clientName: names[p.client_id] || p.client_label, fy: String(p.fy), state: p.state, frozen: appYearIsFrozen_(p.fy) };
+    try {
+      const cur = appVertexConfigOf_(appEngLoadPlanSheets_(p.plan_id, ['CONFIG'], true).CONFIG);
+      Object.keys(APP_VERTEX_KEYS).forEach(f => { row[f] = cur.values[f]; });
+      const missing = Object.keys(APP_VERTEX_KEYS).filter(f => !cur.rows[f].length).map(f => APP_VERTEX_KEYS[f]);
+      if (missing.length) row.missingRows = missing;
+    } catch (e) {
+      row.error = String(e && e.message ? e.message : e).slice(0, 200);
+    }
+    return row;
+  });
+  const summary = {};
+  Object.keys(APP_VERTEX_KEYS).forEach(f => {
+    summary[f] = {};
+    plans.filter(p => !p.frozen && !p.error).forEach(p => { const v = p[f] || '（空）'; summary[f][v] = (summary[f][v] || 0) + 1; });
+  });
+  return { plans: plans, summary: summary, openPlans: plans.filter(p => !p.frozen).length, frozenPlans: plans.filter(p => p.frozen).length };
+}
+
+/**
+ * setVertexConfig: データ本体の各計画の CONFIG の行（VERTEX_GEMINI_MODEL と、頼まれたら VERTEX_LOCATION・VERTEX_PROJECT_ID）を書き換える。
+ * planIds を省くと年度を締めていない全計画。締めた年度の計画を名指ししたら、何も書かずに断る。
+ * 計画ごとにロックの中で、書きかけの保存を先に書き終え、CONFIG を組み立て → 値を替え → 控えの形にして保存の控え（Journal.js）で書く
+ * （ほかの保存と同じ書き方。入力のハッシュが変わるので、計算用ブックは次の操作で組み立て直し、開いていた画面の保存は断られる）。
+ * 組み立てた CONFIG が保存してある中身と一致しない（元どおりに組み立てられない）・項目の行が無い計画は書かずに飛ばす。
+ * 変わる値が無い計画は書かない（同じ頼みを 2 度動かしても書かない）。4 分を過ぎたら残りの計画は書かずに remaining に返す（もう一度動かせば続き）。
+ * 返り値 { want, changed: [{ planId, before, after }], unchanged: [planId], skipped: [{ planId, reason }], remaining: [planId], more? }。
+ * 監査（VERTEX.SET）の終わりの行に、前と後の値が残る（OwnerTask.js）
+ */
+function appSetVertexConfig_(ctx, input) {
+  const want = appVertexConfigWant_(input);
+  let ids;
+  if (input.planIds !== undefined) {
+    ids = input.planIds.map(x => String(x).trim()).filter((x, i, a) => a.indexOf(x) === i);
+    const frozen = ids.filter(id => appYearIsFrozen_(appPlanOf_(id).fy));   // 無い計画は appPlanOf_ が止める
+    if (frozen.length) throw new Error('年度を締めた計画には書けません（何も書いていません）: ' + frozen.join(', '));
+  } else {
+    ids = appReadTable_('PLANS').filter(p => !appYearIsFrozen_(p.fy)).map(p => String(p.plan_id)).sort();
+  }
+  const t0 = new Date().getTime();
+  const out = { want: want, changed: [], unchanged: [], skipped: [], remaining: [] };
+  ids.forEach(id => {
+    if (new Date().getTime() - t0 > APP_VERTEX_SET_BUDGET_MS) { out.remaining.push(id); return; }
+    appWithLock_(() => {
+      appJournalRecover_(ctx);   // 書きかけの保存を先に書き終える（途中の表から組み立てない）
+      const plan = appPlanOf_(id);
+      if (appYearIsFrozen_(plan.fy)) { out.skipped.push({ planId: id, reason: '年度を締めた計画' }); return; }
+      const dec = appEngLoadPlanSheets_(id, ['CONFIG']).CONFIG;
+      if (!dec) { out.skipped.push({ planId: id, reason: 'CONFIG が無い' }); return; }
+      if (appEngEncodeSheet_(id, dec).sheetRow.content_hash !== appStoredHashes_(id).CONFIG) {
+        out.skipped.push({ planId: id, reason: 'CONFIG を元どおりに組み立てられない' });
+        return;
+      }
+      const cur = appVertexConfigOf_(dec);
+      const missing = Object.keys(want).filter(f => !cur.rows[f].length).map(f => APP_VERTEX_KEYS[f]);
+      if (missing.length || dec.lastCol < 2) { out.skipped.push({ planId: id, reason: 'CONFIG に ' + (missing.join('・') || '値の列') + ' の行が無い' }); return; }
+      let changed = false;
+      Object.keys(want).forEach(f => cur.rows[f].forEach(r => {
+        if (dec.values[r][1] === want[f] && !dec.formulas[r][1]) return;
+        dec.values[r][1] = want[f];
+        dec.formulas[r][1] = '';
+        changed = true;
+      }));
+      if (!changed) { out.unchanged.push(id); return; }
+      const enc = appEngEncodeSheet_(id, dec);
+      const ops = appChangedOps_(ctx, id, [enc], appId_('VTX'), { action: 'VERTEX.SET' });
+      appJournalRun_(ctx, 'AI 調査の問い合わせ先の書き換え（' + id + '）', id, ops);
+      out.changed.push({ planId: id, before: Object.assign({}, cur.values), after: Object.assign({}, cur.values, want) });
+    });
+  });
+  if (out.remaining.length) out.more = true;
+  return out;
 }
