@@ -921,6 +921,8 @@ function loading(sub, extra, id, head){ return '<div class="card loading"' + (id
 function yen(n){ return n === null || n === undefined ? '-' : Math.round(n).toLocaleString('ja-JP'); }
 /** 金額＋単位（値が無ければ「-」だけ。「- 円」にしない） */
 function yenU(n){ return n === null || n === undefined ? '-' : yen(n) + ' 円'; }
+/** 表の金額の列の幅: 格子の 1 マス（--col 160px）。年度合計（2,790,000,000 円 など）も 1 行に入る */
+var YEN_COL = 160;
 /** グラフの目盛り・札・数字のまとめの短い金額（1.2億・21.0億・3,400万・8,000） */
 function yenShort(n){
   if (!isNum(n)) return '-';
@@ -2004,7 +2006,8 @@ function mkTable(rows){
   var cnt = function(n){ return n < all ? '<div class="note">' + n + ' メーカー分</div>' : ''; };
   var foot = !all ? '' : '<tr class="total"><td>合計</td><td colspan="2"' + (ms.length ? ' data-tip="' + esc('測る専用の ' + ms.length + ' メーカーは入れていません') + '"' : '') + '>' + all + ' メーカー</td><td class="num">' + yen(tot.budget) + cnt(nB) + '</td><td class="num">' + yen(tot.actual) + '</td>'
     + '<td class="num" data-tip="' + esc(homeRangeTip(r, all)) + '">' + yen(r ? r.landing : null) + cnt(r ? r.n : 0) + '</td><td class="mk-open"></td></tr>';
-  // 列の幅（左右の余白 8px）: 空模様 144・ステータス 128（同じ幅の札 112）・数字 128。残りをメーカーの名前に（1280px の画面で 7 文字）
+  // 列の幅（左右の余白 8px）: 空模様 144・ステータス 128（同じ幅の札 112）・数字 128。残りをメーカーの名前に（1280px の画面で 7 文字）。
+  // 数字を金額の 1 マス（YEN_COL）にすると、決まった列が 904px になり 1280px の画面で表ごと横に送る（「開く」が隠れる）ため、ここは 128 のまま（2026-10-13）
   return '<table class="tbl mk"><colgroup><col><col style="width:144px"><col style="width:128px"><col style="width:128px"><col style="width:128px"><col style="width:128px"><col class="mk-open" style="width:152px"></colgroup>'
     + '<thead><tr><th class="colmin"' + colMinStyle(rows.map(function(p){ return p.clientName; })) + '>メーカー</th><th data-tip="締まった月の実績と予測から推定した着地を、予算と比べた見通しです">空模様</th><th data-tip="未着手 = まだ予測がない・策定中 = 予測はあるが公式版をまだ出していない・承認待ち = 出した版を承認者が確認中・承認済み = 公式版が承認された">ステータス</th><th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">年間予算</th><th class="num" data-tip="締まった月（月末から 5 日たってから取り込んだ月）の実績の合計">暫定実績</th><th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th><th class="mk-open"><span class="sr">開く</span></th></tr></thead><tbody>'
     + body + foot + rest + '</tbody></table>';
@@ -2323,7 +2326,8 @@ function fcForecastTab(d, v){
     { x: ms.map(function(m){ return fcMon(m.month); }), band: ms.map(function(m){ return { lo: m.p10, hi: m.p90 }; }), bandLabel: qName('p10') + '〜' + qName('p90'), yFmt: yenShort, h: 280, label: measure ? '月ごとの見通し' : '月ごとの見通しと最終予算' });
   var bud = function(m, total){ return measure ? '' : total ? '<td class="num">' + yen(m.adopted) + '</td><td class="num">' + yen(m.uplift) + '</td><td class="num">' + yen(m.final) + '</td>'
     : '<td class="num">' + cell(m, 'adopted') + '</td><td class="num">' + cell(m, 'uplift') + '</td><td class="num">' + yen(m.final) + '</td>'; };
-  var table = '<table class="tbl scroll' + (canBudget ? ' edit' : '') + '"><colgroup><col style="width:96px"><col><col><col>' + (measure ? '' : '<col style="width:150px"><col style="width:150px"><col>') + '</colgroup>'
+  // 列: 月 96・下振れ〜上振れ（残りを分ける）・採用予測と上乗せ（入れる欄。金額の 1 マス YEN_COL）・最終予算（残りを分ける）
+  var table = '<table class="tbl scroll' + (canBudget ? ' edit' : '') + '"><colgroup><col style="width:96px"><col><col><col>' + (measure ? '' : '<col style="width:' + YEN_COL + 'px"><col style="width:' + YEN_COL + 'px"><col>') + '</colgroup>'
     + '<thead><tr><th>月</th>' + qTh('p10') + qTh('p50') + qTh('p90') + (measure ? '' : '<th class="num" data-tip="予算のもとにする予測（月ごと）">採用予測</th><th class="num" data-tip="採用予測に足す分（マイナスもできます）">上乗せ</th><th class="num" data-tip="採用予測 + 上乗せ">最終予算</th>') + '</tr></thead><tbody>'
     + ms.map(function(m){ return '<tr><td>' + esc(m.month) + '</td><td class="num">' + yen(m.p10) + '</td><td class="num">' + yen(m.p50) + '</td><td class="num">' + yen(m.p90) + '</td>' + bud(m) + '</tr>'; }).join('')
     // 年度合計の行の下振れ・中心・上振れ: 本番の計画は上の数字の箱と同じ値（旧来の計算の年度合計はカーソルで）。本番でなければ今までどおり
@@ -3567,7 +3571,7 @@ function anBulletCard(plans){
   if (!use.length) return '';
   use.sort(anByRatio);
   var rows = use.map(function(p){ var b = planBudget(p); return { label: p.clientName, low: p.landingP10, mid: p.landing, high: p.landingP90, target: isNum(b) && b > 0 ? b : null, tone: tone(p.ratio), tip: anPlanTip(p) }; });
-  var tbl = anTable(['', 152, 152, 152, 152, 112], '<th>メーカー</th>' + qTh('p10') + '<th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th>' + qTh('p90')
+  var tbl = anTable(['', YEN_COL, YEN_COL, YEN_COL, YEN_COL, 112], '<th>メーカー</th>' + qTh('p10') + '<th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th>' + qTh('p90')
     + '<th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">予算</th><th class="num" data-tip="着地の推定 ÷ 予算">予算比</th>',
     use.map(function(p){ var b = planBudget(p); return '<tr>' + anNameTd(p) + '<td class="num">' + yenU(p.landingP10) + '</td><td class="num">' + yenU(p.landing) + '</td><td class="num">' + yenU(p.landingP90) + '</td><td class="num">' + (isNum(b) ? yenU(b) : '-') + '</td><td class="num">' + anPct(p.ratio) + '</td></tr>'; }).join(''));
   return anCard('着地の推定と予算', '灰の帯は 80% の幅（下振れ〜上振れ）、太い縦棒は着地の推定、▼ の付いた点線は予算です。着地の推定 ÷ 予算の大きい順。\n縦棒の色: 予算の 110% 以上は橙・90% 以下は紺・そのあいだは灰',
@@ -3684,7 +3688,7 @@ function anRevCard(plans){
   // 本番の回のある計画があれば、本番の回の値は月の合計（中心ではない）と、前回からは同じ作り方の値どうしで比べることを見出しの説明に添える
   var liveNote = anyLive ? '。本番の回は月ごとの中心の合計です' : '';
   var chgTh = '<th class="num" data-tip="' + esc('直近の 2 回の予測の、年間の中心の変わり方' + (anyLive ? '（同じ作り方の値どうしで比べます。本番の回は月ごとの中心の合計）' : '')) + '">前回から</th>';
-  var withSpark = anTable(['', 152, 112, 152, 112], '<th>メーカー</th><th data-tip="' + esc('古い順。右の点が最新。どのメーカーも同じ縦の範囲（最初の予測からの変わり方）で描いています' + liveNote) + '">流れ</th>' + chgTh + '<th class="num" data-tip="最新の予測の年間の中心（予測と予算の画面と同じ）">最新の中心</th><th class="num" data-tip="このアプリで動かした予測の回数（最近の 12 回まで）">回数</th>',
+  var withSpark = anTable(['', 152, 112, YEN_COL, 112], '<th>メーカー</th><th data-tip="' + esc('古い順。右の点が最新。どのメーカーも同じ縦の範囲（最初の予測からの変わり方）で描いています' + liveNote) + '">流れ</th>' + chgTh + '<th class="num" data-tip="最新の予測の年間の中心（予測と予算の画面と同じ）">最新の中心</th><th class="num" data-tip="このアプリで動かした予測の回数（最近の 12 回まで）">回数</th>',
     use.map(function(x){ var p = x[0], rs = x[1];
       return '<tr>' + anNameTd(p) + '<td>' + chartSpark(rel(rs), { w: 120, h: 32, min: smin, max: smax, tip: p.clientName + ' の見直し' + (marked(rs) ? '' : '（年間の中心）') + '\n' + list(rs), label: p.clientName + ' の見直しの流れ' }) + '</td>'
         + chg(rs) + latest(p, rs) + '<td class="num">' + rs.length + ' 回</td></tr>'; }).join(''));
