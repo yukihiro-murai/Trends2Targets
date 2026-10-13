@@ -351,6 +351,18 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   let s = cur();
   // 着地見込みの τ・w（2026-10-08 判断 29・11: 学んだ値は所有者が承認して書くまで使わない）
   assert.deepEqual(Object.keys(s).filter((k) => !/^test\./.test(k)), ['source.zac_spreadsheet', 'landing.tau', 'landing.w'], '本番の設定は使うものだけ');
+  // 本番の設定は、どれも所有者だけが変えられる（2026-10-13: ZAC の実績のスプレッドシートも。取り込みは所有者の権限でそのブックを読むため）。
+  // スプレッドシートを指す設定は必ず所有者だけ。所有者の操作（saveSetting）が無くても、中の関数が所有者でない人を断る
+  const defs = env.run('APP_SETTING_DEFS');
+  for (const key of ['source.zac_spreadsheet', 'landing.tau', 'landing.w']) assert.equal(defs[key].owner, true, key + ' は所有者だけ');
+  for (const key of Object.keys(defs).filter((k) => defs[k].type === 'sheet')) assert.equal(defs[key].owner, true, key + '（スプレッドシート）は所有者だけ');
+  const book = env.makeBook('ほかのブック', { Sheet1: { values: [['x']] } });
+  const notOwner = { actor: MEMBER, user: { email: MEMBER, isOwner: false }, roles: [{ role: 'ADMIN', scope_type: 'ALL', client_id: '' }] };
+  for (const key of ['source.zac_spreadsheet', 'landing.tau']) {
+    assert.throws(() => env.run('appSaveSetting_(__c, __in)', { __c: notOwner, __in: { key, value: key === 'landing.tau' ? 0.2 : 'https://docs.google.com/spreadsheets/d/' + book.getId() + '/edit' } }),
+      /所有者だけが変えられます/, key + ' は管理者の役割があっても書けない');
+  }
+  assert.equal(env.table('SETTINGS').length, 0, '所有者でない人の値は保存しない');
   assert.ok(Object.values(s).every((x) => x.isDefault));
   for (const [key, value, re] of [
     ['test.rate', '1.5', /0〜1 の範囲/], ['test.rate', 'abc', /数値で入力/], ['test.rate', '', /数値で入力/],

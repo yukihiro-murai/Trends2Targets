@@ -238,7 +238,7 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   const C = J(env.run('APP_LANDING'));
   assert.deepEqual([defs['landing.tau'].min, defs['landing.tau'].max, defs['landing.tau'].def, defs['landing.w'].min, defs['landing.w'].max, defs['landing.w'].def],
     [C.TAU_MIN, C.TAU_MAX, C.TAU0, 1, C.W_MAX, 1], '設定の範囲と既定値は着地の計算の決まりと同じ');
-  assert.deepEqual([defs['landing.tau'].owner, defs['landing.w'].owner, defs['source.zac_spreadsheet'].owner], [true, true, undefined]);
+  assert.deepEqual([defs['landing.tau'].owner, defs['landing.w'].owner, defs['source.zac_spreadsheet'].owner], [true, true, true], 'どれも所有者だけ（ZAC の実績のスプレッドシートも。2026-10-13）');
   const used0 = env.call('apiAiLearning()').landing.used;
   assert.deepEqual([used0.tau, used0.w, used0.tauSet, used0.wSet, used0.tauFrom], [0.15, 1, false, false, '']);
   const before = port()[idCur];
