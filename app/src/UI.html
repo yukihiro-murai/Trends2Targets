@@ -303,6 +303,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .chart .pt{stroke:var(--card);stroke-width:1.5}
 .chart .hollow{fill:var(--card);stroke:var(--navy);stroke-width:1.8}
 .chart .soft{fill-opacity:.3}
+.chart .brk{stroke:var(--card);stroke-width:3}   /* 目盛りが途中からの棒の切れ目（予算との差の内訳） */
+.chart .area{fill:var(--primary);fill-opacity:.16}   /* 曲線の下の面（全体の着地の分布で、予算に届く分） */
 .chart .f-warm{fill:var(--warm)}.chart .f-neutral{fill:var(--neutral)}.chart .f-cool{fill:var(--cool)}.chart .f-main{fill:var(--primary)}.chart .f-navy{fill:var(--navy)}
 .chart .s-warm{stroke:var(--warm)}.chart .s-neutral{stroke:var(--neutral)}.chart .s-cool{stroke:var(--cool)}.chart .s-main{stroke:var(--primary)}.chart .s-navy{stroke:var(--navy)}
 .spark{display:inline-block;vertical-align:middle;overflow:visible}
@@ -419,19 +421,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 }
 
 /* ==== CSS: ANALYSIS ==== */
-/* 分析: 空模様の板（8 つを決まった順に。キャラ 64px・名前・数・メーカーの札。広い画面は 1 行、ふつうは 4 つずつ、スマホは 2 つずつ）・
-   グラフの下の「除いたメーカー」・読みのクセの左右の名前・横に送る表（スマホ） */
-.ansky{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s3)}   /* メーカーの札の名前が切れないよう、ふつうの画面は 4 つずつ 2 行（とても広い画面だけ 1 行） */
-@media (min-width:1680px){.ansky{grid-template-columns:repeat(8,minmax(0,1fr))}}
-.anblk{display:flex;flex-direction:column;align-items:center;gap:var(--s2);min-width:0;padding:var(--s3) var(--s2) var(--s4);border:1px solid var(--line-soft);border-radius:var(--radius-s);background:#fff}
-.anbh{display:flex;flex-direction:column;align-items:center;gap:var(--s1);color:var(--navy)}
-.anbh .nm{font-size:var(--fs-s);line-height:1.4}
-.anbh .ct{font-size:var(--fs-h2);line-height:1.2;font-variant-numeric:tabular-nums}
-.anblk.none .anbh .skych{opacity:.4}.anblk.none .anbh .ct{color:var(--muted)}   /* 0 のものは絵だけ淡く（名前は読める濃さ。ホームと同じ） */
-.anmks{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s1);max-width:100%}
-.anmks .chip.anmk[data-tip]{margin:0;max-width:100%;cursor:pointer;text-decoration:none;color:var(--navy);transition:background var(--ease),box-shadow var(--ease)}
-.anmks .chip.anmk span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.anmks .chip.anmk:hover,.anmks .chip.anmk:focus-visible{background:var(--primary-soft);box-shadow:inset 0 0 0 1.5px var(--primary)}
+/* 分析: グラフの下の「除いたメーカー」・読みのクセの左右の名前・横に送る表（スマホ） */
 .anx{margin-top:var(--s3)}
 .anx[data-tip]{display:inline-block}
 .tbl.anw{width:max(100%,560px)}
@@ -441,7 +431,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .anwx{display:inline-flex;align-items:center;gap:var(--s2)}
 .tbl .anlink[data-tip]:hover{text-decoration-color:var(--primary)}
 @media (max-width:760px){
-  .ansky{grid-template-columns:repeat(2,minmax(0,1fr))}
   /* 分析の表: 列は中身の幅（列の少ない表は横に送らずに収まる。多い表だけ送る。見直しの流れは 名前・流れ・前回から まで見える） */
   .tbl.anw{width:100%}.tbl.anw col{width:auto!important}.tbl.anw td.wrap{min-width:var(--w-btn-sm)}
 }
@@ -1650,6 +1639,92 @@ function chartArrows(rows, opts){
       out += chRect(0, cy - rh / 2, w, rh, 'hit', r.tip || r.label + '\n' + nRaw + ' ' + fmt(a) + ' → ' + nShr + ' ' + fmt(b));
     });
     return chSvg(w, h, opts.label || '縮める前と後', out);
+  });
+}
+/**
+ * 金額の目盛りの名前（既定は yenShort。幅が狭くて同じ名前が並ぶときだけ、刻みに合わせて小数を付ける: 4.70億・4.72億…）。ticks = 目盛りの値
+ */
+function chYenTicks(ticks){
+  var ls = ticks.map(yenShort);
+  if (ticks.length < 2 || ls.every(function(l, i){ return i === 0 || l !== ls[i - 1]; })) return yenShort;
+  var st = Math.abs(ticks[1] - ticks[0]), big = Math.max.apply(null, ticks.map(Math.abs)) >= 1e8, unit = big ? 1e8 : 1e4;
+  var k = Math.max(0, Math.min(4, Math.ceil(-Math.log(st / unit) / Math.LN10 - 1e-9)));
+  return function(v){ return isNum(v) ? Number((v / unit).toFixed(k)).toLocaleString('ja-JP', { minimumFractionDigits: k, maximumFractionDigits: k }) + (big ? '億' : '万') : '-'; };
+}
+/**
+ * 差の内訳（横の滝。上から下へ足していく）。rows: [{ label, value, total?（合計の行: 左の端から value まで）, tone?, text?（棒の横の文字）, tip }]。
+ * 合計でない行は、前の行の終わりから value だけ足す（正 = 暖色・負 = 寒色が既定）。行と行のあいだは細い線でつなぐ。
+ * 合計がほかの動きより十分大きいときは、目盛りを途中から始め（差が見えるように）、合計の棒の左の端に切れ目を入れる。
+ * opts: { w, fmt（目盛り。既定 yenShort）, labelW, label, empty }
+ */
+function chartWaterfall(rows, opts){
+  return chSafe(function(){
+    opts = opts || {};
+    var fmt = opts.fmt || yenShort, list = (rows || []).filter(function(r){ return r && isNum(r.value); });
+    if (!list.length) return chEmpty(opts.empty);
+    var w = opts.w || chW(), narrow = w < 480, lw = opts.labelW || (narrow ? 88 : 168), rh = 32, T = 8;
+    var cum = 0, segs = list.map(function(r){ var a = r.total ? null : cum, b = r.total ? r.value : cum + r.value; cum = b; return { r: r, a: a, b: b }; });
+    var ends = []; segs.forEach(function(s){ ends.push(s.b); if (s.a !== null) ends.push(s.a); });
+    var lo = Math.min.apply(null, ends), hi = Math.max.apply(null, ends), span = hi - lo || Math.abs(hi) * 0.1 || 1;
+    var cut = lo > 0 && lo - span * 0.6 > 0;   // 合計の棒を 0 から描くと差が見えないとき
+    var vtext = function(s){ return s.r.text !== undefined && s.r.text !== null ? String(s.r.text) : (s.r.total ? fmt(s.b) : (s.r.value > 0 ? '+' : '') + fmt(s.r.value)); };
+    var R = Math.max(narrow ? 16 : 24, segs.reduce(function(m, s){ return Math.max(m, chTextW(vtext(s)) + 8); }, 0));
+    var n = chNice(cut ? lo - span * 0.6 : Math.min(0, lo), hi, Math.max(2, Math.floor((w - lw - R) / (narrow ? 72 : 96))));
+    if (cut && n.lo < 0) n.lo = 0;
+    n.ticks = n.ticks.filter(function(t){ return t >= n.lo - 1e-9 && t <= n.hi + 1e-9; });
+    var x = chLin(n.lo, n.hi, lw, w - R), y1 = T + segs.length * rh, h = y1 + 26;
+    var out = chXAxis(x, n, T - 4, y1, opts.fmt ? fmt : chYenTicks(n.ticks), [0, w]);
+    segs.forEach(function(s, i){
+      var cy = T + i * rh + rh / 2, r = s.r, x0 = r.total ? x(n.lo) : x(s.a), x1 = x(s.b), tc = r.total ? (r.tone ? chTone(r.tone) : 'navy') : r.tone ? chTone(r.tone) : r.value >= 0 ? 'warm' : 'cool';
+      out += chText(0, cy + 4, chClip(r.label, lw - 10), { c: 'lb' });
+      if (i > 0) { var px = x(segs[i - 1].b); out += chLine(px, cy - rh / 2 - 9 + 2, px, cy - 9, 'grid', ' stroke-dasharray="3 3"'); }
+      var bx = Math.min(x0, x1), bw = Math.max(Math.abs(x1 - x0), 1.5);
+      out += chRect(bx, cy - 9, bw, 18, 'f-' + tc, null, ' rx="2"');
+      if (r.total && cut) out += chLine(bx + 10, cy - 11, bx + 4, cy + 11, 'brk') + chLine(bx + 16, cy - 11, bx + 10, cy + 11, 'brk');
+      out += chText(Math.max(x0, x1) + 4, cy + 4, vtext(s), { c: 'vl' });
+      out += chRect(0, cy - rh / 2, w, rh, 'hit', r.tip || r.label + ' ' + vtext(s));
+    });
+    return chSvg(w, h, opts.label || '差の内訳', out);
+  });
+}
+
+/** 標準正規分布の密度 */
+function chNormPdf(v, m, sd){ var z = (v - m) / sd; return Math.exp(-z * z / 2) / (sd * Math.sqrt(2 * Math.PI)); }
+/**
+ * 正規分布の曲線（金額の見通し。例: 全体の着地）。curves: [{ mean, sd, label, dashed?, tone?, tip }]（sd > 0 の曲線だけ描く）。
+ * opts: { w, h（既定 240。スマホ 200）, ref（縦の点線。例: 予算）, refLabel, mark（細い縦線。例: 着地の推定）, markLabel,
+ *         shade: true（最初の曲線の、ref より右の面を塗る = ref を超える確率）, fmt（既定 yenShort）, label, empty }
+ */
+function chartNormal(curves, opts){
+  return chSafe(function(){
+    opts = opts || {};
+    var fmt = opts.fmt || yenShort, cs = (curves || []).filter(function(c){ return c && isNum(c.mean) && isNum(c.sd) && c.sd > 0; });
+    if (!cs.length) return chEmpty(opts.empty);
+    var w = opts.w || chW(), narrow = w < 480, h = opts.h || (narrow ? 220 : 260), L = 12, R = 12, Bm = 30, N = 180;
+    var lg = chLegend(cs.map(function(c){ return { label: c.label || '', kind: c.dashed ? 'dash' : 'line', cls: 's-' + (c.tone ? chTone(c.tone) : 'main') }; })
+      .concat(opts.shade && isNum(opts.ref) ? [{ label: '届く分', kind: 'band' }] : []), L, 14, w);
+    var T = lg.h + 14 + (isNum(opts.ref) || isNum(opts.mark) ? 34 : 0);   // 点線の名前を 2 段（予算・着地の推定）
+    var lo = Math.min.apply(null, cs.map(function(c){ return c.mean - 3.2 * c.sd; })), hi = Math.max.apply(null, cs.map(function(c){ return c.mean + 3.2 * c.sd; }));
+    if (isNum(opts.ref)) { lo = Math.min(lo, opts.ref); hi = Math.max(hi, opts.ref); }
+    var n = chNice(lo, hi, Math.max(2, Math.floor((w - L - R) / (narrow ? 72 : 96))));
+    var x = chLin(n.lo, n.hi, L, w - R), ymax = Math.max.apply(null, cs.map(function(c){ return chNormPdf(c.mean, c.mean, c.sd); }));
+    var y = chLin(0, ymax * 1.06, h - Bm, T), out = chXAxis(x, n, T, h - Bm, opts.fmt ? fmt : chYenTicks(n.ticks), [0, w]) + chLine(L, h - Bm, w - R, h - Bm, 'axis');
+    var pts = function(c, a, b){ var s = []; for (var i = 0; i <= N; i++) { var v = a + (b - a) * i / N; s.push(chR(x(v)) + ' ' + chR(y(chNormPdf(v, c.mean, c.sd)))); } return s; };
+    if (opts.shade && isNum(opts.ref) && opts.ref < n.hi) {
+      var c0 = cs[0], a0 = Math.max(opts.ref, n.lo);
+      out += '<path d="M' + chR(x(a0)) + ' ' + chR(h - Bm) + ' L' + pts(c0, a0, n.hi).join(' L') + ' L' + chR(x(n.hi)) + ' ' + chR(h - Bm) + ' Z" class="area"/>';
+    }
+    // 点線の名前: 予算は上の段・着地の推定は下の段（近くても重ならない）。入りきらなければ線の左に寄せる
+    var tag = function(v, label, row){ var px = x(v), fit = px + 4 + chTextW(label) <= w; return chText(fit ? px + 4 : px - 4, lg.h + 14 + 12 + row * 17, label, { a: fit ? 'start' : 'end' }); };
+    if (isNum(opts.mark)) out += chLine(x(opts.mark), lg.h + 14 + 18, x(opts.mark), h - Bm, 'grid', ' stroke-dasharray="2 3"') + (opts.markLabel ? tag(opts.mark, opts.markLabel, 1) : '');
+    if (isNum(opts.ref)) out += chLine(x(opts.ref), lg.h + 14 + 2, x(opts.ref), h - Bm, 'ref') + (opts.refLabel ? tag(opts.ref, opts.refLabel, 0) : '');
+    cs.forEach(function(c){
+      var d = 'M' + pts(c, n.lo, n.hi).join(' L'), tc = c.tone ? chTone(c.tone) : 'main';
+      out += '<path d="' + d + '" class="ln s-' + tc + '"' + (c.dashed ? ' stroke-dasharray="6 4"' : '') + '/>';
+      out += '<path d="' + d + '" class="hitline" data-tip="' + esc(c.tip || (c.label || '') + '\n中心 ' + fmt(c.mean)) + '"/>';
+    });
+    out += lg.svg;
+    return chSvg(w, h, opts.label || '見通しの分布', out);
   });
 }
 // ==== END REGION: CHARTS ====
@@ -3457,11 +3532,12 @@ function fcStepsTab(d, v){
 }
 // ==== END REGION: FORECAST ====
 // ==== REGION: ANALYSIS ====
-// 分析（年度のメーカーを横に並べる。apiCrossMaker）。タブ: 俯瞰・市場。年度は題の横。グラフ / 表で見る を切り替えられる
-// 2026-10-06 作り直し: 俯瞰 = 合計 → 空模様の板（メーカーの名前を出してよい。押すと予測）→ 着地 ÷ 予算と不確かさ → 着地の推定と予算 → 予算を超える確率 →
-// 外れ幅 → 読みのクセ → 予測の見直しの流れ。市場 = 話題 × メーカーの向き・話題ごとのまとめ・最後の調査。数字はサーバーの値をそのまま使う（空模様も計算し直さない）
-S.an = { tab: 'overview', fy: '', data: null, view: 'chart' };
-var AN_TABS = [['overview', '俯瞰'], ['market', '市場']];
+// 分析（年度のメーカーを横に並べる。apiCrossMaker）。年度は題の横。グラフ / 表で見る を切り替えられる
+// 2026-10-13 作り直し（村井さん「画面の中のタブは使いにくい・空模様はホームと被る・専門家レベルの推定と示唆をグラフで」）: タブをやめて 1 カラムで縦に。
+// 分析の要点（よみ。サーバーの insights から言える示唆を気になる順に）→ 全体の着地の分布 → 予算との差の内訳 → 不確かさの寄与 → 着地の推定と予算 →
+// 着地 ÷ 予算と不確かさ → 予算を超える確率 → 外れ幅 → 読みのクセ → 予測の見直しの流れ → 物差し → 話題ごとの向き（市場）。
+// 数字はサーバーの値をそのまま使う（空模様も計算し直さない。合計の分布の曲線だけ、サーバーの中心と幅から描く）
+S.an = { fy: '', data: null, view: 'chart' };
 /** 分析を開く: 中身が無い・10 分より古いときだけ読む（サーバーも日ごとに控える） */
 function anEnter(){ if (ldNeed('an', !!S.an.data)) anLoad(); }
 function anLoad(){
@@ -3481,7 +3557,6 @@ function anClosed(d){
   if (!ps.length) ps = (S.an.plans || []).filter(function(p){ return String(p.fy) === String(d.fy); });
   return ps.length > 0 && ps.every(function(p){ return p.frozen; });
 }
-function anTab(t){ S.an.tab = t === 'market' ? 'market' : 'overview'; render(); }
 /** 年度を変える（その年度を読み直す） */
 function anFy(fy){ S.an.fy = String(fy); S.an.data = null; anLoad(); render(); }
 function viewAnalysis(){
@@ -3489,9 +3564,9 @@ function viewAnalysis(){
   var fys = d ? (d.fys || []).slice().reverse() : a.fy ? [a.fy] : [];
   var sel = fys.length ? '<select class="inp sm" id="an_fy" data-near="1" aria-label="年度" onchange="anFy(this.value)">'
     + fys.map(function(f){ return '<option value="' + esc(f) + '"' + (String(f) === String(a.fy) ? ' selected' : '') + '>FY' + esc(f) + '</option>'; }).join('') + '</select>' : '';
-  var html = '<div class="page-head"><h1>分析</h1>' + sel + '</div>' + subTabs(AN_TABS, a.tab, 'anTab');
+  var html = '<div class="page-head"><h1>分析</h1>' + sel + '</div>';
   if (!d) return html + (slot('an', '分析を読み込んでいます', 'anLoad()') || loading('分析を読み込んでいます'));
-  return html + (a.tab === 'market' ? anMarket(d) : anOverview(d));
+  return html + anOverview(d);
 }
 
 // ---- 分析の小さな道具（an で始まる名前。ほかの区切りの関数は CORE・CHARTS だけを使う） ----
@@ -3556,17 +3631,17 @@ function anPlanTip(p, more){
   return lines.join('\n');
 }
 
-// ---- 俯瞰 ----
+// ---- 1 カラムの分析 ----
 function anOverview(d){
   var plans = (d.plans || []).slice();
   if (!plans.length) return guide('guide', 'FY' + esc(d.fy) + ' の計画はまだありません。所有者が計画を作ると、ここにメーカーが並びます。');
-  // 測る専用の計画（予算を立てない）は、合計・空模様・予算と比べるグラフに入れない。外れ幅・読みのクセ・見直しの流れには入れる（版 10 の 3-9）
+  // 測る専用の計画（予算を立てない）は、合計・予算と比べるグラフ・全体の読み解きに入れない。外れ幅・読みのクセ・見直しの流れには入れる（版 10 の 3-9）
   var bud = plans.filter(function(p){ return !planMeasure(p); }), ms = plans.filter(planMeasure);
   var miss = [], parts = (bud.length ? [
-    [anScatterCard(bud), '着地 ÷ 予算と不確かさ'], [anBulletCard(bud), '着地の推定と予算'], [anProbCard(bud), '予算を超える確率']] : []).concat([
+    [anBulletCard(bud), '着地の推定と予算'], [anScatterCard(bud), '着地 ÷ 予算と不確かさ'], [anProbCard(bud), '予算を超える確率']] : []).concat([
     [anMapeCard(plans), '外れ幅'], [anBiasCard(plans), '読みのクセ'], [anRevCard(plans), '予測の見直しの流れ']]);
   var body = parts.map(function(x){ if (!x[0]) miss.push(x[1]); return x[0]; }).join('');
-  // 描けないグラフは、カードを並べずに、よみの案内 1 枚にまとめる。外れ幅・読みのクセは、各計画の「当たり具合を計算」で出る（実績の取り込みだけでは出ない。
+  // 描けないグラフは、カードを並べずに、よみの要点の最後で言う。外れ幅・読みのクセは、各計画の「当たり具合を計算」で出る（実績の取り込みだけでは出ない。
   // 動かせない人には「計算されると出ます」）。締め済みの年度は、予測も当たり具合も計算し直さない（ずっと出ない）ので、動かし方も「まだ」も言わない
   var accMiss = miss.filter(function(x){ return x === '外れ幅' || x === '読みのクセ'; }), onlyAcc = accMiss.length === miss.length, closed = anClosed(d);
   var why = '（FY' + d.fy + ' は締め済みのため、' + (onlyAcc ? '' : '予測や') + '当たり具合は計算し直しません）。';
@@ -3575,10 +3650,170 @@ function anOverview(d){
   var accHow = closed ? '' : accMiss.length ? (z.zero ? zeroHow : (onlyAcc ? '' : accMiss.join('・') + 'は、') + runWhen() + (onlyAcc ? '、ここに出てきます。' : '出ます。')) : '';
   var more = closed ? '' : '予測を動かし、実績を取り込むと、ここに出てきます。';
   var none = miss.length === parts.length && bud.length > 0;   // 測る専用の計画だけの年度は、着地の推定の話をしない
-  var g = !miss.length ? '' : closed ? guide('explain', esc(none ? '着地の推定や、予測と実績の比べ' : miss.join('・')) + 'はありません' + esc(why) + (none ? '' : esc(zeroHow)))
-    : none ? guide('explain', (z.zero ? 'まだ数字がそろっていないため、グラフは出していません。' : 'まだ着地の推定や、予測と実績の比べがないため、グラフは出していません。') + more + esc(accHow))
-    : guide('explain', (onlyAcc && z.zero && !z.rest ? '' : 'まだ数字がそろっていないため、') + esc(miss.join('・')) + 'は出していません。' + (onlyAcc ? '' : more) + esc(accHow));
-  return (bud.length ? anSkyBoard(bud) : '') + anMeasure(ms) + g + body + anBacktestCard(d);   // 出していないグラフの案内は、グラフより先に。物差しは最後（動かした計画があるときだけ）
+  var g = !miss.length ? '' : closed ? esc(none ? '着地の推定や、予測と実績の比べ' : miss.join('・')) + 'はありません' + esc(why) + (none ? '' : esc(zeroHow))
+    : none ? (z.zero ? 'まだ数字がそろっていないため、グラフは出していません。' : 'まだ着地の推定や、予測と実績の比べがないため、グラフは出していません。') + more + esc(accHow)
+    : (onlyAcc && z.zero && !z.rest ? '' : 'まだ数字がそろっていないため、') + esc(miss.join('・')) + 'は出していません。' + (onlyAcc ? '' : more) + esc(accHow);
+  // 全体の読み解き（サーバーの insights。予算を立てるメーカーだけ）は、メーカーごとのグラフより先に
+  var whole = bud.length ? anDistCard(d) + anWaterfallCard(d) + anSpreadCard(d) : '';
+  return anHero(d, bud, g) + anMeasure(ms) + whole + body + anBacktestCard(d) + anMarket(d);   // 物差しは見通しと当たり具合の後、市場は最後
+}
+
+// ---- 分析の要点（よみ。サーバーの insights から、数字で言える示唆を気になる順に 5 つまで。根拠の式はカーソルで）----
+var AN_LVL = { ng: 0, warn: 1, info: 2, ok: 3 };
+/** 割（7 割。10 割はほぼすべて） */
+function anWari(v){ var k = Math.round(v * 10); return k >= 10 ? 'ほぼすべて' : k <= 0 ? '1 割未満' : k + ' 割'; }
+/** 符号つきの金額（+1.2億円・−3,000万円） */
+function anYenS(v){ return !isNum(v) ? '-' : (v > 0 ? '+' : v < 0 ? '−' : '') + yenShort(Math.abs(v)) + '円'; }
+/** 名前の並び（多ければ ほか n 社） */
+function anNames(xs, k){ var n = xs.slice(0, k || 3).map(function(x){ return x.clientName; }); return n.join('・') + (xs.length > n.length ? ' ほか ' + (xs.length - n.length) + ' 社' : ''); }
+/** 確率の範囲（小さい方〜大きい方。同じ書き方なら 1 つ） */
+function anRange(a, b){ var lo = Math.min(a, b), hi = Math.max(a, b); return anProb(lo) === anProb(hi) ? anProb(lo) : anProb(lo) + '〜' + anProb(hi); }
+/**
+ * 要点の一覧: [{ lvl, rank, text, tip }]（予算に届く確率を先頭に、ほかは気になる順: 度合い → 決まった順。5 つまで）。言えることが無いものは出さない
+ * （数字の無いメーカー・計画の無い年度・締めた年度でも崩れない。何も言えなければ、その理由を 1 つ）
+ */
+function anSays(d, bud){
+  var ins = d.insights || {}, t = ins.total, out = [];
+  var add = function(rank, lvl, text, tipText){ out.push({ rank: rank, lvl: lvl, text: text, tip: tipText || '' }); };
+  // 1. 予算の合計に届く確率（独立なら〜全部同じ向きなら）。締まった年度は確定した着地
+  if (t && t.settled) {
+    add(0, t.gap >= 0 ? 'ok' : 'warn', 'FY' + d.fy + ' の着地は、予算の ' + anPct(t.landing / t.budget) + 'で確定しています（予算との差 ' + anYenS(t.gap) + '）。',
+      '着地の合計 ' + yenU(t.landing) + '\n予算の合計 ' + yenU(t.budget) + '（' + t.plans + ' メーカー）');
+  } else if (t) {
+    var lo = Math.min(t.pIndependent, t.pTogether), hi = Math.max(t.pIndependent, t.pTogether);
+    add(0, hi < 0.5 ? 'warn' : lo >= 0.5 ? 'ok' : 'info', '予算の合計に届く確率は ' + anRange(t.pIndependent, t.pTogether) + ' と見ています（着地の推定は予算の ' + anPct(t.landing / t.budget) + '）。',
+      'メーカーどうしが独立に振れるなら ' + anProb(t.pIndependent) + '、全部同じ向きに振れるなら ' + anProb(t.pTogether) + '。本当の値は、そのあいだにある見込みです\n'
+      + '確率 = Φ((着地の推定の合計 − 予算の合計) ÷ ぶれ)。ぶれは、独立なら √(Σ ぶれ²) = ' + anYen(t.sdIndependent) + '、同じ向きなら Σ ぶれ = ' + anYen(t.sdTogether)
+      + '\n予算と着地の推定がある ' + t.plans + ' メーカー（着地の推定 ' + yenU(t.landing) + '・予算 ' + yenU(t.budget) + '）');
+  }
+  // 2. 予算との差の何割が上位 2 社か（差の大きさ。向きを問わない）
+  var gt = ins.gapTop, gs = ins.gaps || [];
+  if (t && gt && gs.length >= 3) {
+    var g2 = gs.slice(0, 2), short = t.gap < 0 && g2.every(function(x){ return x.gap < 0; });
+    add(1, short && gt.share >= 0.5 ? 'warn' : 'info', '予算との差の ' + anWari(gt.share) + 'は、' + anNames(g2, 2) + 'の 2 社から来ています。',
+      '差の大きさ（向きを問わない）の割合 ' + anPct(gt.share) + ' = 上位 2 社の |着地の推定 − 予算| ÷ 全メーカーの |着地の推定 − 予算| の合計\n'
+      + g2.map(function(x){ return x.clientName + ' ' + anYenS(x.gap); }).join('\n') + '\n全体の差 ' + anYenS(t.gap) + '（' + gs.length + ' メーカー）');
+  }
+  // 3. 全体のぶれは、どのくらいのメーカーから来ているか（分散の寄与）
+  var st = ins.spreadTop, sp = ins.spread || [];
+  if (st && sp.length >= 3 && st.k80 < sp.length) {
+    add(2, 'info', '全体のぶれの 8 割は、' + st.k80 + ' 社（' + anNames(sp.slice(0, st.k80), 3) + '）から来ています。ここが固まると、全体の幅が大きく縮む見込みです。',
+      '寄与 = ぶれ² ÷ Σ ぶれ²（メーカーどうしが独立とみたときの、合計の着地の分散の割合）\n' + sp.slice(0, 5).map(function(x){ return x.clientName + ' ' + anPct(x.share); }).join('\n')
+      + '\n実質のメーカーの数（1 ÷ Σ 寄与²） ' + st.effective.toFixed(1) + ' / ' + st.plans);
+  }
+  // 4. 予測の見直しの向きの偏り（符号検定）
+  var dr = ins.drift;
+  if (dr && dr.up + dr.down >= 3) {
+    var tilt = isNum(dr.pValue) && dr.pValue <= 0.25 && dr.up !== dr.down, downTilt = tilt && dr.down > dr.up;
+    var dirTxt = '上向き ' + dr.up + '・下向き ' + dr.down + (dr.flat ? '・横ばい ' + dr.flat : '');
+    add(3, downTilt ? 'warn' : 'info', tilt ? '直近の予測の見直しは、' + dr.plans + ' 社中 ' + Math.max(dr.up, dr.down) + ' 社が' + (downTilt ? '下向き' : '上向き') + 'で、' + (downTilt ? '下方' : '上方') + '修正に偏っています。'
+      : '直近の予測の見直しの向きに、目立った偏りはありません（' + dirTxt + '）。',
+      '最近の 2 回の予測の年間の中心の変わり方（±0.5% 未満は横ばい）。' + dirTxt + '\n'
+      + (isNum(dr.pValue) ? '五分五分の偶然でこれ以上偏る確率（符号検定・両側） ' + anProb(dr.pValue) + '\n' : '')
+      + (isNum(dr.change) ? '合計 ' + yenShort(dr.from) + ' → ' + anYen(dr.to) + '（' + pct1(dr.change) + '）\n' : '')
+      + dr.items.slice(0, 5).map(function(x){ return x.clientName + ' ' + pct1(x.change); }).join('\n'));
+  }
+  // 5. 読みのクセがそろって片方に寄っているか（3 分の 2 以上）
+  var ln = ins.lean;
+  if (ln && ln.plans >= 3) {
+    var over = ln.over >= Math.ceil(ln.plans * 2 / 3), under = !over && ln.under >= Math.ceil(ln.plans * 2 / 3);
+    if (over || under) add(4, over ? 'warn' : 'info', '比べた月のある ' + ln.plans + ' 社中 ' + (over ? ln.over : ln.under) + ' 社で、予測が実績より' + (over ? '高め（強気）' : '低め（弱気）') + 'です。'
+      + (over ? '届く確率も、その分楽観寄りの可能性があります。' : '着地は推定より上振れる可能性があります。'),
+      '読みのクセ = 予測の中心の合計 ÷ 実績の合計 − 1（±3% 未満は釣り合い。比べた月が 3 か月以上のメーカー）\n強気 ' + ln.over + '・釣り合い ' + ln.even + '・弱気 ' + ln.under
+      + (isNum(ln.meanBias) ? '\n平均 ' + pct1(ln.meanBias) : ''));
+  }
+  // 6. 市場の話題の向きのそろい方と、数字との結びつき（順位相関）
+  var mk = ins.market;
+  if (mk && mk.makers >= 2) {
+    var lead = mk.up > mk.down ? '上向きが多く' : mk.down > mk.up ? '下向きが多く' : '上向きと下向きが同じ数で';
+    var rhoTxt = isNum(mk.rho) && Math.abs(mk.rho) >= 0.5 ? (mk.rho > 0 ? '話題の向きと着地 ÷ 予算の順位がそろっていて、市場の動きが数字に表れている可能性があります。'
+      : '話題の向きと着地 ÷ 予算の順位が逆で、数字がまだ市場の動きを映していない可能性があります。') : 'メーカーの数字との結びつきは、まだはっきりしません。';
+    add(5, 'info', '市場の話題は' + lead + '（↑' + mk.up + '・→' + mk.flat + '・↓' + mk.down + '）、' + rhoTxt,
+      'メーカーごとに、AI の一番新しい調査の話題の点数を平均（±5 未満は横ばい）。' + mk.makers + ' メーカー'
+      + (isNum(mk.rho) ? '\n話題の点数の平均と、着地の推定 ÷ 予算の順位相関（スピアマン） ' + mk.rho.toFixed(2) + '（' + mk.rhoN + ' メーカー。±0.5 以上で言います）'
+        : '\n順位相関は、予算と着地の推定がある 4 メーカーから出します'));
+  }
+  // 全体の見通しが出せないときは、その理由
+  if (!t && bud.length) {
+    var noL = bud.filter(function(p){ return !isNum(p.landing); }).length;
+    add(9, 'info', noL === bud.length ? '着地の推定がまだ無いため、全体の見通しは出していません。' : '予算と着地の推定がそろうメーカーがまだ無いため、全体の見通しは出していません。',
+      bud.slice().sort(anByName).map(function(p){ var w = anWhy(p, 'ratio'); return p.clientName + (w ? '（' + w + '）' : ''); }).join('\n'));
+  }
+  // 予算に届く確率（または確定した着地）はいつも先頭。ほかは気になる順（度合い → 決まった順）
+  return out.sort(function(a, b){ return (a.rank === 0 ? -1 : 0) - (b.rank === 0 ? -1 : 0) || AN_LVL[a.lvl] - AN_LVL[b.lvl] || a.rank - b.rank; }).slice(0, 5);
+}
+/** 分析の要点（画面の先頭のよみの吹き出し）。missHtml = 出していないグラフの案内（あれば最後に。エスケープ済み） */
+function anHero(d, bud, missHtml){
+  // 全体の見通しを出せない理由は、出していないグラフの案内が着地の推定のことを言っていれば重ねない
+  var says = anSays(d, bud).filter(function(x){ return !(x.rank === 9 && /着地の推定/.test(missHtml || '')); });
+  if (!says.length && !missHtml) says = [{ lvl: 'info', text: bud.length ? '読み解ける数字がまだそろっていません。' : '予算を立てるメーカーが無いため、全体の見通しは出していません。', tip: '' }];
+  var tipAttr = function(x){ return x.tip ? ' data-tip="' + esc(x.tip) + '"' : ''; };
+  var items = says.map(function(x){ return { lvl: x.lvl, cls: 't', tip: tipAttr(x), html: esc(x.text) }; });
+  if (missHtml) items.push({ lvl: 'info', cls: 't anmiss', tip: '', html: missHtml });
+  var pose = says.some(function(x){ return x.lvl === 'warn' || x.lvl === 'ng'; }) ? 'discover' : 'explain';
+  // 1 つだけなら、そのまま話す。2 つ以上は、気になる順に並べて話す（印の形と色で度合い。ホームと同じ）
+  var body = items.length === 1 ? '<span class="' + items[0].cls.replace(/^t ?/, '') + '"' + items[0].tip + '>' + items[0].html + '</span>'
+    : '<ul class="says">' + items.map(function(x){ return '<li>' + homeLvl(x.lvl) + '<span class="' + x.cls + '"' + x.tip + '>' + x.html + '</span></li>'; }).join('') + '</ul>';
+  return '<div class="card"><div class="hero"><div class="charbox">' + YOMI_POSE[pose] + '</div><div class="bubble">' + body + '</div></div></div>';
+}
+
+// ---- 全体の読み解き（サーバーの insights。予算と着地の推定がある、予算を立てるメーカー）----
+/** 全体の着地の分布（独立なら・全部同じ向きなら の 2 本。点線が予算。届く確率は凡例に） */
+function anDistCard(d){
+  var t = (d.insights || {}).total;
+  if (!t) return '';
+  var tipText = 'メーカーごとの着地の推定とぶれを足した、年度の合計の着地の見通しです。実線はメーカーどうしが独立に振れる場合、破線は全部同じ向きに振れる場合（いちばん広い幅）で、'
+    + '本当の分布はそのあいだにある見込みです。点線は予算の合計、塗った面は予算に届く分（実線）。予算と着地の推定がある ' + t.plans + ' メーカー';
+  if (t.settled) return anCard('全体の着地の分布', tipText, '<p class="note chempty">年度の 12 か月が締まったので、着地は確定しています（' + esc(yenU(t.landing)) + '・予算の ' + anPct(t.landing / t.budget) + '）。</p>');
+  var z = 1.2815515655446004, one = t.plans === 1;
+  var cv = [{ mean: t.landing, sd: t.sdIndependent, name: one ? '着地の分布' : '独立なら', p: t.pIndependent, tone: 'main' }];
+  if (!one) cv.push({ mean: t.landing, sd: t.sdTogether, name: '全部同じ向きなら', p: t.pTogether, dashed: true, tone: 'navy' });
+  cv.forEach(function(c){
+    c.label = c.name + '：届く ' + anProb(c.p);
+    c.tip = c.name + '\n着地の推定 ' + yenU(t.landing) + '\nぶれ（標準偏差） ' + anYen(c.sd) + '\n80% の幅 ' + yenShort(Math.max(0, t.landing - z * c.sd)) + '〜' + anYen(t.landing + z * c.sd) + '\n予算に届く確率 ' + anProb(c.p);
+  });
+  var tbl = anTable(['', YEN_COL, YEN_COL, 152], '<th>見方</th><th class="num" data-tip="合計の着地のぶれ（標準偏差）">ぶれ</th>'
+    + '<th class="num" data-tip="80% の幅（下振れ〜上振れ）の下の端と上の端">80% の幅</th><th class="num" data-tip="' + esc('予算の合計 ' + yenU(t.budget) + ' 以上で着地する確率') + '">予算に届く確率</th>',
+    cv.map(function(c){ return '<tr><td>' + esc(c.name) + '</td><td class="num">' + anYen(c.sd) + '</td><td class="num wrap">' + esc(yenShort(Math.max(0, t.landing - z * c.sd)) + '〜' + anYen(t.landing + z * c.sd))
+      + '</td><td class="num">' + anProb(c.p) + '</td></tr>'; }).join(''));
+  return anCard('全体の着地の分布', tipText,
+    anCot('an.dist', chartNormal(cv, { ref: t.budget, refLabel: '予算 ' + anYen(t.budget), mark: t.landing, markLabel: '着地の推定 ' + anYen(t.landing), shade: true, label: '全体の着地の分布' }), tbl));
+}
+var AN_WF_MAX = 10;   // 予算との差の内訳・不確かさの寄与に、名前で並べるメーカーの数（ほかはまとめる）
+/** 予算との差の内訳（予算の合計 → メーカーごとの 着地の推定 − 予算（差の大きい順）→ 着地の推定の合計） */
+function anWaterfallCard(d){
+  var ins = d.insights || {}, t = ins.total, gs = ins.gaps || [];
+  if (!t || !gs.length) return '';
+  var head = gs.slice(0, AN_WF_MAX), rest = gs.slice(AN_WF_MAX);
+  var rows = [{ label: '予算', value: t.budget, total: true, text: anYen(t.budget), tip: '予算の合計 ' + yenU(t.budget) + '（' + t.plans + ' メーカー）' }]
+    .concat(head.map(function(x){ return { label: x.clientName, value: x.gap, text: anYenS(x.gap),
+      tip: x.clientName + '\n着地の推定 − 予算 ' + anYenS(x.gap) + '\n着地の推定 ' + yenU(x.landing) + '・予算 ' + yenU(x.budget) + (isNum(x.share) ? '\n差の大きさの ' + anPct(x.share) : '') }; }));
+  if (rest.length) {
+    var rs = rest.reduce(function(s, x){ return s + x.gap; }, 0);
+    rows.push({ label: 'ほか ' + rest.length + ' 社', value: rs, text: anYenS(rs), tip: rest.map(function(x){ return x.clientName + ' ' + anYenS(x.gap); }).join('\n') });
+  }
+  rows.push({ label: '着地の推定', value: t.landing, total: true, text: anYen(t.landing), tip: '着地の推定の合計 ' + yenU(t.landing) + '\n予算との差 ' + anYenS(t.gap) + '（予算の ' + anPct(t.landing / t.budget) + '）' });
+  var tbl = anTable(['', YEN_COL, YEN_COL, YEN_COL, 112], '<th>メーカー</th><th class="num">予算</th><th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th>'
+    + '<th class="num" data-tip="着地の推定 − 予算">差</th><th class="num" data-tip="差の大きさ（向きを問わない）の合計のうち、このメーカーの割合">差の割合</th>',
+    gs.map(function(x){ return '<tr>' + anNameTd(x) + '<td class="num">' + yenU(x.budget) + '</td><td class="num">' + yenU(x.landing) + '</td><td class="num">' + esc(anYenS(x.gap)) + '</td><td class="num">' + anPct(x.share) + '</td></tr>'; }).join('')
+    + '<tr class="total"><td>合計</td><td class="num">' + yenU(t.budget) + '</td><td class="num">' + yenU(t.landing) + '</td><td class="num">' + esc(anYenS(t.gap)) + '</td><td class="num">-</td></tr>');
+  return anCard('予算との差の内訳', '予算の合計から、メーカーごとの「着地の推定 − 予算」を差の大きい順に足して、着地の推定の合計に至る道すじです。橙は予算を上回る分、紺は下回る分'
+    + (gs.length > AN_WF_MAX ? '（' + AN_WF_MAX + ' 社より後はまとめています）' : '') + '。差を見やすくするため、目盛りは途中からです',
+    anCot('an.wf', chartWaterfall(rows, { label: '予算との差の内訳' }), tbl));
+}
+/** 不確かさの寄与（合計の着地の分散のうち、各メーカーの割合。大きい順） */
+function anSpreadCard(d){
+  var ins = d.insights || {}, sp = ins.spread || [], st = ins.spreadTop;
+  if (sp.length < 2) return '';
+  var head = sp.slice(0, AN_WF_MAX), rest = sp.slice(AN_WF_MAX);
+  var rows = head.map(function(x){ return { label: x.clientName, value: x.share, text: anPct(x.share), tone: 'main', tip: x.clientName + '\n寄与 ' + anPct1(x.share) + '\nぶれ（標準偏差） ' + anYen(x.sd) }; });
+  if (rest.length) { var rv = rest.reduce(function(s, x){ return s + x.share; }, 0); rows.push({ label: 'ほか ' + rest.length + ' 社', value: rv, text: anPct(rv), tone: 'neutral', tip: rest.map(function(x){ return x.clientName + ' ' + anPct1(x.share); }).join('\n') }); }
+  var mx = Math.min(1, Math.max(0.2, Math.ceil(Math.max.apply(null, rows.map(function(r){ return r.value; })) * 10 - 1e-9) / 10));
+  var tbl = anTable(['', YEN_COL, 152], '<th>メーカー</th><th class="num" data-tip="着地の推定のぶれ（標準偏差）">ぶれ</th><th class="num" data-tip="ぶれ² ÷ Σ ぶれ²">寄与</th>',
+    sp.map(function(x){ return '<tr>' + anNameTd(x) + '<td class="num">' + anYen(x.sd) + '</td><td class="num">' + anPct1(x.share) + '</td></tr>'; }).join(''));
+  return anCard('不確かさの寄与', '全体の着地のぶれ（分散）のうち、どのメーカーから来ているかです（寄与 = ぶれ² ÷ Σ ぶれ²。メーカーどうしが独立とみたとき）。上のメーカーの見通しが固まるほど、全体の幅が縮みます'
+    + (st ? '。実質のメーカーの数（1 ÷ Σ 寄与²）は ' + st.effective.toFixed(1) + ' / ' + st.plans : ''),
+    anCot('an.spread', chartBars(rows, { min: 0, max: mx, fmt: anPctFor(mx), label: '不確かさの寄与' }), tbl));
 }
 /** 測る専用の計画の数（名前と、どこに入れたかはカーソルで）。無ければ空 */
 function anMeasure(ms){
@@ -3610,20 +3845,6 @@ function anTotals(d, plans){
     + '</div>';
 }
 function anKpi(label, v, unit, tipText, main, sub){ var subs = (Array.isArray(sub) ? sub : [sub]).filter(Boolean); return '<div class="kpi' + (main ? ' main' : '') + '" data-tip="' + esc(tipText) + '"><div class="k">' + esc(label) + '</div><div class="v">' + esc(v) + (v === '-' ? '' : '<span class="u">' + esc(unit) + '</span>') + '</div>' + subs.map(kpiSub).join('') + '</div>'; }
-/** 見通しの空模様の板: 8 つをいつも決まった順に。キャラ・名前・数と、メーカーの札（押すとそのメーカーの予測） */
-function anSkyBoard(plans){
-  var by = {};
-  plans.forEach(function(p){ var k = skyKey(p); (by[k] = by[k] || []).push(p); });
-  var blocks = SKY8.map(function(s){
-    var ps = (by[s.key] || []).sort(anByRatio);
-    return '<div class="anblk' + (ps.length ? '' : ' none') + '"><div class="anbh" data-tip="' + esc(s.name + '：' + s.rule) + '">' + skyChar(s.key, 64) + '<span class="nm">' + esc(s.name) + '</span><span class="ct">' + ps.length + '</span></div>'
-      + (ps.length ? '<div class="anmks">' + ps.map(function(p){
-        return '<a class="chip anmk" role="button" tabindex="0" data-tip="' + esc(anPlanTip(p, '押すと予測を開きます')) + '" onclick="openPlan(\'' + esc(p.planId) + '\',\'forecast\')"'
-          + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}"><span>' + esc(p.clientName) + '</span></a>';
-      }).join('') + '</div>' : '') + '</div>';
-  }).join('');
-  return anCard('見通しの空模様', '締まった月の実績と予測から推定した着地を予算と比べた、統計的な見通しです。メーカーの札を押すと、そのメーカーの予測を開きます', '<div class="ansky">' + blocks + '</div>');
-}
 /** 着地 ÷ 予算（横）と不確かさ = 80% の幅 ÷ 着地の推定（縦）。点線が予算 */
 function anScatterCard(plans){
   var use = [], out = [];
@@ -3873,7 +4094,7 @@ function anHorizon(h){ var m = /^(\d+)\s*M$/i.exec(String(h || '').trim()); retu
 function anMarket(d){
   var plans = (d.plans || []).slice().sort(anByName);
   var has = plans.filter(function(p){ return (p.topics || []).length; });
-  if (!has.length) return guide('observe', 'まだ AI の市場調査の結果がありません。市場・競合・販路・DX の動きは、週に 1 回自動で調べます。');
+  if (!has.length) return anCard('話題ごとの向き', 'AI が調べた、メーカーごとの市場・競合・販路・DX の向きです', '<p class="note chempty">まだ AI の市場調査の結果がありません。市場・競合・販路・DX の動きは、週に 1 回自動で調べます。</p>');
   // 話題の列: 市場・競合・販路・DX の順、ほかの話題は後ろ
   var keys = [];
   (d.market || []).forEach(function(m){ if (keys.indexOf(m.topic) < 0) keys.push(m.topic); });

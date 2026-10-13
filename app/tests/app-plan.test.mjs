@@ -399,11 +399,11 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   // メニュー: ホーム・メーカー・予測・分析・学び（使える人は全員同じ。2026-10-06 村井さん）
   assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(NAV.map(function(n){ return n[1]; }))`, ui)), ['ホーム', 'メーカー一覧', '予測', '分析', '学び']);
   assert.equal(vm.runInContext(`go('settings'); S.view`, ui), 'home', '無い画面へは移らない');
-  // 分析（apiCrossMaker）: 年度は題の横、タブは 俯瞰・市場
+  // 分析（apiCrossMaker）: 年度は題の横。画面の中のタブは無く、1 カラムで縦に（要点のよみ → … → 話題ごとの向き。2026-10-13）
   ui.__an = env.call('apiCrossMaker(__in)', { __in: {} });
   const anHtml = vm.runInContext(`S.view = 'analysis'; S.an.data = __an; S.an.fy = String(__an.fy); viewAnalysis()`, ui);
-  assert.match(anHtml, /<h1>分析<\/h1><select[^>]*data-near[\s\S]*俯瞰[\s\S]*市場/);
-  assert.match(vm.runInContext(`anTab('market'); viewAnalysis()`, ui), /<button class="tab on"[^>]*>市場</);
+  assert.match(anHtml, /<h1>分析<\/h1><select[^>]*data-near[^]*?<\/div><div class="card"><div class="hero">[\s\S]*話題ごとの向き/);
+  assert.doesNotMatch(anHtml, /role="tablist"(?! aria-label="見せ方")|俯瞰|見通しの空模様/, 'タブと空模様の板は無い');
   assert.match(vm.runInContext(`S.an.data = null; S.ld.an = { error: 'x', at: 1 }; var __a = viewAnalysis(); S.an.data = __an; __a`, ui), /読み込めませんでした[\s\S]*anLoad\(\)/);
   // 学び（人の学び: apiPeopleLearning・AI の学び: apiAiLearning）
   ui.__lp = env.call('apiPeopleLearning()'); ui.__la = env.call('apiAiLearning()');

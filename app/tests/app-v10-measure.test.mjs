@@ -319,10 +319,13 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
 
   // 分析: 合計・空模様・予算のグラフに入れず、数と名前（カーソル）を添える
   const an = env.call('apiCrossMaker(__in)', { __in: {} });
-  const a = clean(run(`S.view = 'analysis'; S.an.data = __a; S.an.fy = __a.fy; S.an.tab = 'overview'; viewAnalysis()`, { __a: an }), '分析');
+  const a = clean(run(`S.view = 'analysis'; S.an.data = __a; S.an.fy = __a.fy; viewAnalysis()`, { __a: an }), '分析');
   assert.match(a, /<p class="note anx" data-tip="測る専用の計画です。予算は立てず、合計・空模様・予算と比べるグラフには入れません（外れ幅・読みのクセ・見直しの流れには入れます）\nテスト薬品">測る専用 1<\/p>/);
-  const board = /<div class="ansky">([\s\S]*?)<\/div><\/div>(?=<p|<div class="guide"|<div class="card")/.exec(a);
-  assert.ok(board && !board[1].includes('テスト薬品') && board[1].includes('テスト製薬'), '空模様の板は予算を立てるメーカーだけ');
+  assert.doesNotMatch(a, /class="ansky"|見通しの空模様/, '空模様の板は分析に出さない（ホームにある。2026-10-13）');
+  // 予算と比べる全体の読み解き（予算との差の内訳）は予算を立てるメーカーだけ
+  const wf = /<h2>予算との差の内訳[\s\S]*?<\/svg><\/div><\/div>/.exec(a);
+  assert.ok(!wf || !wf[0].includes('テスト薬品'), '予算との差の内訳に測る専用の計画を入れない');
+  assert.ok(!(an.insights.gaps || []).some((g) => g.clientName === 'テスト薬品'), 'サーバーの全体の読み解きにも入れない');
   assert.doesNotMatch(a, /<div class="k">年間予算<\/div>/, '年度の合計の数字はホームだけ（分析はメーカーを並べて読み解く画面。2026-10-13）');
   // 測る専用の計画だけの年度: 合計と空模様は出さず、数を出す
   const onlyM = Object.assign({}, an, { plans: an.plans.filter((p) => p.measure) });

@@ -2,7 +2,8 @@
  * Insights.js — 責任者の 3 つの画面（分析・人の学び・AI の学び）の材料。読むだけ（書かない。旧来の計算・保存・権限は変えない）。
  *
  *   分析（appCrossMaker_）     … 年度のメーカーを横に並べる: 予測と予算・着地の見込み（一覧にあれば）・予測の改訂の道すじ・精度・AI の話題。
- *                                 話題ごとの市場のまとめ（上向き・下向きのメーカーの数と点数の平均）
+ *                                 話題ごとの市場のまとめ（上向き・下向きのメーカーの数と点数の平均）。全体の読み解き（appCrossInsights_: 予算に届く確率・
+ *                                 予算との差の内訳・不確かさの寄与・見直しの向きの偏り・読みのクセのそろい方・市場のそろい方。予算を立てる計画だけ）
  *   人の学び（appPeopleLearning_）… 外れた月の振り返り（同じ月の重複を除き、向きは予測と実績から決め直す）・人と話題ごとの当たり
  *                                 （ベータ分布の事後）・四半期レビューの判断の記録・予算の上乗せの実績
  *   AI の学び（appAiLearning_）   … 情報源の種類ごとの信頼度の学び（ベータ分布の四半期ごとの事後）・全計画で縮めた偏り・
@@ -651,6 +652,7 @@ function appInsightCountMonths_(byPlan) {
  *              （合計。予算は計画ごとの空模様と同じ budgetUsed = 承認済みの公式版の最終予算、無ければ今の予算。budgetDraft = 今の予算（OUTPUT）の合計。
  *               着地の見込みが無い計画は着地の合計に入れない（landingPlans = 入れた計画の数）。比は予算のある計画だけで）
  *   market:    [{ topic, makers, up, down, flat, meanScore }]（話題ごと。メーカーの向きは、その話題の行の点数の平均の符号）
+ *   insights:  全体の読み解き（予算との差の内訳・合計の分布・不確かさの寄与・見直しの向き・読みのクセ・市場のそろい方。appCrossInsights_）
  */
 function appCrossMaker_(fy) {
   const all = appPortfolioCached_();
@@ -717,8 +719,133 @@ function appCrossMaker_(fy) {
     fy: pick, fys: fys, plans: rows, totals: totals,
     market: Object.keys(market).map(k => ({ topic: k, makers: market[k].makers, up: market[k].up, down: market[k].down, flat: market[k].flat,
       meanScore: appInsightMean_(market[k].scores) })).sort((x, y) => y.makers - x.makers || x.topic.localeCompare(y.topic)),
-    backtest: appBacktestCard_(pick)   // 物差し（Backtest.js。割合と点の数だけ。動かした計画が無ければ null）
+    backtest: appBacktestCard_(pick),   // 物差し（Backtest.js。割合と点の数だけ。動かした計画が無ければ null）
+    insights: appCrossInsights_(rows)   // 全体の読み解き（予算を立てる計画だけ。2026-10-13）
   };
+}
+
+// ---- 分析: 全体の読み解き（2026-10-13 村井さん「専門家レベルの推定・示唆・洞察」）----
+const APP_INSIGHT_REV_FLAT = 0.005;   // 見直しの変化がこれより小さければ横ばい（±0.5%）
+const APP_INSIGHT_LEAN = 0.03;        // 読みのクセが ±3% 未満ならほぼ釣り合い（画面の読みのクセと同じ）
+const APP_INSIGHT_LEAN_MIN_N = 3;     // 読みのクセの向きを数えるのは、比べた月がこれだけある計画（画面の ACC_MIN_MONTHS と同じ）
+const APP_INSIGHT_MARKET_FLAT = 5;    // 話題の点数の平均が ±5 未満なら横ばい（画面の AN_FLAT と同じ）
+
+/**
+ * 全体の読み解き（appCrossMaker_ の insights）。どれも予算を立てる計画（測る専用は入れない: appBudgetPlanRows_）。読むだけ・人ごとの当たりは使わない。
+ * 返り値: {
+ *   total:  { plans, budget, landing, gap（着地 − 予算）, sdIndependent（√Σσ²）, sdTogether（Σσ）, pIndependent, pTogether（予算以上になる確率 Φ((L − B) / σ)）, settled（σ がどれも 0）} | null
+ *           （予算と着地の推定の両方がある計画だけ。appLandingReachTotal_ と同じ足し方）
+ *   gaps:   [{ planId, clientName, budget, landing, gap, sd, share（|gap| ÷ Σ|gap|）}]（|gap| の大きい順）
+ *   gapTop: { n（上位の数 = 2）, share（上位 2 社の |gap| ÷ Σ|gap|）, absSum } | null（3 社以上で差があるときだけ）
+ *   spread: [{ planId, clientName, sd, share（σᵢ² ÷ Σσ²。独立とみたときの合計の分散への寄与）}]（大きい順。σ > 0 の計画だけ）
+ *   spreadTop: { k80（寄与の大きい順に足して 80% に届く数）, effective（1 ÷ Σshare²。実質のメーカーの数）, plans } | null
+ *   drift:  { plans（直近 2 回の見直しのある計画の数）, up, down, flat, from, to（その 2 回の合計）, change（to ÷ from − 1）, pValue（上下の数の符号検定。両側）,
+ *             items: [{ planId, clientName, change }] } | null（見直しが 2 回以上の計画が無ければ null）
+ *   lean:   { plans, over, under, even, meanBias } | null（比べた月が 3 か月以上の計画だけ）
+ *   market: { makers, up, down, flat, rho（話題の点数の平均と着地 ÷ 予算の順位相関。4 社以上）, rhoN } | null
+ * }
+ */
+function appCrossInsights_(rows) {
+  const fin = v => typeof v === 'number' && isFinite(v);
+  const used = p => (fin(p.budgetUsed) ? p.budgetUsed : p.budget);
+  const counted = appBudgetPlanRows_(rows || []);
+  const both = counted.filter(p => fin(used(p)) && used(p) > 0 && fin(p.landing));
+  const sdOf = p => (fin(p.landingSd) && p.landingSd > 0 ? p.landingSd : 0);
+  const reach = appLandingReachTotal_(both.map(p => ({ landing: p.landing, sd: p.landingSd, budget: used(p) })));
+  const out = { total: null, gaps: [], gapTop: null, spread: [], spreadTop: null, drift: null, lean: null, market: null };
+  if (reach) {
+    const v = both.reduce((s, p) => s + sdOf(p) * sdOf(p), 0), tog = both.reduce((s, p) => s + sdOf(p), 0);
+    out.total = { plans: reach.plans, budget: reach.budget, landing: reach.landing, gap: reach.landing - reach.budget, sdIndependent: Math.sqrt(v), sdTogether: tog,
+      pIndependent: reach.independent.p, pTogether: reach.together.p, settled: !(tog > 0) };
+    const abs = both.reduce((s, p) => s + Math.abs(p.landing - used(p)), 0);
+    out.gaps = both.map(p => ({ planId: p.planId, clientName: p.clientName, budget: used(p), landing: p.landing, gap: p.landing - used(p), sd: sdOf(p),
+      share: abs > 0 ? Math.abs(p.landing - used(p)) / abs : null }))
+      .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap) || String(a.clientName).localeCompare(String(b.clientName)));
+    if (out.gaps.length >= 3 && abs > 0) out.gapTop = { n: 2, share: (Math.abs(out.gaps[0].gap) + Math.abs(out.gaps[1].gap)) / abs, absSum: abs };
+    if (v > 0) {
+      out.spread = both.filter(p => sdOf(p) > 0).map(p => ({ planId: p.planId, clientName: p.clientName, sd: sdOf(p), share: sdOf(p) * sdOf(p) / v }))
+        .sort((a, b) => b.share - a.share || String(a.clientName).localeCompare(String(b.clientName)));
+      let cum = 0, k80 = 0;
+      out.spread.forEach(x => { if (cum < 0.8 - 1e-12) { cum += x.share; k80++; } });
+      out.spreadTop = { k80: k80, effective: 1 / out.spread.reduce((s, x) => s + x.share * x.share, 0), plans: out.spread.length };
+    }
+  }
+  out.drift = appInsightDrift_(counted);
+  const leaned = counted.filter(p => p.accuracy && fin(p.accuracy.bias) && (p.accuracy.n || 0) >= APP_INSIGHT_LEAN_MIN_N);
+  if (leaned.length) out.lean = { plans: leaned.length, over: leaned.filter(p => p.accuracy.bias >= APP_INSIGHT_LEAN).length,
+    under: leaned.filter(p => p.accuracy.bias <= -APP_INSIGHT_LEAN).length, even: leaned.filter(p => Math.abs(p.accuracy.bias) < APP_INSIGHT_LEAN).length,
+    meanBias: appInsightMean_(leaned.map(p => p.accuracy.bias)) };
+  out.market = appInsightMarketTilt_(counted, used);
+  return out;
+}
+
+/**
+ * 直近の見直しの向き（予算を立てる計画の、最近の 2 回の予測の年間の中心）。前回の値は今回と同じ作り方の値で比べる（画面の anRevPrev と同じ:
+ * 今回が本番の月の合計なら前回の月の合計、旧来の計算なら前回の旧来の年度合計）。上下の数の偏りは符号検定（両側。横ばいは除く）
+ */
+function appInsightDrift_(plans) {
+  const fin = v => typeof v === 'number' && isFinite(v);
+  const items = [];
+  plans.forEach(p => {
+    const rs = (p.revisions || []).filter(r => r && fin(r.p50Shown));
+    if (rs.length < 2) return;
+    const a = rs[rs.length - 2], b = rs[rs.length - 1];
+    const kind = r => (r.live && r.basis === 'monthsum' ? 'monthsum' : 'legacy');
+    const prev = kind(a) === kind(b) ? a.p50Shown : kind(b) === 'monthsum' && fin(a.monthSum) ? a.monthSum : kind(b) === 'legacy' && fin(a.p50) ? a.p50 : a.p50Shown;
+    if (!(prev > 0)) return;
+    items.push({ planId: p.planId, clientName: p.clientName, from: prev, to: b.p50Shown, change: b.p50Shown / prev - 1 });
+  });
+  if (!items.length) return null;
+  const up = items.filter(x => x.change >= APP_INSIGHT_REV_FLAT).length, down = items.filter(x => x.change <= -APP_INSIGHT_REV_FLAT).length;
+  const from = items.reduce((s, x) => s + x.from, 0), to = items.reduce((s, x) => s + x.to, 0);
+  return { plans: items.length, up: up, down: down, flat: items.length - up - down, from: from, to: to, change: from > 0 ? to / from - 1 : null,
+    pValue: appSignTest_(up, down), items: items.map(x => ({ planId: x.planId, clientName: x.clientName, change: x.change })).sort((x, y) => x.change - y.change) };
+}
+
+/** 符号検定（両側）: 上 a・下 b のとき、偶然（五分五分）でこれ以上偏る確率。a + b = 0 なら null */
+function appSignTest_(a, b) {
+  const n = a + b, k = Math.max(a, b);
+  if (!n) return null;
+  let tail = 0, c = 1;   // c = nCi
+  for (let i = 0; i <= n; i++) { if (i >= k) tail += c; c = c * (n - i) / (i + 1); }
+  return Math.min(1, 2 * tail / Math.pow(2, n));
+}
+
+/** 順位（同じ値は順位の平均） */
+function appInsightRanks_(xs) {
+  const idx = xs.map((v, i) => i).sort((i, j) => xs[i] - xs[j]);
+  const r = new Array(xs.length);
+  for (let s = 0; s < idx.length;) {
+    let e = s;
+    while (e + 1 < idx.length && xs[idx[e + 1]] === xs[idx[s]]) e++;
+    for (let k = s; k <= e; k++) r[idx[k]] = (s + e) / 2 + 1;
+    s = e + 1;
+  }
+  return r;
+}
+
+/** 順位相関（スピアマン。順位のピアソン相関）。ばらつきが無ければ null */
+function appSpearman_(xs, ys) {
+  if (xs.length !== ys.length || xs.length < 2) return null;
+  const a = appInsightRanks_(xs), b = appInsightRanks_(ys), n = a.length;
+  const ma = a.reduce((s, v) => s + v, 0) / n, mb = b.reduce((s, v) => s + v, 0) / n;
+  let sab = 0, saa = 0, sbb = 0;
+  for (let i = 0; i < n; i++) { sab += (a[i] - ma) * (b[i] - mb); saa += (a[i] - ma) * (a[i] - ma); sbb += (b[i] - mb) * (b[i] - mb); }
+  return saa > 0 && sbb > 0 ? sab / Math.sqrt(saa * sbb) : null;
+}
+
+/**
+ * 市場の話題の向きのそろい方（メーカーごとに、AI の一番新しい調査の話題の点数をすべて平均。±5 未満は横ばい）と、
+ * その平均と着地 ÷ 予算の順位相関（予算と着地の推定がある 4 社以上のとき）
+ */
+function appInsightMarketTilt_(plans, used) {
+  const fin = v => typeof v === 'number' && isFinite(v);
+  const scored = plans.map(p => ({ p: p, s: appInsightMean_((p.topics || []).map(t => t.score).filter(fin)) })).filter(x => x.s !== null);
+  if (!scored.length) return null;
+  const pair = scored.filter(x => fin(x.p.landing) && fin(used(x.p)) && used(x.p) > 0);
+  const rho = pair.length >= 4 ? appSpearman_(pair.map(x => x.s), pair.map(x => x.p.landing / used(x.p))) : null;
+  return { makers: scored.length, up: scored.filter(x => x.s >= APP_INSIGHT_MARKET_FLAT).length, down: scored.filter(x => x.s <= -APP_INSIGHT_MARKET_FLAT).length,
+    flat: scored.filter(x => Math.abs(x.s) < APP_INSIGHT_MARKET_FLAT).length, rho: rho, rhoN: rho === null ? 0 : pair.length };
 }
 
 /** 予測の回が本番で保存されたか（FORECAST_RUNS.fixes_json に annual_aligned。年度を月の合計にそろえた回。Landing.js の APP_FIX_ANNUAL_ALIGNED） */

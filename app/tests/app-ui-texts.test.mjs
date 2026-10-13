@@ -221,7 +221,7 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
 {
   const plan = { planId: 'P1', clientName: 'テスト製薬', fy: '2026', budget: 1000, officialFinal: null, budgetUsed: null, landing: 1050, landingP10: 950, landingP90: 1150, landingSd: 78, ratio: 1.05, pAbove: 0.7,
     sky: 'harenochi', skyReason: 'ratio', accuracy: { mape: null, bias: null, n: 0, coverage: null, coverageN: 0 }, revisions: [{ at: '2026-09-01', p50: 1000 }, { at: '2026-10-01', p50: 1050 }], topics: [] };
-  const guideOf = (plans) => (/<div class="guide">[\s\S]*?<div class="bubble">([\s\S]*?)<\/div><\/div><\/div>/.exec(run(`S.an.data = __d; S.an.tab = 'overview'; viewAnalysis()`,
+  const guideOf = (plans) => (/<span class="(?:t )?anmiss">([\s\S]*?)<\/span>/.exec(run(`S.an.data = __d; viewAnalysis()`,
     { __d: { fy: '2026', fys: ['2026'], totals: { budget: 1000, budgetPlans: 1, landing: 1050, ratioLanding: 1.05 }, plans } })) || [])[1];
   assert.equal(guideOf([plan]), 'まだ数字がそろっていないため、外れ幅・読みのクセは出していません。各計画の振り返りで「当たり具合を計算」を動かすと、ここに出てきます。');
   const noRev = Object.assign({}, plan, { revisions: [] });
@@ -278,7 +278,7 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
   assert.match(h, /<div class="kpi"><div class="k">外れ幅<\/div><div class="v">-<\/div><\/div>/, '年度の数字は説明なし（2026-10-13）');
   assert.match(h, /data-tip="霧：比べられる実績がまだない\n各計画の振り返りで「当たり具合を計算」を動かすと出ます\n[^"]*"><span class="skych"[^>]*aria-label="霧"[\s\S]*精度の天気[\s\S]*霧[\s\S]*比べる実績はまだです/);
   // 分析: 外れ幅・読みのクセのカードは出さず、案内に当たり具合を計算を出す
-  const a = clean(run(`S.view = 'analysis'; S.an.data = __a; S.an.tab = 'overview'; viewAnalysis()`, { __a: an }), '分析');
+  const a = clean(run(`S.view = 'analysis'; S.an.data = __a; viewAnalysis()`, { __a: an }), '分析');
   assert.match(a, /外れ幅・読みのクセ[^<]*は出していません。[^<]*各計画の振り返りで「当たり具合を計算」を動かすと/);
   assert.doesNotMatch(a, /<h2>外れ幅<span|<h2>読みのクセ<span/);
   // 学び: 人の学びは「まだ比べた月がありません」、AI の学びも外れ幅が無いことを言う
@@ -325,7 +325,7 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
 // ==== 9. 動かせない人（閲覧・情報提供）には「計算されると出ます」。締め済みの年度の分析は「計算し直しません」 ====
 const AN_PLAN = { planId: 'P1', clientName: 'テスト製薬', fy: '2026', budget: 1000, officialFinal: null, budgetUsed: null, landing: 1050, landingP10: 950, landingP90: 1150, landingSd: 78, ratio: 1.05, pAbove: 0.7,
   sky: 'harenochi', skyReason: 'ratio', accuracy: { mape: null, bias: null, n: 0, coverage: null, coverageN: 0 }, revisions: [{ at: '2026-09-01', p50: 1000 }, { at: '2026-10-01', p50: 1050 }], topics: [] };
-const anGuide = (plans, fy = '2026') => (/<div class="guide">[\s\S]*?<div class="bubble">([\s\S]*?)<\/div><\/div><\/div>/.exec(run(`S.an.data = __d; S.an.fy = __d.fy; S.an.tab = 'overview'; viewAnalysis()`,
+const anGuide = (plans, fy = '2026') => (/<span class="(?:t )?anmiss">([\s\S]*?)<\/span>/.exec(run(`S.an.data = __d; S.an.fy = __d.fy; viewAnalysis()`,
   { __d: { fy, fys: [fy], totals: { budget: 1000, budgetPlans: 1, landing: 1050, ratioLanding: 1.05 }, plans } })) || [])[1];
 {
   const home = { fy: '2026', plans: [{ planId: 'P1', clientName: 'テスト製薬', fy: '2026', mape: null }] };
