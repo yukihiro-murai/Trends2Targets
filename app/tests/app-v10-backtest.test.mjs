@@ -512,9 +512,10 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   assert.equal(render({ fy: '2026' }), '', '古いサーバー（backtest が無い）でも描ける');
   // 分析の俯瞰の最後に出る
   ui.__a = x;
-  const view = vm.runInContext(`S.view = 'analysis'; S.an.data = __a; S.an.fy = __a.fy; S.an.tab = 'overview'; viewAnalysis()`, ui);
+  const view = vm.runInContext(`S.view = 'analysis'; S.an.data = __a; S.an.fy = __a.fy; viewAnalysis()`, ui);
   assert.ok(!/undefined|NaN/.test(view));
-  assert.ok(view.endsWith(card), '物差しは俯瞰の最後');
+  assert.ok(view.includes(card) && view.indexOf(card) < view.indexOf('<h2>話題ごとの向き'), '物差しは見通しと当たり具合の後、話題ごとの向き（市場）の前');
+  assert.ok(view.indexOf('<h2>予測の見直しの流れ') < 0 || view.indexOf('<h2>予測の見直しの流れ') < view.indexOf(card));
 }
 
 // ==== 外れ幅は合計の比（WAPE。精度の画面と同じ）: 実績が 0 に近い月が 1 つあっても壊れない（2026-10-13 提案 1） ====
