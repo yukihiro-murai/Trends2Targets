@@ -32,7 +32,7 @@ function book(client, over, width, hit) {
     }
   }
   const evid = [H.RELIABILITY_EVIDENCE];
-  for (const [type, n, h] of [['opinion', 10, Math.round(10 * hit)], ['factor_product', 8, 4], ['ai_topic', 2, 1]]) evid.push([client, type, 'k', '2025Q4', '2025/12', n, h, h / n, D(2026, 1, 5), 'R', '']);
+  for (const [type, n, h] of [['opinion', 10, Math.round(10 * hit)], ['factor_product', 8, 4], ['ai_topic', 2, 1]]) evid.push([client, type, 'k', '2025Q4', '2025/12', n, h, h / n, D(2026, 1, 5), 'R', 'expected=' + (n / 2).toFixed(4)]);   // 基準が半々の当たり（2026-10-13 から C-1 が基準で当たるはずの数を書く）
   return env.makeBook(client, {
     CONFIG: { values: [['項目', '値'], ['[必須] メーカー名（外部集計キー）', client], ['[必須] 予測年度FY（YYYY）', 2026], ['[必須] 担当者（カンマ区切り）', '鷹野']] },
     EVAL_LOG: { values: ev, formats: { D: '@' } },
@@ -193,7 +193,7 @@ env.run('appPlanReadMinRows_ = () => 3000');
 // ==== 7. 全計画の事前分布（LEARN.POOL）は、締まった月で数えた当たりだけから作る（D4）。数えた日に四半期の最後の月が締まっていない行は読み飛ばす（消さない） ====
 {
   const e4 = setUpEnv();
-  const ev = (client, key, qEnd, at, n, hit) => [client, 'opinion', key, 'FY2026-Q', qEnd, n, hit, hit / n, at, 'R', ''];
+  const ev = (client, key, qEnd, at, n, hit) => [client, 'opinion', key, 'FY2026-Q', qEnd, n, hit, hit / n, at, 'R', 'expected=' + n / 2];
   // 今の版の B-2 は 7/01 に動いた（その後に数えた行だけを使う。8 で確かめる）
   const plan = (client, rows) => e4.seedPlan(e4.makeBook(client, {
     CONFIG: { values: [['項目', '値'], ['[必須] メーカー名（外部集計キー）', client], ['[必須] 予測年度FY（YYYY）', 2026], ['[必須] 担当者（カンマ区切り）', '鷹野']] },
@@ -231,7 +231,7 @@ env.run('appPlanReadMinRows_ = () => 3000');
 {
   const e5 = setUpEnv();
   const at = (s) => new Date(s);
-  const evRow = (client, key, qEnd, when, n, hit) => [client, 'opinion', key, 'FY2026-Q', qEnd, n, hit, hit / n, when, 'R', ''];
+  const evRow = (client, key, qEnd, when, n, hit) => [client, 'opinion', key, 'FY2026-Q', qEnd, n, hit, hit / n, when, 'R', 'expected=' + n / 2];
   const evalRow = (client, when, ver) => H.EVAL_LOG.map((h) => ({ eval_id: 'E-' + ver, evaluated_at: when, client, target_month: '2026/09', scenario: 'neutral', pred: 1100, actual: 1000,
     evaluation_policy_version: ver, constraint_relevant_flag: 1 })[h] ?? '');
   const runRow = (client, when, status, summary) => H.RUN_LOG.map((h) => ({ run_id: 'L' + when.getTime(), run_at: when, run_by: 'owner', function_name: 'updatePhase1EvaluationReport',

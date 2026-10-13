@@ -21,7 +21,9 @@
  *     毎回書き直すが、B-4 を動かし直すまでは逆のまま）→ 使わず、予測 − 実績の符号で決める
  * 振り返り・当たり・精度・縮めた偏り・精度の推移は、締まった月（月末から 5 日たってから取り込んだ月。appLandingCutoff_）だけで数える
  * （2026-10-07 村井さん承認 D4・D5。締まっていない月の EVAL_LOG・EVAL_INSIGHTS の行は消さずに読み飛ばす）。
- * 当たりは、その月が始まる前の最後の予測の回で測る（D6。appSourceEvidence_）。
+ * 当たりは、その月が始まる前の最後の予測の回で測る（D6。appSourceEvidence_）。当たる割合は 50% ではなく、基準 = いつも同じ向きと言った場合に
+ * 当たる割合（同じ計画の比べられた月で、実績がその向きに外れた割合。月が少なければ全計画の割合に寄せる。appInsightEvidence_）と比べる
+ * （2026-10-13 村井さん承認。統計だけの予測には補正が入らないので、偏りがあると、いつも同じ向きと言うだけで 50% を超えて当たる）。
  * 精度・当たりの実績・振り返りは、今の検証の版で B-2 が測った月だけ（appEvalRowCurrent_。旧来の B-3〜C-1 と同じ）。
  * 前の版の EVAL_LOG の行と、その月の EVAL_INSIGHTS の行は、締まった月でも消さずに読み飛ばす（月が始まった後の予測で測ったもの）。
  * 今の版で測った月でも、EVAL_INSIGHTS の行の予測と実績が、その月の今の版の EVAL_LOG の行を B-4 が写す形（実績が負なら 0 円）と違う行と、
@@ -409,9 +411,11 @@ function appInsightPriors_(poolByPlan) {
  * （振り返りは、この数字と同じ行だけを使う。appInsightRowScored_）。
  * since（渡したときだけ）には、その計画で今の版の B-2 が初めて動いた時刻（ミリ秒か null。appEvalPolicySince_。RUN_LOG も読む）を入れる
  * （振り返りは、この時刻より後に書いた行だけを使う）。
- * 返り値: [{ planId, ym, quarter, type, key, hit(0/1) }]
+ * dirs（渡したときだけ）には、計画ごとの比べられた月（実績と、その月が始まる前の予測の回の統計だけの予測がそろった月）の、
+ * 実績が上に外れた月・下に外れた月の数 [上, 下] を入れる（押した人がいなくても数える。当たりの基準を作る。appInsightEvidence_）。
+ * 返り値: [{ planId, ym, quarter, type, key, hit(0/1), dir（押した向き ±1） }]
  */
-function appSourceEvidence_(ids, tab, noPre, current, since) {
+function appSourceEvidence_(ids, tab, noPre, current, since, dirs) {
   const subj = tab('SUBJECTIVE_IMPACT_HISTORY');
   const impact = tab('AI_IMPACT_HISTORY');
   const evals = tab('EVAL_LOG');
@@ -451,13 +455,20 @@ function appSourceEvidence_(ids, tab, noPre, current, since) {
       const u = ym + '\u0001' + type + '\u0001' + key;
       if (newer(latest[u], t, i)) latest[u] = { ym: ym, type: type, key: key, dir: Math.sign(Number(r.push_direction || 0)), t: t, i: i };
     });
+    // 月ごとの外れの向き（実績 − 統計だけの予測の符号。0 = 外れていない月は、どの向きも当たりと言えないので数えない）
+    const surpriseOf = ym => (Object.prototype.hasOwnProperty.call(actual, ym) && isFinite(actual[ym]) && pre[ym] && isFinite(pre[ym].v)
+      ? Math.sign(actual[ym] - pre[ym].v) : 0);
     Object.keys(latest).forEach(u => {
       const x = latest[u];
-      if (!Object.prototype.hasOwnProperty.call(actual, x.ym) || !isFinite(actual[x.ym]) || !isFinite(pre[x.ym].v)) return;
-      const surprise = Math.sign(actual[x.ym] - pre[x.ym].v);
+      const surprise = surpriseOf(x.ym);
       if (!surprise || !x.dir) return;
-      out.push({ planId: id, ym: x.ym, quarter: appInsightQuarter_(x.ym), type: x.type, key: x.key, hit: x.dir === surprise ? 1 : 0 });
+      out.push({ planId: id, ym: x.ym, quarter: appInsightQuarter_(x.ym), type: x.type, key: x.key, hit: x.dir === surprise ? 1 : 0, dir: x.dir });
     });
+    if (dirs) {
+      const c = [0, 0];
+      Object.keys(actual).forEach(ym => { const s = surpriseOf(ym); if (s) c[s > 0 ? 0 : 1]++; });
+      dirs[id] = c;
+    }
     if (noPre) noPre[id] = Object.keys(seen).filter(ym => !pre[ym]).sort();
     if (current) current[id] = appEvalScoredMonths_(evals[id] || [], cut[id]);
     if (since) since[id] = appEvalPolicySince_(evals[id] || [], runs[id] || []);
@@ -476,28 +487,36 @@ function appInsightEvidenceKey_(planId) {
 }
 
 /**
- * 全計画の当たり（appSourceEvidence_ と同じ行・同じ並び）。計画ごとに、入力のハッシュが同じあいだ控える（6 時間。精度の控え ACC_ と同じ）。
- * どこかで保存すると画面の控え（appCachedRead_）は全部外れるが、この控えは保存した計画の分だけが外れる。
+ * 全計画の当たり（appSourceEvidence_ と同じ行・同じ並び）に、当たりの基準を付けたもの。計画ごとに、入力のハッシュが同じあいだ控える
+ * （6 時間。精度の控え ACC_ と同じ）。どこかで保存すると画面の控え（appCachedRead_）は全部外れるが、この控えは保存した計画の分だけが外れる。
  * 控えの無い計画だけ 5 つの表（SUBJECTIVE_IMPACT_HISTORY・AI_IMPACT_HISTORY・EVAL_LOG・PROCESS_STATUS・RUN_LOG）を読む（少なければ、その計画の行だけ）。
- * 控えは { rows: [[月, 種類, 人や話題, 当たり]], noPre: [その月が始まる前の予測が無い月], cur: [[今の決まりで測った月, 予測, 実績]],
- * from: 今の版の B-2 が初めて動いた時刻（ミリ秒か null） } で持つ（小さくするため。同じ鍵に前の形の控え（cur や from が無い・月だけの並び・
- * [月, B-2 が書いた時刻] の 2 つ組）が残っていても、使わずに数え直す。from の無い控えの cur は、実績を B-4 の形（appInsightB4View_）にする前のもの）。
+ * 控えは { rows: [[月, 種類, 人や話題, 当たり, 押した向き]], dirs: [上, 下], noPre: [その月が始まる前の予測が無い月],
+ * cur: [[今の決まりで測った月, 予測, 実績]], from: 今の版の B-2 が初めて動いた時刻（ミリ秒か null） } で持つ（小さくするため。同じ鍵に前の形の控え
+ * （dirs・cur・from が無い・行が 4 つ組・月だけの並び・[月, B-2 が書いた時刻] の 2 つ組）が残っていても、使わずに数え直す。
+ * from の無い控えの cur は、実績を B-4 の形（appInsightB4View_）にする前のもの）。
+ * 基準（行の base。2026-10-13 村井さん承認）= いつも同じ向きと言った場合に当たる割合: その計画の比べられた月のうち、実績が押した向きに
+ * 外れた月の割合を、月が少なければ全計画（ids）の割合へ寄せたもの（appHitBaseRates_。寄せる強さは 3 か月ぶん）。
+ * 全計画の割合は ids の計画すべての月から作るので、控えには計画ごとの [上, 下] だけを持ち、基準は毎回ここで付ける。
  * noPre・current・since（渡したときだけ）に、計画ごとの「その月が始まる前の予測が無い月」「今の決まりで測った月」「今の版の B-2 が初めて動いた時刻」
- * を入れる（appSourceEvidence_）
+ * を入れる（appSourceEvidence_）。dirs（渡したときだけ）に計画ごとの [上, 下] を入れる
  */
-function appInsightEvidence_(ids, tab, noPre, current, since) {
+function appInsightEvidence_(ids, tab, noPre, current, since, dirs) {
   appInsightPreloadHashes_(ids);
   const keys = {};
   ids.forEach(id => { try { keys[id] = appInsightEvidenceKey_(id); } catch (e) { /* 鍵を作れない計画は控えない（毎回数える） */ } });
   const hits = appInsightCacheGet_(ids.filter(id => keys[id]).map(id => keys[id]));
   const out = [];
+  const counts = {};
   const missing = [];
+  const pair = x => Array.isArray(x) && x.length === 2 && x.every(n => typeof n === 'number' && n >= 0);
   ids.forEach(id => {
     const c = keys[id] ? hits[keys[id]] : null;
     const v = c && c.found ? c.value : null;
-    if (!v || !Array.isArray(v.rows) || !Array.isArray(v.noPre) || !Array.isArray(v.cur) || !v.cur.every(x => Array.isArray(x) && x.length === 3) ||
+    if (!v || !Array.isArray(v.rows) || !v.rows.every(x => Array.isArray(x) && x.length === 5) || !pair(v.dirs) || !Array.isArray(v.noPre) ||
+      !Array.isArray(v.cur) || !v.cur.every(x => Array.isArray(x) && x.length === 3) ||
       !Object.prototype.hasOwnProperty.call(v, 'from') || !(v.from === null || typeof v.from === 'number')) { missing.push(id); return; }
-    v.rows.forEach(x => out.push({ planId: id, ym: x[0], quarter: appInsightQuarter_(x[0]), type: x[1], key: x[2], hit: x[3] }));
+    v.rows.forEach(x => out.push({ planId: id, ym: x[0], quarter: appInsightQuarter_(x[0]), type: x[1], key: x[2], hit: x[3], dir: x[4] }));
+    counts[id] = v.dirs;
     if (noPre) noPre[id] = v.noPre;
     if (current) current[id] = v.cur;
     if (since) since[id] = v.from;
@@ -508,17 +527,24 @@ function appInsightEvidence_(ids, tab, noPre, current, since) {
     const gaps = {};
     const cur = {};
     const from = {};
+    const got = {};
     missing.forEach(id => { mine[id] = []; });
-    appSourceEvidence_(missing, sheet => tab(sheet, few), gaps, cur, from).forEach(e => { mine[e.planId].push([e.ym, e.type, e.key, e.hit]); out.push(e); });
+    appSourceEvidence_(missing, sheet => tab(sheet, few), gaps, cur, from, got).forEach(e => { mine[e.planId].push([e.ym, e.type, e.key, e.hit, e.dir]); out.push(e); });
     missing.forEach(id => {
       const at = typeof from[id] === 'number' ? from[id] : null;
+      counts[id] = got[id] || [0, 0];
       if (noPre) noPre[id] = gaps[id] || [];
       if (current) current[id] = cur[id] || [];
       if (since) since[id] = at;
       if (!keys[id]) return;
-      try { appJobPutResult_(keys[id], { rows: mine[id], noPre: gaps[id] || [], cur: cur[id] || [], from: at }); } catch (e) { /* 控えられなくても返す */ }
+      try { appJobPutResult_(keys[id], { rows: mine[id], dirs: counts[id], noPre: gaps[id] || [], cur: cur[id] || [], from: at }); } catch (e) { /* 控えられなくても返す */ }
     });
   }
+  if (dirs) ids.forEach(id => { dirs[id] = counts[id] || [0, 0]; });
+  const share = appHitBaseShare_(counts);
+  const rates = {};
+  ids.forEach(id => { rates[id] = appHitBaseRates_(counts[id], share, APP_HIT_BASE_MONTHS); });
+  out.forEach(e => { e.base = appHitBaseOf_(rates[e.planId], e.dir); });
   return out.sort(appInsightEvidenceOrder_);
 }
 
@@ -670,10 +696,13 @@ function appInsightRevision_(r, sums) {
  *                   当たりと同じ計画で、締まった月の今の版の neutral の EVAL_LOG の行がある月）。B-2 の後で B-4 がまだなら、
  *                   months（出した振り返りの月）が 0 でも 0 ではない。waitingMonths = そのうち、締めていない年度の計画で、出せる振り返りの行が
  *                   まだ無い月の数（「外れの原因を整理」（B-4）待ち。締めた年度の計画は B-4 を動かせないので数えない））
- *   scoreboard:  full:    [{ type, label, key, n, hit, hitRate, alpha, beta, postMean, ci80: [下, 上], prior: { alpha0, beta0, from }, appliedR,
- *                            plans: [{ planId, clientName, fy, n, hit, appliedR }] }]（人や話題ごと）
- *                summary: [{ type, label, sources, n, hit, hitRate, alpha, beta, postMean, ci80, prior }]（情報源の種類ごと。sources = まとめた人や話題の数。今の信頼度は出さない）
- *                （どちらも 80% の区間の下の端が高い順。少ない数で上位に出ない）
+ *   scoreboard:  full:    [{ type, label, key, n, hit, hitRate, expected, base, alpha, beta, postMean, ci80: [下, 上], vsBase, prior: { alpha0, beta0, from }, appliedR,
+ *                            plans: [{ planId, clientName, fy, n, hit, expected, appliedR }] }]（人や話題ごと）
+ *                summary: [{ type, label, sources, n, hit, hitRate, expected, base, alpha, beta, postMean, ci80, vsBase, prior }]（情報源の種類ごと。
+ *                           sources = まとめた人や話題の数。今の信頼度は出さない）
+ *                （expected = 基準で当たるはずの数、base = その割合（いつも同じ向きと言った場合に当たる割合。appInsightEvidence_）。
+ *                 vsBase = 'above'（80% の区間の下の端が基準より上 = いつも同じ向きと言うよりも当たっている）・'below'（上の端が基準より下）・''。
+ *                 どちらも 80% の区間の下の端と基準の差が大きい順。少ない数で上位に出ない）
  *   noPreMonth:  締まった月で実績があるのに、その月が始まる前の予測が無いので当たりを数えなかった月の数（計画 × 月。D6）
  *   decisions:   [{ planId, clientName, fy, reviewId, proposalId, at, quarter, phase, phaseLabel, target, targetLabel, current, proposed,
  *                   confidence, rationale, status, decidedAt, decidedBy, applied, appliedAt }]（四半期レビューの提案と判断。新しい順。
@@ -826,7 +855,9 @@ function appInsightLessons_(plans, insights, hideNames, months, since, frozen) {
 }
 
 /**
- * 人と話題ごとの当たり（全計画・全部の評価できた月）と、ベータ分布の事後。事前分布は POOL_PRIOR（無ければ Beta(2, 2)）。
+ * 人と話題ごとの当たり（全計画・全部の評価できた月）と、ベータ分布の事後。当たりは基準（いつも同じ向きと言った場合に当たる割合。
+ * evidence の行の base）と比べる（2026-10-13 村井さん承認）: 事前分布は、その行の基準の割合に全計画の見立て（POOL_PRIOR）の
+ * 基準を引いた当たり（μ − 0.5）を足した所を中心にする（appInsightBasePrior_。POOL_PRIOR が無ければ基準の割合を中心に強さ 4）。
  * byType = true なら人や話題を出さず、情報源の種類ごとにまとめる（key・plans・appliedR は無し。sources = まとめた人や話題の数）
  */
 function appSourceScoreboard_(plans, evidence, poolByPlan, relByPlan, byType) {
@@ -843,18 +874,21 @@ function appSourceScoreboard_(plans, evidence, poolByPlan, relByPlan, byType) {
   const g = {};
   evidence.forEach(e => {
     const k = byType ? e.type : e.type + '\u0001' + e.key;
-    const o = g[k] = g[k] || { type: e.type, key: e.key, n: 0, hit: 0, by: {}, keys: {} };
-    o.n++; o.hit += e.hit;
+    const o = g[k] = g[k] || { type: e.type, key: e.key, n: 0, hit: 0, expected: 0, by: {}, keys: {} };
+    const b0 = typeof e.base === 'number' ? e.base : 0.5;   // 基準の無い行（呼ぶ側が付けていない）は半々
+    o.n++; o.hit += e.hit; o.expected += b0;
     o.keys[e.key] = true;
-    const b = o.by[e.planId] = o.by[e.planId] || { n: 0, hit: 0 };
-    b.n++; b.hit += e.hit;
+    const b = o.by[e.planId] = o.by[e.planId] || { n: 0, hit: 0, expected: 0 };
+    b.n++; b.hit += e.hit; b.expected += b0;
   });
   return Object.keys(g).map(k => {
     const o = g[k];
-    const pr = priors[o.type] || appInsightPrior_(null);
+    const base = o.expected / o.n;
+    const pr = appInsightBasePrior_(priors[o.type] || appInsightPrior_(null), base);
     const post = appBetaSummary_(pr.alpha0 + o.hit, pr.beta0 + o.n - o.hit);
-    const row = { type: o.type, label: APP_SOURCE_LABELS[o.type] || o.type, n: o.n, hit: o.hit, hitRate: o.hit / o.n,
-      alpha: post.alpha, beta: post.beta, postMean: post.mean, ci80: post.ci80, prior: { alpha0: pr.alpha0, beta0: pr.beta0, from: pr.from } };
+    const row = { type: o.type, label: APP_SOURCE_LABELS[o.type] || o.type, n: o.n, hit: o.hit, hitRate: o.hit / o.n, expected: o.expected, base: base,
+      alpha: post.alpha, beta: post.beta, postMean: post.mean, ci80: post.ci80, vsBase: appInsightVsBase_(post.ci80, base),
+      prior: { alpha0: pr.alpha0, beta0: pr.beta0, from: pr.from } };
     if (byType) {
       // 今の信頼度（appliedR）は出さない（2026-10-07: 情報源が 1 人だけの種類では、種類ごとの平均がその人の信頼度になる）
       return Object.assign(row, { sources: Object.keys(o.keys).length });
@@ -862,8 +896,25 @@ function appSourceScoreboard_(plans, evidence, poolByPlan, relByPlan, byType) {
     const ap = applied[k] || {};
     return Object.assign(row, { key: o.key, appliedR: appInsightMean_(Object.keys(ap).map(id => ap[id])),
       plans: Object.keys(o.by).map(id => ({ planId: id, clientName: (info[id] || {}).clientName || '', fy: (info[id] || {}).fy || '', n: o.by[id].n, hit: o.by[id].hit,
-        appliedR: ap[id] === undefined ? null : ap[id] })) });
-  }).sort((a, b) => b.ci80[0] - a.ci80[0] || b.n - a.n || a.type.localeCompare(b.type) || String(a.key || '').localeCompare(String(b.key || '')));
+        expected: o.by[id].expected, appliedR: ap[id] === undefined ? null : ap[id] })) });
+  }).sort((a, b) => (b.ci80[0] - b.base) - (a.ci80[0] - a.base) || b.n - a.n || a.type.localeCompare(b.type) || String(a.key || '').localeCompare(String(b.key || '')));
+}
+
+/**
+ * 基準に合わせた事前分布（{ alpha0, beta0, mean, from }）。pr = 種類の事前分布（appInsightPrior_。μ は POOL_PRIOR の基準を引いた当たり
+ * = 0.5 + 当たる割合 − 基準の割合。旧来の reliability_r = 2μ）、base = 基準の割合。中心 = base + (μ − 0.5)（0.01〜0.99）、強さは pr のまま。
+ * POOL_PRIOR が無ければ μ = 0.5 なので、中心は基準の割合（いつも同じ向きと同じだけ当たる、という見立てから始める）
+ */
+function appInsightBasePrior_(pr, base) {
+  const b = typeof base === 'number' && isFinite(base) ? base : 0.5;
+  const mean = Math.min(0.99, Math.max(0.01, b + pr.mu - 0.5));
+  return { alpha0: mean * pr.precision, beta0: (1 - mean) * pr.precision, mean: mean, precision: pr.precision, from: pr.from };
+}
+
+/** 80% の区間と基準: 'above'（下の端が基準より上）・'below'（上の端が基準より下）・''（見分けられない） */
+function appInsightVsBase_(ci80, base) {
+  if (!ci80 || typeof base !== 'number') return '';
+  return ci80[0] > base ? 'above' : ci80[1] < base ? 'below' : '';
 }
 
 /** 四半期レビューの提案と、人の判断（QUARTERLY_REVIEW_LOG。新しい順）。hideNames = true なら判断した人を出さず、信頼度の対象は種類まで（根拠も出さない） */
@@ -917,8 +968,10 @@ function appInsightUplift_(ids) {
 /**
  * AI の学び（ctx = 見る人。信頼度の提案と補正の、人や話題の名前は予算策定担当以上だけ: appInsightDetail_）。返り値:
  *   detail:      'full'（予算策定担当以上）/ 'summary'（閲覧・情報提供。人や話題の名前を出さない）
- *   curves:      [{ type, label, prior: { alpha0, beta0, mu, precision, from, mean, ci80 }, n, hit,
- *                   quarters: [{ quarter, n, hit, cumN, cumHit, alpha, beta, mean, ci80 }] }]（四半期ごとに積み上げた事後。画面がベータ分布の曲線を描く）
+ *   curves:      [{ type, label, base, prior: { alpha0, beta0, mu, precision, from, mean, ci80 }, n, hit, expected,
+ *                   quarters: [{ quarter, n, hit, cumN, cumHit, cumExpected, base, alpha, beta, mean, ci80, vsBase }] }]（四半期ごとに積み上げた事後。
+ *                   画面がベータ分布の曲線を描く。base = いつも同じ向きと言った場合に当たる割合（曲線の基準の線。quarters はその時点までの分）。
+ *                   事前分布は基準に合わせる（appInsightBasePrior_。mu は POOL_PRIOR の基準を引いた当たり））
  *   noPreMonth:  その月が始まる前の予測が無いので当たりを数えなかった、締まった月の数（人の学びと同じ。D6）
  *   shrinkage:   { mu, tau, tau2, pooled, plans: [{ planId, clientName, fy, n, bias, se, shrunk, factorShadow, mapeNow, mapeShadow }] }
  *   timeline:    [{ ym, n, mape, coverage, coverageN, coverageCi80: [下, 上], target, rolling3, rolling3N }]（全計画の締まった月ごと。締まった後の予測の月は除く）
@@ -939,23 +992,29 @@ function appAiLearning_(ctx) {
   const evidence = appInsightEvidence_(ids, tab, noPre);
   const priors = appInsightPriors_(tab('POOL_PRIOR'));
   const curves = Object.keys(priors).map(type => {
-    const pr = priors[type];
     const byQ = {};
+    let expected = 0, all = 0;
     evidence.forEach(e => {
       if (e.type !== type || !e.quarter) return;
-      const q = byQ[e.quarter] = byQ[e.quarter] || { n: 0, hit: 0 };
-      q.n++; q.hit += e.hit;
+      const b0 = typeof e.base === 'number' ? e.base : 0.5;
+      const q = byQ[e.quarter] = byQ[e.quarter] || { n: 0, hit: 0, expected: 0 };
+      q.n++; q.hit += e.hit; q.expected += b0;
+      all++; expected += b0;
     });
-    let a = pr.alpha0, b = pr.beta0, n = 0, hit = 0;
+    // 基準（その種類の押した月の基準の平均）に合わせた事前分布（人と話題ごとの当たりと同じ。appInsightBasePrior_）
+    const base = all ? expected / all : 0.5;
+    const pr = appInsightBasePrior_(priors[type], base);
+    let a = pr.alpha0, b = pr.beta0, n = 0, hit = 0, cumExp = 0;
     const quarters = Object.keys(byQ).sort().map(q => {
-      n += byQ[q].n; hit += byQ[q].hit;
+      n += byQ[q].n; hit += byQ[q].hit; cumExp += byQ[q].expected;
       a += byQ[q].hit; b += byQ[q].n - byQ[q].hit;
       const s = appBetaSummary_(a, b);
-      return { quarter: q, n: byQ[q].n, hit: byQ[q].hit, cumN: n, cumHit: hit, alpha: a, beta: b, mean: s.mean, ci80: s.ci80 };
+      return { quarter: q, n: byQ[q].n, hit: byQ[q].hit, cumN: n, cumHit: hit, cumExpected: cumExp, base: cumExp / n, alpha: a, beta: b, mean: s.mean, ci80: s.ci80,
+        vsBase: appInsightVsBase_(s.ci80, cumExp / n) };
     });
     const p0 = appBetaSummary_(pr.alpha0, pr.beta0);
-    return { type: type, label: APP_SOURCE_LABELS[type] || type, prior: { alpha0: pr.alpha0, beta0: pr.beta0, mu: pr.mu, precision: pr.precision, from: pr.from,
-      mean: p0.mean, ci80: p0.ci80 }, n: n, hit: hit, quarters: quarters };
+    return { type: type, label: APP_SOURCE_LABELS[type] || type, base: base, prior: { alpha0: pr.alpha0, beta0: pr.beta0, mu: priors[type].mu, precision: pr.precision,
+      from: pr.from, mean: p0.mean, ci80: p0.ci80 }, n: n, hit: hit, expected: expected, quarters: quarters };
   });
   const info = {};
   plans.forEach(p => { info[p.planId] = p; });

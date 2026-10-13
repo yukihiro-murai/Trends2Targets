@@ -665,7 +665,7 @@ function seedReviewPlan(e, name, withHistory) {
     ACTUAL_EVAL_MONTHLY: { values: [H.ACTUAL_EVAL_MONTHLY].concat(MONTHS.map(([ym, act]) => [CLIENT, 'BASE', '製品A', ym, act, 'closed', D(2026, 7, 10)])), formats: { D: '@' } },
     AI_IMPACT_HISTORY: { values: [H.AI_IMPACT_HISTORY, impact(4), impact(5), impact(6)] },
     SUBJECTIVE_IMPACT_HISTORY: { values: [H.SUBJECTIVE_IMPACT_HISTORY, push(4, 'opinion', '鷹野', 1), push(5, 'opinion', '鷹野', -1), push(6, 'opinion', '鷹野', 1),
-      push(4, 'factor_product', '佐藤', 1), push(5, 'factor_product', '佐藤', 1), push(6, 'factor_product', '佐藤', 1)] },
+      push(4, 'factor_product', '佐藤', -1), push(5, 'factor_product', '佐藤', 1), push(6, 'factor_product', '佐藤', -1)] },   // 佐藤は 3 か月とも実績と逆（いつも同じ向きより外れる。2026-10-13 から当たりは基準と比べる）
     AI_SCORE_HISTORY: { values: [H.AI_SCORE_HISTORY] },
     CALIBRATION_STATE: { values: [H.CALIBRATION_STATE, [CLIENT, D(2026, 9, 1), 'owner', '', '', '[]', 1, '', '{}', '', '', 1, '']] },
     SOURCE_RELIABILITY: { values: [H.SOURCE_RELIABILITY] },

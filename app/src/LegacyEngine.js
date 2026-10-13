@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.4.0-dev、SHA-256 6a19638d0a20258ea8271db654e30769704239a8c243712563250d4a2a76cae5）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.4.0-dev、SHA-256 4660e56aaed47a795bc46f89678ddc13b5c1db1906751ff16dcc73a8a4ec7672）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -9211,7 +9211,9 @@ function runQuarterlyReview() {
 /**
  * C-1 の材料。月は、今の決まりで測った月（締まった月を、月が始まる前の予測で。D4〜D6・2026-10-07）のうち新しい 3 か月。
  * 前の版の EVAL_LOG の行（締まっていない月の途中の売上や、月が始まった後の予測で測った行）は消さずに残っているが使わない。
- * AI と人の押しの当たりも、その月が始まる前の最後の予測の回（AI_IMPACT_HISTORY・SUBJECTIVE_IMPACT_HISTORY）だけで数える（D6）
+ * AI と人の押しの当たりも、その月が始まる前の最後の予測の回（AI_IMPACT_HISTORY・SUBJECTIVE_IMPACT_HISTORY）だけで数える（D6）。
+ * impactsAll は、今の決まりで測った全部の月の、その月が始まる前の最後の回の AI_IMPACT_HISTORY の行（当たりの基準 = いつも同じ向きと言った場合に
+ * 当たる割合を、その計画の比べられた月から作る。2026-10-13 村井さん承認。impacts は そのうち新しい 3 か月の行）
  */
 function collectQuarterlyReviewData_(client) {
   try {
@@ -9241,14 +9243,17 @@ function collectQuarterlyReviewData_(client) {
     const impactSh = ss.getSheetByName(SHEETS.AI_IMPACT_HISTORY);
     let impactIdx = {};
     let impacts = [];
+    let impactsAll = [];
     if (impactSh && impactSh.getLastRow() >= 1) {
       const impactValues = impactSh.getDataRange().getValues();
       impactIdx = headerIndexMap_(impactValues[0] || []);
       if (hasHeaderIndexes_(impactIdx, ['client','target_month','k_ai','ai_direction','pred_p50_quant_only'])) {
         const impactClientIdx = impactIdx.client;
         const impactTargetMonthIdx = impactIdx.target_month;
-        impacts = keepPreMonthRunRows_(impactValues.slice(1)
-          .filter(r => isSameClient_(r[impactClientIdx], client) && last3.indexOf(ymKey_(r[impactTargetMonthIdx])) >= 0), impactIdx);
+        // 月ごとに選ぶので、全部の月で選んでから 3 か月に絞っても、3 か月で選ぶのと同じ行になる
+        impactsAll = keepPreMonthRunRows_(impactValues.slice(1)
+          .filter(r => isSameClient_(r[impactClientIdx], client) && months.indexOf(ymKey_(r[impactTargetMonthIdx])) >= 0), impactIdx);
+        impacts = impactsAll.filter(r => last3.indexOf(ymKey_(r[impactTargetMonthIdx])) >= 0);
       }
     }
     const subjSh = ss.getSheetByName(SHEETS.SUBJECTIVE_IMPACT_HISTORY);
@@ -9267,7 +9272,8 @@ function collectQuarterlyReviewData_(client) {
     const scoreSh = ss.getSheetByName(SHEETS.AI_SCORE_HISTORY);
     const scores = scoreSh ? scoreSh.getDataRange().getValues().slice(1)
       .filter(r => isSameClient_(r[2], client)) : [];
-    return { ready: true, client, months: last3, evalRows, impacts, scores, subjectiveImpacts, evalIdx, impactIdx, subjectiveImpactIdx, calibration: readCalibrationState_(client) };
+    return { ready: true, client, months: last3, evalRows, impacts, impactsAll, scores, subjectiveImpacts, evalIdx, impactIdx, subjectiveImpactIdx,
+      calibration: readCalibrationState_(client) };
   } catch (err) {
     throw err;
   }
@@ -9353,7 +9359,8 @@ function computeReliabilityHitStats_(data) {
   });
   const quantByMonth = new Map();
   const latestQuantByMonth = new Map();
-  (data.impacts || []).forEach((r, seq) => {
+  // 統計だけの予測は全部の月（今の決まりで測った月）の分を読む（当たりの基準に使う。当たりそのものは 3 か月の押しだけで数える）
+  (data.impactsAll || data.impacts || []).forEach((r, seq) => {
     const forecastSource = impactForecastSourceIdx === undefined ? '' : String(r[impactForecastSourceIdx] || '').trim();
     if (forecastSource !== 'forecast_open') return;
     const ym = ymKey_(r[impactTargetMonthIdx]);
@@ -9383,6 +9390,9 @@ function computeReliabilityHitStats_(data) {
       latestSubjectiveByUnit.set(unitKey, { row: r, runAtMs: runMs, seq });
     }
   });
+  // 当たりの基準（2026-10-13 村井さん承認）: いつも同じ向きと言った場合に当たる割合。その計画の比べられた月（実績と統計だけの予測がそろった月。
+  // 外れの無い月は除く）のうち、実績が上（下）に外れた月の割合。月が少なければ全計画の割合（POOL_PRIOR の hit_base。新アプリが書く）に寄せる
+  const rates = hitBaseRatesOf_(evalActualByMonth, quantByMonth, readHitBaseShare_());
   const grouped = new Map();
   Array.from(latestSubjectiveByUnit.values()).forEach(x => {
     const r = x.row;
@@ -9398,18 +9408,72 @@ function computeReliabilityHitStats_(data) {
     const pushDir = Math.sign(Number(r[subjPushDirectionIdx] || 0));
     if (!type || !key || !pushDir) return;
     const gKey = `${type}:${key}`;
-    if (!grouped.has(gKey)) grouped.set(gKey, { source_type: type, source_key: key, n: 0, hit: 0 });
+    if (!grouped.has(gKey)) grouped.set(gKey, { source_type: type, source_key: key, n: 0, hit: 0, expected: 0 });
     const g = grouped.get(gKey);
     g.n += 1;
+    g.expected += pushDir > 0 ? rates.up : rates.down;
     if (pushDir === surpriseDir) g.hit += 1;
   });
+  // hit_rate は基準を引いた当たる割合（0.5 + (当たり − 基準で当たるはずの数) ÷ 数。0〜1）。いつも同じ向きと言うだけなら 0.5（信頼度 r = 2 × これ = 1.0）
   return Array.from(grouped.values()).map(g => ({
     source_type: g.source_type,
     source_key: g.source_key,
     n: g.n,
     hit: g.hit,
-    hit_rate: g.n > 0 ? g.hit / g.n : 0
+    expected: g.expected,
+    hit_rate: hitRateOverBase_(g.hit, g.expected, g.n)
   }));
+}
+
+/** 当たりの基準を全計画の割合へ寄せる強さ（月の数。POOL_PRIOR の hit_base に強さが無いとき） */
+const HIT_BASE_SHRINK_MONTHS = 3;
+
+/**
+ * 当たりの基準（{ up, down }。いつも上・いつも下と言った場合に当たる割合）。actualByMonth・quantByMonth = 月 → 実績・統計だけの予測。
+ * 両方がそろい、外れのあった月（実績 ≠ 統計だけの予測）の、上に外れた月と下に外れた月の数から作る。
+ * pool（readHitBaseShare_。全計画の上の割合と強さ）があれば、その強さの月の数だけ全計画の割合に寄せる（新アプリの appHitBaseRates_ と同じ式）。
+ * 無ければ、その計画の割合のまま（比べられた月が無ければ半々）
+ */
+function hitBaseRatesOf_(actualByMonth, quantByMonth, pool) {
+  let up = 0, down = 0;
+  actualByMonth.forEach((a, ym) => {
+    const q = Number(quantByMonth.get(ym));
+    if (!isFinite(Number(a)) || !quantByMonth.has(ym) || !isFinite(q)) return;
+    const s = Math.sign(Number(a) - q);
+    if (s > 0) up += 1; else if (s < 0) down += 1;
+  });
+  const k = pool ? Math.max(0, Number(pool.precision) || 0) : 0;
+  const share = pool ? Math.min(1, Math.max(0, Number(pool.share))) : 0.5;
+  const den = up + down + k;
+  const pUp = den > 0 ? (up + k * share) / den : 0.5;
+  return { up: pUp, down: 1 - pUp, upMonths: up, downMonths: down };
+}
+
+/** 基準を引いた当たる割合（0.5 + (当たり − 基準で当たるはずの数) ÷ 数。0〜1。数が 0 なら 0.5） */
+function hitRateOverBase_(hit, expected, n) {
+  return n > 0 ? clamp_(0.5 + (Number(hit) - Number(expected)) / n, 0, 1) : 0.5;
+}
+
+/**
+ * 全計画の「実績が統計だけの予測より上に外れた」割合（POOL_PRIOR の pool_scope = hit_base・param_key = up_share。新アプリの LEARN.POOL が書く）。
+ * { share（0〜1）, precision（寄せる強さ。月の数） }。無ければ null（基準はその計画の割合のまま）
+ */
+function readHitBaseShare_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(SHEETS.POOL_PRIOR);
+  if (!sh || sh.getLastRow() < 2) return null;
+  const values = sh.getDataRange().getValues();
+  const idx = headerIndexMap_(values[0] || []);
+  if (!hasHeaderIndexes_(idx, ['pool_scope', 'param_key', 'pooled_value'])) return null;
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idx.pool_scope] || '').trim() !== 'hit_base' || String(values[i][idx.param_key] || '').trim() !== 'up_share') continue;
+    const v = Number(values[i][idx.pooled_value]);
+    if (!isFinite(v) || v < 0 || v > 1) return null;
+    const kRaw = idx.precision === undefined ? '' : values[i][idx.precision];
+    const k = Number(kRaw);
+    return { share: v, precision: kRaw === '' || kRaw === null || !isFinite(k) ? HIT_BASE_SHRINK_MONTHS : Math.max(0, k) };
+  }
+  return null;
 }
 
 function generateReliabilityProposals_(data) {
@@ -9421,7 +9485,10 @@ function generateReliabilityProposals_(data) {
   const proposals = [];
   stats.forEach(g => {
     if (g.n < tuning.reliabilityMinSamples) return;
-    const h = g.n > 0 ? g.hit / g.n : 0;
+    // h = 基準を引いた当たる割合（computeReliabilityHitStats_ の hit_rate。いつも同じ向きと言うだけなら 0.5 → r = 1.0。2026-10-13 村井さん承認）
+    const h = g.n > 0 ? Number(g.hit_rate) : 0.5;
+    const raw = g.n > 0 ? g.hit / g.n : 0;
+    const base = g.n > 0 ? Number(g.expected) / g.n : 0.5;
     const rHat = clamp_(2 * h, tuning.reliabilityRMin, tuning.reliabilityRMax);
     const pool = readPoolPrior_(`reliability:${g.source_type}`);
     const rPool = isFinite(Number(pool.value)) ? Number(pool.value) : 1.0;
@@ -9437,10 +9504,10 @@ function generateReliabilityProposals_(data) {
       rCurrent,
       rShrunk,
       conf,
-      `的中率=${(h * 100).toFixed(0)}% / n=${g.n}`,
+      `的中率=${(raw * 100).toFixed(0)}% / 基準=${(base * 100).toFixed(0)}% / n=${g.n}`,
       `次回A-9で ${g.source_type}:${g.source_key} の主観/AI寄与を reliability_r=${rShrunk.toFixed(3)} で重み付け`,
       'C-2で却下、またはSOURCE_RELIABILITYを手動で旧値へ戻す',
-      { hitRate: h, n: g.n, rHat, rShrunk, rCurrent }
+      { hitRate: h, rawHitRate: raw, baseRate: base, n: g.n, rHat, rShrunk, rCurrent }
     ));
   });
   return proposals;
@@ -9485,7 +9552,8 @@ function writeReliabilityEvidence_(client, quarterLabel, quarterEndMonth, stats,
       Number(s.hit_rate || 0),
       now,
       runId || '',
-      ''
+      // hit_rate は基準を引いた当たる割合。基準で当たるはずの数を残す（新アプリの全計画の事前分布が、計画をまたいで基準を引くのに使う）
+      isFinite(Number(s.expected)) ? 'expected=' + Number(s.expected).toFixed(4) : ''
     ];
     const key = [targetClient, type, sourceKey, targetQuarter].join('|');
     const rowNo = rowByKey.get(key);
@@ -10690,7 +10758,7 @@ function webAuditLogUrl_() {
     forecastSeasonalWeighted48_: typeof forecastSeasonalWeighted48_ === 'undefined' ? undefined : forecastSeasonalWeighted48_,
     readForecastClosedMonthMode_: typeof readForecastClosedMonthMode_ === 'undefined' ? undefined : readForecastClosedMonthMode_,
     runForecastFYCore_: typeof runForecastFYCore_ === 'undefined' ? undefined : runForecastFYCore_,
-    SOURCE_SHA256: '6a19638d0a20258ea8271db654e30769704239a8c243712563250d4a2a76cae5',
+    SOURCE_SHA256: '4660e56aaed47a795bc46f89678ddc13b5c1db1906751ff16dcc73a8a4ec7672',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

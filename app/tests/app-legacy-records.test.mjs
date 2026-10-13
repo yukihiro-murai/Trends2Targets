@@ -113,12 +113,19 @@ runPausedAction('REVIEW.GENERATE');
 const ev = engRows('RELIABILITY_EVIDENCE');
 assert.deepEqual(ev.map((r) => [r.source_type, r.source_key, r.quarter_label, r.n, r.hit]),
   [['opinion', '鷹野', 'FY2026-Q1', '3', '3'], ['factor_product', '佐藤', 'FY2026-Q1', '3', '2']], '月が日付でも人ごとの当たりを数える');
+// 当たりの基準（2026-10-13）: 実績の向きは 上・下・上 なので、いつも上と言えば 2/3 当たる。hit_rate は基準を引いた当たる割合、note に基準で当たるはずの数
+// 鷹野（上・下・上）: 基準で 2/3 + 1/3 + 2/3 = 5/3 → 0.5 + (3 − 5/3) / 3。佐藤（いつも上）: 基準で 2 → 0.5（いつも同じ向きと同じ）
+assert.ok(Math.abs(Number(ev[0].hit_rate) - (0.5 + (3 - 5 / 3) / 3)) < 1e-9, '鷹野の基準を引いた当たる割合: ' + ev[0].hit_rate);
+assert.equal(ev[0].note, 'expected=' + (5 / 3).toFixed(4));
+assert.deepEqual([Number(ev[1].hit_rate), ev[1].note], [0.5, 'expected=2.0000'], '佐藤はいつも上と言っただけ（当たる割合 2/3 = 基準）');
 const log = engRows('QUARTERLY_REVIEW_LOG');
-assert.deepEqual(log.map((r) => [r.target_field, r.confidence]), [['reliability:opinion:鷹野', '中'], ['reliability:factor_product:佐藤', '中']], '信頼度の見直し案が出る');
+assert.deepEqual(log.map((r) => [r.target_field, r.confidence]), [['reliability:opinion:鷹野', '中']],
+  '信頼度の見直し案は鷹野だけ（佐藤はいつも上と言っただけなので r = 2 × 0.5 = 1.0 のまま。基準を引く前は 2/3 当たりで案が出ていた）');
+assert.equal(log[0].rationale, '的中率=100% / 基準=56% / n=3', '根拠に基準を添える');
 
 // ==== 4. 案の確度は 高・中・低 の文字のまま画面へ（直す前は数にして null になり、画面は「-」だった） ====
 view = env.call('apiPlanView(__in)', { __in: { planId } });
-assert.deepEqual(view.boot.quarterly.proposals.map((p) => p.conf), ['中', '中'], '確度は文字のまま');
+assert.deepEqual(view.boot.quarterly.proposals.map((p) => p.conf), ['中'], '確度は文字のまま');
 const js = uiHtml.slice(uiHtml.indexOf('<script>') + 8, uiHtml.lastIndexOf('</script>'))
   .replace('<?!= charsJs ?>', 'var YOMI_POSE = new Proxy({}, { get: () => "" }); var CHAR_SVG = new Proxy({}, { get: () => "" });')
   .replace('<?!= bootJson ?>', JSON.stringify({ app: { name: 'T', version: 'x' }, user: { email: OWNER, isOwner: true, isAdmin: true, roles: [] }, setUp: true, allowed: true }));
@@ -129,7 +136,11 @@ const ui = vm.createContext({ document: { getElementById: el, querySelector: () 
 vm.runInContext(js, ui);
 ui.__q = view.boot.quarterly;
 const props = vm.runInContext('fcRvProposals(__q)', ui);
-assert.equal((props.match(/<td class="num">中<\/td>/g) || []).length, 2, '確度の列に 中 を出す');
+assert.equal((props.match(/<td class="num">中<\/td>/g) || []).length, 1, '確度の列に 中 を出す');
+// 根拠（基準つき・前の書き方）をふつうの言葉に（予算策定担当以上の人に出す。閲覧の人には出さない）
+assert.equal(vm.runInContext(`qrWhy(${JSON.stringify(log[0].rationale)}, 'reliability:opinion:鷹野', false)`, ui), '当たった割合 100%（いつも同じ向きなら 56%・3 件）');
+assert.equal(vm.runInContext(`qrWhy('的中率=67% / n=3', 'reliability:opinion:鷹野', false)`, ui), '当たった割合 67%（3 件）', '前の書き方の根拠もそのまま読む');
+assert.equal(vm.runInContext(`qrWhy(${JSON.stringify(log[0].rationale)}, 'reliability:opinion:鷹野', true)`, ui), '');
 assert.equal(vm.runInContext(`fcRvProposals({ proposals: [{ row: 8, target: 'ai_weight_override', current: '1', proposed: '0.5', conf: null, rationale: '', impact: '' }] })`, ui)
   .match(/<td class="num">-<\/td>/g).length, 1, '確度が無ければ -');
 
