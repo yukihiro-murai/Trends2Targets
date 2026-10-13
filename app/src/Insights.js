@@ -977,9 +977,12 @@ function appAiLearning_(ctx) {
       return { planId: p.planId, clientName: p.clientName, fy: p.fy, n: accs[p.planId].n, bias: s.bias, se: s.se, shrunk: s.shrunk,
         factorShadow: s.factorShadow, mapeNow: s.mapeNow, mapeShadow: s.mapeShadow };
     }) };
+  // 今の補正: CONFIG!B2 のメーカーの行（予測に効く行。最後の行ではない。appLandingCalRow_。2026-10-13）
   const state = tab('CALIBRATION_STATE');
+  let clients = {};
+  try { clients = appPlanClients_(ids); } catch (e) { Logger.log('メーカーの名前を読めません: ' + (e && e.message ? e.message : e)); }
   const factorNow = {};
-  ids.forEach(id => { const c = (state[id] || []).slice(-1)[0]; factorNow[id] = c ? appNum_(c.bias_correction_factor) : null; });
+  ids.forEach(id => { const c = appLandingCalRow_(state[id] || [], clients[id] || ''); factorNow[id] = c ? appNum_(c.bias_correction_factor) : null; });
   return {
     detail: detail, curves: curves, noPreMonth: appInsightCountMonths_(noPre), shrinkage: shrinkage, timeline: appInsightTimeline_(accs),
     calibration: appInsightCalibration_(plans, tab('CALIBRATION_HISTORY'), factorNow, hide),

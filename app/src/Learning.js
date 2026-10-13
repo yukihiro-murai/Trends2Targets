@@ -264,6 +264,40 @@ function appBiasShadow_(accs) {
 }
 
 /**
+ * 計画のメーカーの名前（CONFIG!B2）: { 計画の ID: 名前（無ければ ''） }。旧来の A-9・B-5 は、この名前の CALIBRATION_STATE の行の補正を
+ * 予測に掛ける（名前が合う行が無ければ既定の行を足す）。「今の補正」はこの名前で選ぶ（appLandingCalRow_。Landing.js・Calibration.js と同じ。2026-10-13）。
+ * データ本体の ENG_ROWS の CONFIG の 2 行目を読む（計画が 2 つ以上なら表を 1 回で。Portfolio.js の appPortfolioData_ と同じ読み方）
+ */
+function appPlanClients_(ids) {
+  const want = {};
+  (ids || []).forEach(id => { want[id] = true; });
+  const out = {};
+  (ids || []).forEach(id => { out[id] = ''; });
+  if (!ids || !ids.length) return out;
+  const rows = ids.length === 1 ? appReadPlanTable_('ENG_ROWS', ids[0]) : appReadTable_('ENG_ROWS');
+  rows.forEach(s => {
+    if (!want[s.plan_id] || s.sheet !== 'CONFIG' || Number(s.row_no) !== 2) return;
+    const at = 2 - Number(s.col_from);   // B 列
+    if (!(at >= 0)) return;
+    let cells;
+    try { cells = JSON.parse(s.cells_json) || []; } catch (e) { return; }
+    const x = cells[at];
+    if (x === undefined || x === null || x === '') return;
+    const t = String(x).charAt(0);
+    out[s.plan_id] = t === 'f' ? '' : String(appCellDecode_(t, String(x).slice(1))).trim();
+  });
+  return out;
+}
+
+/**
+ * 計画の今の補正の行（CALIBRATION_STATE の行のうち、CONFIG!B2 のメーカーの行。appLandingCalRow_。無ければ null）。
+ * 最後の行ではない（旧来はメーカーの名前が合わないと既定の行を足すので、行が 2 つになった計画では最後の行と予測に効く行がずれる）
+ */
+function appPlanCalRow_(planId, calRows) {
+  return appLandingCalRow_(calRows, appPlanClients_([planId])[planId]);
+}
+
+/**
  * 計画の精度と学習の影（予測の画面の「検証」タブ）。データ本体が変わらない間は控えから返す（appCachedRead_）。
  * scoredMonths = 今の決まりで B-2 が測った月の数（実績 0 円の月も数える。appAccuracyOf_）。accuracy.months・n は実績 0 円の月を除くので、
  * 画面は scoredMonths で「まだ比べていない」と「比べた月がどれも売上 0 円」を見分ける
@@ -282,7 +316,7 @@ function appLearningViewData_(planId) {
     try { appJobPutResult_(appAccuracyKey_(plan.plan_id), mine); } catch (e) { /* 控えられなくても返す */ }
   }
   const shadow = appBiasShadow_(accs);
-  const cal = appEngTableObjects_(plan.plan_id, ['CALIBRATION_STATE']).CALIBRATION_STATE.slice(-1)[0] || null;
+  const cal = appPlanCalRow_(plan.plan_id, appEngTableObjects_(plan.plan_id, ['CALIBRATION_STATE']).CALIBRATION_STATE);   // CONFIG!B2 のメーカーの行
   return { planId: plan.plan_id, scoredMonths: mine.scoredMonths, accuracy: Object.assign({}, mine, { months: mine.months.map(m => ({ month: m.month, p10: m.p10, p50: m.p50, p90: m.p90, actual: m.actual,
     err: m.err, inside: m.inside, leak: m.leak })) }),
     shadow: shadow.plans[plan.plan_id] || null, pooledPlans: Object.keys(shadow.plans).length, pooled: shadow.pooled, mu: shadow.mu, tau2: shadow.tau2,

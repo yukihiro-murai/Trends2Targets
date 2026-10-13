@@ -150,4 +150,23 @@ const B1 = new Date(2026, 6, 6, 10), B2old = new Date(2026, 5, 6, 11), B2now = n
   assert.equal(J(env.run(`appPlanCutoff_('X-none', [{ step_key: 'step2_status', status: 'success', last_run_date: __b1 }])`, { __b1: B1 })), '');
 }
 
+// ==== 4. 「今の補正」は CONFIG!B2 のメーカーの行（最後の行ではない。提案 10） ====
+{
+  const { env, seed } = pipelineEnv();
+  // 旧来の計算は、メーカーの名前が合わないと既定の行（係数 1）を足す。ここでは、予測に効く行（甲製薬・0.75）の後ろに別の名前の既定の行がある
+  const calRow = (client, f) => ({ client, updated_at: new Date(2026, 5, 1), updated_by: 'owner', bias_correction_factor: f, residual_month_bias_json: '{}', auto_update_enabled: 1 });
+  const id = seed('甲製薬', { b1: B1, b2: B2now, cal: [calRow('甲製薬', 0.75), calRow('甲製薬（旧名）', 1)] });
+  const one = seed('乙製薬', { b1: B1, b2: B2now, cal: [calRow('乙製薬（別名）', 0.9)] });   // 行が 1 つだけなら、名前が違ってもその行（Landing・Calibration と同じ）
+  assert.deepEqual(J(env.run('appPlanClients_(__ids)', { __ids: [id, one, 'X-none'] })), { [id]: '甲製薬', [one]: '乙製薬', 'X-none': '' });
+  assert.equal(env.call('apiLearningView(__in)', { __in: { planId: id } }).factorNow, 0.75, '検証の画面の今の補正');
+  assert.equal(env.call('apiLearningView(__in)', { __in: { planId: one } }).factorNow, 0.9);
+  const ai = env.call('apiAiLearning()');
+  assert.equal(ai.calibration.find((c) => c.planId === id).factorNow, 0.75, 'AI の学びの補正の履歴の今');
+  assert.ok(ai.health.some((h) => h.planId === id && h.key === 'factor_clamp'), '下限に張りついた補正を見落とさない（最後の行の 1 では見えなかった）');
+  const basis = env.call('apiForecastBasis(__in)', { __in: { planId: id } });
+  assert.equal(basis.calibration.factor, 0.75, '根拠の今の補正');
+  // 名前の合う行が無く、行が 2 つ以上: どの行も選ばない（予測には既定の行が足されて効く）
+  assert.equal(J(env.run(`appLandingCalRow_([{ client: 'A', bias_correction_factor: 0.8 }, { client: 'B', bias_correction_factor: 1.1 }], 'C')`)), null);
+}
+
 console.log('app-accuracy-measure: all tests passed');
