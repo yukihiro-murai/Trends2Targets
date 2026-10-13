@@ -7,6 +7,11 @@
  *   - 時間の区切り（APP_AI_CALC_BUDGET_MS）を過ぎたら、新しい問い合わせはせずに止める（旧来の側は失敗として先へ進むが、その結果は使わない）
  *   - 計算用ブックを組み立て直してもう一度動かすと、同じ問い合わせは控えから答える（時刻と乱数は固定なので、問い合わせの中身も同じになる）
  * 問い合わせ先は Vertex AI（aiplatform）と Vertex AI Search（discoveryengine）だけ。
+ *
+ * 守り（2026-10-13 の点検。村井さん承認）:
+ *   - 保存の前の確かめ（appAiCheckBeforeSave_）: 計算用ブックの AI_RESEARCH・AI_RESEARCH_STRUCTURED に数式が 1 つでもあれば保存しない
+ *     （旧来の側でも AI の文を文字として書く。二重の守り）。時間の区切りで止まっていないのに問い合わせが失敗し、4 つの話題のどれかが
+ *     欠けたときも保存しない（前の結果を残す。自動の調べは失敗として数え、次の晩に試し直す）
  */
 const APP_AI_CALC_BUDGET_MS = 3 * 60 * 1000;   // 1 回の計算で新しく問い合わせてよい時間（1 回の問い合わせに 1 分ほどかかっても 6 分に収まる）
 /** 区切りの時刻（テストで差し替える） */
@@ -80,4 +85,57 @@ function appAiFetcher_(actionId, deadlineMs) {
   };
   return { fetch: fetch, stopped: () => st.stopped, failures: () => log.slice(),
     stats: () => ({ hits: st.hits, live: st.live, retries: st.retries, stopped: st.stopped, failed: log.length }) };
+}
+
+// ---- 保存の前の確かめ（数式・欠けた話題） ----
+
+/** 4 つの話題（旧来の AI_TOPICS）と画面の名前 */
+const APP_AI_TOPIC_NAMES = { Market: '市場', Competitor: '競合', Channel: '販路', DX: 'DX' };
+/** 話題が欠けて保存しなかったときのエラーの文の印（AutoResearch.js が「次の晩に試し直す失敗」として見分ける） */
+const APP_AI_TOPICS_MISSING = 'を調べられませんでした。前の結果を残しました。';
+/** AI の文を書くシート（旧来の A-4 が毎回書き直す。数式が 1 つでもあれば保存しない） */
+const APP_AI_TEXT_SHEETS = ['AI_RESEARCH', 'AI_RESEARCH_STRUCTURED'];
+
+/**
+ * A-4 の計算の後・保存の前（Plan.js の appPlanRunCalc_。時間の区切りで止まっていないとき）。保存してはいけなければ止める:
+ *   1. 計算用ブックの AI_RESEARCH・AI_RESEARCH_STRUCTURED に数式が 1 つでもある（旧来の側で文字として書くようにした上での二重の守り）
+ *   2. 問い合わせの失敗があり、AI_RESEARCH_STRUCTURED に 4 つの話題のどれかが無い（一時的な失敗で欠けた話題を「中立」として
+ *      残した話題だけで書き直さない。前の結果を残す）
+ * 止めたときは何も書かない（計算用ブックは途中のまま。次の操作で組み立て直す）
+ */
+function appAiCheckBeforeSave_(scratch, fetcher) {
+  const formulas = appAiFormulaCells_(scratch);
+  if (formulas.length) {
+    Logger.log('A-4 の答えの数式のセル: ' + formulas.slice(0, 20).join(', '));
+    throw new Error('AI 調査の答えに、表の数式として動いてしまう文がありました（' + formulas.length + ' か所）。安全のため保存せずに止め、前の結果を残しました。');
+  }
+  const f = fetcher ? fetcher.failures() : [];
+  if (!f.length || fetcher.stopped()) return;
+  const missing = appAiMissingTopics_(scratch);
+  if (!missing.length) return;
+  throw new Error('（' + missing.map(t => APP_AI_TOPIC_NAMES[t]).join('・') + '）' + APP_AI_TOPICS_MISSING + '少し待ってから、もう一度調べてください。\n' +
+    '問い合わせの失敗（' + f.length + ' 件）:\n' + f.slice(0, 6).join('\n'));
+}
+
+/** AI の文を書くシートの数式のセル（シート名!A1 の一覧） */
+function appAiFormulaCells_(scratch) {
+  const out = [];
+  APP_AI_TEXT_SHEETS.forEach(name => {
+    const sh = scratch.getSheetByName(name);
+    if (!sh || sh.getLastRow() < 1 || sh.getLastColumn() < 1) return;
+    sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getFormulas().forEach((row, r) => row.forEach((x, c) => { if (x) out.push(name + '!' + appA1_(r, c)); }));
+  });
+  return out;
+}
+
+/** AI_RESEARCH_STRUCTURED に 1 行も無い話題（Market・Competitor・Channel・DX の順） */
+function appAiMissingTopics_(scratch) {
+  const sh = scratch.getSheetByName('AI_RESEARCH_STRUCTURED');
+  const have = {};
+  if (sh && sh.getLastRow() >= 2 && sh.getLastColumn() >= 1) {
+    const vals = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+    const c = vals[0].map(h => String(h).trim()).indexOf('topic');
+    if (c >= 0) vals.slice(1).forEach(r => { have[String(r[c]).trim()] = true; });
+  }
+  return Object.keys(APP_AI_TOPIC_NAMES).filter(t => !have[t]);
 }

@@ -3,13 +3,14 @@
  * app-ai-formula.test.mjs — A-4 AI 調査の守り: AI の文を数式にしない（提案 19）。2026-10-13 の点検（村井さん承認）。
  * AI の文が = + - @ で始まっても数式にしない（=IMAGE("https://…"&CONFIG!B2) の例）。旧来の A-4 が AI の文をセルに書くすべての所で、
  * そのセルの書式を文字にしてから書く。データ本体から組み立て直しても文字のまま。
+ * 新アプリは保存の前にも、計算用ブックの AI_RESEARCH・AI_RESEARCH_STRUCTURED に数式が 1 つでもあれば保存しない（二重の守り）。
  * 本物の旧来の A-4 を、決まった形の Vertex AI の答えで動かす（共通の道具は ai-stub.mjs）。モックの上の確かめで、本物の Apps Script・Vertex AI の上では動かしていない。
  *
  *   node app/tests/app-ai-formula.test.mjs
  */
 import assert from 'node:assert/strict';
 import { setUpEnv } from './gas-mock.mjs';
-import { seed, stubVertex, setAi, research, structured, rowOf, EVIL } from './ai-stub.mjs';
+import { seed, stubVertex, setAi, research, structured, rowOf, actions, EVIL } from './ai-stub.mjs';
 
 const env = setUpEnv();
 const FY = env.run('appFy_(new Date())');
@@ -58,6 +59,37 @@ stubVertex(env);
   rebuilt.forEach((x) => assert.deepEqual([x.forced, x.mismatches, x.formulas], [0, 0, []], x.name + ': 組み立て直しても数式にならない'));
   assert.ok(rebuilt.find((x) => x.name === 'AI_RESEARCH').evil);
   setAi(env, "__ai.citeTitle = ''; __ai.answers = {};");
+}
+
+// ==== 計算用ブックに数式が残れば保存しない（二重の守り。前の結果を残す） ====
+{
+  const p = seed(env, '守り製薬', FY);
+  assert.equal(research(env, p).status, 'DONE');
+  const before = JSON.stringify(structured(env, p));
+  const acts = actions(env, p).length;
+  // 旧来の側で数式が残った（ここでは A-4 の後に作って差し込む）
+  env.run(`(() => {
+    const base = appLegacyEngine_;
+    globalThis.__restoreEngine = () => { appLegacyEngine_ = base; };
+    appLegacyEngine_ = function (svc) {
+      const eng = base(svc);
+      const run = eng.webRunAiResearch;
+      eng.webRunAiResearch = function () {
+        const r = run.apply(this, arguments);
+        const sh = svc.SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AI_RESEARCH');
+        sh.getRange(sh.getLastRow() + 1, 1).setFormula(${JSON.stringify(EVIL)});
+        return r;
+      };
+      return eng;
+    };
+  })()`);
+  const ng = research(env, p);
+  env.run('__restoreEngine()');
+  assert.equal(ng.status, 'FAILED');
+  assert.match(ng.error, /AI 調査の答えに、表の数式として動いてしまう文がありました（1 か所）。安全のため保存せずに止め、前の結果を残しました。/);
+  assert.doesNotMatch(ng.error, /AI_RESEARCH|CONFIG/, '画面の文に表の名前を出さない');
+  assert.equal(JSON.stringify(structured(env, p)), before, '前の結果を残す');
+  assert.equal(actions(env, p).length, acts, '実行の記録も足さない');
 }
 
 console.log('app-ai-formula: all tests passed');

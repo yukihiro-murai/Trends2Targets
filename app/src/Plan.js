@@ -576,6 +576,8 @@ function appPlanRunCalc_(ctx, p) {
       return { __next: { kind: 'PLAN.RUN', payload: { planId: plan.plan_id, action: p.action, actionId: p.actionId, asOfMs: p.asOfMs,
         buildMs: p.buildMs, aiAttempt: attempt, aiCalls: fetcher.stats() } }, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
     }
+    // A-4: 数式が残った・一時的な失敗で話題が欠けたときは、保存せずに止める（前の結果を残す。Ai.js）
+    if (fetcher) appAiCheckBeforeSave_(scratch, fetcher);
     const payload = Object.assign({}, p, { engine: { version: call.version, sourceSha256: call.sourceSha256, webSha256: call.webSha256 },
       result: appPlanResultSummary_(call.value), runMs: new Date().getTime() - t0 }, fetcher ? { aiCalls: fetcher.stats() } : {});
     return { __next: { kind: 'PLAN.RUN_SAVE', payload: payload }, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
