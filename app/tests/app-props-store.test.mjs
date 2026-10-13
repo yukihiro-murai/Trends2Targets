@@ -161,6 +161,27 @@ function toOldLayout(env) {
   placed(env, 'ほかの実行が済ませた');
 }
 {
+  // 初期設定をしたのと別のアカウントで動いた（UserProperties が空で、写すものも無い）: 空の状態で進まず、何も書かずに止める
+  const env = setUpEnv();
+  env.call('apiSaveClient(__in)', { __in: { clientName: 'テスト製薬' } });
+  const userBefore = Object.assign({}, env.userProps);
+  const scriptBefore = Object.assign({}, env.scriptProps);
+  const sheets = Object.keys(env.sheetsById).length;
+  const audits = env.audit().length;
+  for (const k of Object.keys(env.userProps)) delete env.userProps[k];   // 別のアカウントの置き場（空）
+  env.run('APP_PROPS_MOVED_ = false');
+  assert.throws(() => env.call('apiSaveClient(__in)', { __in: { clientName: 'ほか製薬' } }), /この実行のアカウントには、アプリの状態.*がありません/);
+  assert.deepEqual(env.userProps, {}, '印も付けない（空の状態で始めない）');
+  assert.deepEqual(env.scriptProps, scriptBefore, 'Script Properties は変えない');
+  assert.equal(Object.keys(env.sheetsById).length, sheets, 'ログのファイルをもう 1 つ作らない');
+  // 元のアカウントに戻れば、そのまま続く（鎖も切れない）
+  Object.assign(env.userProps, userBefore);
+  env.run('APP_PROPS_MOVED_ = false');
+  env.call('apiSaveClient(__in)', { __in: { clientName: 'ほか製薬' } });
+  assert.ok(env.audit().length > audits);
+  assert.deepEqual([env.call('apiVerifyAudit()').ok, env.call('apiVerifyAudit()').matchesLatest], [true, true]);
+}
+{
   // 初期設定の前の新しい環境: 何も写さずに印だけ付ける。初期設定もそのまま動く
   const env = makeEnv();
   env.as(OWNER);

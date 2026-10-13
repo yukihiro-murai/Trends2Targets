@@ -86,6 +86,12 @@ function appPropsMove_() {
   const script = PropertiesService.getScriptProperties();
   const all = script.getProperties();
   const keys = Object.keys(all).filter(k => !appPropsInScript_(k)).sort();
+  // 初期設定が済んでいるのに、写すものも印も無い = 初期設定をしたのと別のアカウントで動いている（UserProperties は人ごと）。
+  // 空の状態のまま進むと、監査の鎖が切れ、同じ年度のログのファイルをもう 1 つ作るので、何も書かずに止める（README「所有者の操作」）
+  if (!keys.length && all[APP_PROP.dataId]) {
+    throw new Error('この実行のアカウントには、アプリの状態（監査の鎖の最新のハッシュ・ログのファイルの一覧など）がありません。' +
+      'アプリを動かしているアカウント（初期設定をしたアカウント）で実行してください。アカウントを替えるときは、先に開発者に相談してください。');
+  }
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const have = user.getProperties();
   const copy = {};
