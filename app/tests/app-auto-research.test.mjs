@@ -72,7 +72,7 @@ const stateBytes = (env) => Buffer.byteLength(env.props.APP_AUTO_RESEARCH || '',
 const status = (env) => J(env.run('appAutoResearchStatus_()'));
 const jobs = (env) => J(env.run('appJobList_()'));
 const ensure = (env) => J(env.run(`appEnsureAutoResearchTrigger_({ requestId: 'TEST', actor: '${OWNER}' })`));
-/** 毎日の手入れが offset 日の hh:mm に始まり durationMs で終わった控え（Housekeeping.js が残す APP_HOUSEKEEPING と同じ形） */
+/** 毎日の手入れが offset 日の hh:mm に始まり durationMs で終わった控え（前の版の形。今の形 state・finishedAt は app-ops-night.test.mjs で確かめる。どちらも読む） */
 const maintained = (env, offset, hh = 3, mm = 10, durationMs = 60000) => {
   env.props.APP_HOUSEKEEPING = JSON.stringify({ at: `${jstDay(offset)}T${p2(hh)}:${p2(mm)}:00+0900`, ok: true, problems: [], durationMs });
 };
@@ -168,13 +168,14 @@ const LEGACY_FAIL = 'AI調査エラー: Vertex調査エラー: Vertex AI への�
   const uid = env.triggers.find((t) => t.handler === 'triggerDailyBackup').uid;
   env.as('');
   const daily = env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`);
+  env.fireTriggers('triggerRunJob');   // 手入れは別の実行（数分後の裏の処理）
   env.as(OWNER);
   assert.equal(daily.autoResearch.created, true, '毎日の手入れでも作る');
   assert.equal(autoTriggers(env).length, 1);
-  // 毎日の手入れの控えは、自動の回が「手入れが終わったか」を見る形（始めた時刻とかかった時間）
+  // 毎日の手入れの控えは、自動の回が「手入れが終わったか」を見る形（終わった印と終わった時刻）
   const hk = JSON.parse(env.props.APP_HOUSEKEEPING);
-  const hkEnd = new Date(hk.at).getTime() + hk.durationMs;
-  assert.ok(isFinite(hkEnd) && typeof hk.durationMs === 'number', '手入れの控えに始めた時刻とかかった時間がある');
+  const hkEnd = new Date(hk.finishedAt).getTime();
+  assert.ok(hk.state === 'DONE' && isFinite(hkEnd), '手入れの控えに終わった印と終わった時刻がある');
   const pendingAt = (ms) => env.run(`appAutoResearchMaintenancePending_(new Date(${ms}))`);
   assert.equal(pendingAt(hkEnd + 60 * 1000), true, '手入れが終わってから 5 分は待つ');
   if (jstDay(0) === new Date(hkEnd + 6 * 60 * 1000 + 9 * 3600e3).toISOString().slice(0, 10)) assert.equal(pendingAt(hkEnd + 6 * 60 * 1000), false, '手入れが終わって 5 分たてば始められる');

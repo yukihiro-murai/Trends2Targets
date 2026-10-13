@@ -1817,8 +1817,12 @@ function homeSysItems(sys){
   var hk = sys.housekeeping, b = sys.backup, ba = sys.backupAuto || {}, ar = sys.autoResearch;
   if (hk && hk.ok === false) it.push(['毎日の手入れ', '毎日の手入れで、確認が ' + (hk.problems || []).length + ' 件あります',
     (hk.problems || []).slice(0, 3).map(function(x){ return '・' + plainMsg(x); }).join('\n') + '\n' + homeOwnerTip('{"action":"health"}', '中身が分かります')]);
-  // 手入れは毎日 3 時ごろ（バックアップの後）。1 回の実行の時間切れなどで終わらないと結果を控えられず、前の日の結果が残るので、古さでも気づけるようにする
-  var hkH = hk ? homeHours(hk.at) : null;
+  // 手入れは毎日 3 時ごろ（バックアップの数分後、別の実行）。始めたときに印を書くので、時間切れなどで止まると「始めたまま」が残る（サーバーが stalled を付ける）
+  if (hk && hk.stalled) it.push(['毎日の手入れ', '毎日の手入れが途中で止まりました（' + String(hk.startedAt || hk.at || '').replace('T', ' ').slice(0, 16) + ' に始めて、終わりの記録がありません）',
+    '1 回の実行の時間切れ（6 分）などで止まると、結果を控えられません。次の日の手入れがもう一度動き、止まったことも要確認として残します\n'
+    + homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"HOUSEKEEPING"}', '動いた時刻と理由が分かります')]);
+  // 終わらない日が続いても気づけるよう、最後に終わってからの時間も見る（lastDoneAt。前の版のサーバーは at）
+  var hkH = hk && !hk.stalled ? homeHours(hk.lastDoneAt || hk.finishedAt || hk.at) : null;
   if (hkH !== null && hkH > 26 && !(b && b.enabled === false)) it.push(['毎日の手入れ', '毎日の手入れが、最後に終わってから ' + hkH + ' 時間たっています',
     '毎日 3 時ごろに動きます。途中で止まっている（時間切れ・トリガーが無い）と、結果が新しくなりません。止まっている間は、市場の自動の調べも見送ります\n'
     + homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"HOUSEKEEPING"}', '最後に動いた時刻と理由が分かります')]);

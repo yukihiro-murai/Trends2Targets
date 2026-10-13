@@ -47,8 +47,9 @@ const copiedEmails = (env, file) => env.sheetsById[file.id].getSheetByName('MEMB
   const uid = env.triggers.find((t) => t.handler === 'triggerDailyBackup').uid;
   env.as('');
   env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`);
+  env.fireTriggers('triggerRunJob');   // 手入れ（月次の写し）は数分後の裏の処理
   env.as(OWNER);
-  assert.ok(seen.length >= 2 && seen.every((s) => s.lock), '毎日のトリガーも同じ（月次の写しも）');
+  assert.deepEqual(seen.map((s) => [s.lock, /Monthly/.test(s.name)]), [[true, false], [true, false], [true, true]], '毎日のトリガーも、手入れの月次の写しも同じ');
   assert.equal(env.state.lockHeld, false);
   env.ctx.SpreadsheetApp.flush = origFlush;
 }

@@ -360,7 +360,7 @@ function appHealth_() {
   }
   try { out.backup = appBackupStatus_(); } catch (e) { out.backup = { note: String(e && e.message || e) }; }
   try { out.triggers = ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction()); } catch (e) { out.triggers = []; }
-  out.housekeeping = appHousekeepingLast_();
+  out.housekeeping = appHousekeepingStatus_();   // 始めたまま止まったか（stalled）と最後に終わった時刻（lastDoneAt）つき
   try { out.journal = appJournalPending_(); } catch (e) { out.journal = null; }
   try { out.jobs = appJobList_().length; } catch (e) { out.jobs = null; }
   try { out.years = appYearStatus_(); } catch (e) { out.years = { error: String(e && e.message || e) }; }   // 年度の一覧（締めの管理。読めなければそのことを出す）

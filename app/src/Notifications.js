@@ -1,6 +1,6 @@
 /**
- * Notifications.js — 毎日の処理（バックアップと手入れ。triggerDailyBackup → appDailyMaintenance_）で
- * 異常があった日にだけ、管理者へメールを送る。正常な日は送らない。
+ * Notifications.js — 毎日の処理（バックアップ: triggerDailyBackup → appDailyMaintenance_、手入れ: その後の裏の処理 SYSTEM.HOUSEKEEPING →
+ * appHousekeepingJob_。Housekeeping.js）で異常があった日にだけ、管理者へメールを送る。正常な日は送らない。
  * 手で動かす入口（apiRunBackup・apiRunHousekeeping・apiVerifyAudit）は呼ばない（知らせは定期の処理だけ）。
  *
  * - 送る先は「所有者」と、ROLES 表でいま効いている全体の管理者だけ（呼び出し側から宛先を受け取らない）。

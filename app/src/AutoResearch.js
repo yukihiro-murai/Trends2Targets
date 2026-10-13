@@ -222,16 +222,13 @@ function appAutoResearchBusy_() {
 }
 
 /**
- * 今日の毎日の手入れ（triggerDailyBackup。3 時台）がまだ終わっていないか。毎日のバックアップのトリガーが無ければ待たない。
- * 終わりは、手入れが最後に残す控え（APP_HOUSEKEEPING の始めた時刻 at と、かかった時間 durationMs）で見る。終わってから 5 分は待つ
+ * 今日の毎日の手入れ（3 時台。毎日のバックアップの数分後の裏の処理）がまだ済んでいないか。毎日のバックアップのトリガーが無ければ待たない。
+ * 手入れの印（APP_HOUSEKEEPING。始めたら RUNNING、終わったら DONE と終わった時刻）で見る（Housekeeping.js の appHousekeepingSettled_）:
+ * 今日の手入れが終わってから 5 分は待つ。始めたまま止まった（始めて 10 分を過ぎた）手入れは、もう動いていないので待たない
  */
 function appAutoResearchMaintenancePending_(now) {
   if (!appBackupEnabled_()) return false;
-  const last = appHousekeepingLast_();
-  const at = last && last.at ? new Date(last.at).getTime() : NaN;
-  if (!isFinite(at)) return true;
-  if (Utilities.formatDate(new Date(at), APP_TZ, 'yyyy-MM-dd') !== Utilities.formatDate(now, APP_TZ, 'yyyy-MM-dd')) return true;
-  return now.getTime() < at + (Number(last.durationMs) || 0) + APP_AUTO_RESEARCH_MAINTENANCE_GRACE_MS;
+  return !appHousekeepingSettled_(appHousekeepingLast_(), now, APP_AUTO_RESEARCH_MAINTENANCE_GRACE_MS);
 }
 
 // ---- 始める ----

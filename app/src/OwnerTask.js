@@ -410,6 +410,7 @@ function appOwnerHealthBrief_(h) {
   if (h.audit && h.audit.matchesLatest === false) warnings.push('監査の最後の行が消えた疑いがあります');
   if (!b.enabled) warnings.push(b.note ? 'バックアップの状態を読めません' : '毎日のバックアップが有効ではありません');
   else if (b.ageHours > APP_OWNER_BACKUP_STALE_HOURS) warnings.push('バックアップが ' + b.ageHours + ' 時間止まっています');
+  if (hk && hk.stalled) warnings.push('毎日の手入れが途中で止まりました（' + String(hk.startedAt || hk.at || '') + ' に始めて、終わりの記録がありません）');
   if (hk && hk.ok === false) warnings.push('毎日の手入れに要確認があります');
   if (h.journal) warnings.push('書きかけの保存があります');
   if (h.years && h.years.error) warnings.push('年度の一覧を読めません');
@@ -428,7 +429,8 @@ function appOwnerHealthBrief_(h) {
     backup: h.backup,
     triggers: triggers,
     // errors は 24 時間のエラーの数、openStarts は終わりの記録が無い開始の数（手入れのときの数）
-    housekeeping: hk ? { at: hk.at, ok: hk.ok, problems: hk.problems, errors: hk.errors, openStarts: hk.openStarts } : null,
+    // state は RUNNING（動いている・stalled なら途中で止まった）か DONE。lastDoneAt は最後に終わった時刻
+    housekeeping: hk ? { at: hk.at, state: hk.state, stalled: !!hk.stalled, lastDoneAt: hk.lastDoneAt, ok: hk.ok, problems: hk.problems, errors: hk.errors, openStarts: hk.openStarts } : null,
     journal: h.journal ? { id: h.journal.id, label: h.journal.label, planId: h.journal.planId, at: h.journal.at } : null,
     jobs: h.jobs,
     years: h.years,
