@@ -142,6 +142,8 @@ const redactedView = (full) => {
     p.current = ''; p.proposed = '';   // 信頼度の今と案の値も出さない（情報源が 1 人だけの種類で、その人の値がわかるため。2026-10-07）
   });
   x.boot.eval.insights.forEach((r) => { r.owner = ''; });
+  (x.boot.runLog || []).forEach((r) => { r.by = ''; });   // 操作した人（2026-10-13）
+  (x.boot.steps || []).forEach((s) => { s.by = ''; });
   const o = x.boot.output;
   o.policyLines = o.policyLines.map((t) => t.split(REL_FULL).join(REL_VIEWER));
   o.engineNote = o.engineNote.split(REL_FULL).join(REL_VIEWER);
@@ -150,6 +152,7 @@ const redactedView = (full) => {
 const redactedBasis = (full) => {
   const x = J(full);
   x.monthly.forEach((m) => m.sources.forEach((s) => { s.keys = []; }));
+  (x.between || []).forEach((b) => { b.actor = ''; });   // 操作した人（2026-10-13）
   return x;
 };
 
@@ -343,6 +346,79 @@ const redactedBasis = (full) => {
   assert.ok(full.review.includes('鷹野') && /当たった割合 67%/.test(full.review));
   assert.ok(full.basis.includes('（信頼度 0.80）') && full.basis.includes('鷹野'));
   assert.deepEqual(chips(full.basis), chips(sum.basis), '札そのものは同じ（内訳はカーソルの説明だけ）');
+}
+
+// ==== 6. 操作した人のメール: その計画で予算策定担当以上でない人（閲覧の人・ほかのメーカーだけの担当）には返さない。画面は「-」で止まらない（2026-10-13） ====
+{
+  const t = build();
+  const env = t.env;
+  const run0 = env.call(`appReadTable_('FORECAST_RUNS').filter(r => r.plan_id === '${t.planId}').map(appStripRow_)[0]`);
+  // 前回の予測と今回の予測の間に、予算策定担当の操作を 1 つ。今回の予測は承認者が動かした（根拠の「前回からの間の操作」と最新の予測の人）
+  const T1 = '2099-01-01T00:00:00+0900', T2 = '2099-01-02T00:00:00+0900', T3 = '2099-01-02T00:01:00+0900';
+  env.run(`appInsertRows_('PLAN_ACTIONS', __a); appInsertRows_('FORECAST_RUNS', __r); appBumpGen_();`, {
+    __a: [{ action_id: 'ACT-T6', plan_id: t.planId, action: 'INPUT.SAVE', status: 'DONE', changed_sheets_json: '["PRODUCT"]', result_json: '{}', started_at: T1, finished_at: T1, actor_email: PLANNER_ALL }],
+    __r: [Object.assign({}, run0, { run_id: 'FR-T6', started_at: T2, finished_at: T3, actor_email: APPROVER })] });
+  // 公式版: 予算策定担当が出し、承認者が承認した
+  env.as(PLANNER_ALL);
+  const sub = env.call('apiVersionSubmit(__in)', { __in: { planId: t.planId, inputHash: env.call('apiVersionList(__in)', { __in: { planId: t.planId } }).inputHash } });
+  env.as(APPROVER);
+  env.call('apiVersionDecide(__in)', { __in: { versionId: sub.version.versionId, decision: 'APPROVED', rowVersion: sub.version.rowVersion } });
+  env.as(OWNER);
+  const read = (email) => {
+    env.as(email);
+    try {
+      return { view: env.call('apiPlanView(__in)', { __in: { planId: t.planId } }), basis: env.call('apiForecastBasis(__in)', { __in: { planId: t.planId } }),
+        latest: env.call('apiForecastLatest(__in)', { __in: { planId: t.planId } }), ver: env.call('apiVersionList(__in)', { __in: { planId: t.planId } }) };
+    } finally { env.as(OWNER); }
+  };
+  const emails = (x) => [...new Set((JSON.stringify(x).match(/[A-Za-z0-9._-]+@bigm2y\.com/g) || []))].sort();
+  const full = read('planner.here@bigm2y.com');
+  // 前提: 予算策定担当以上には、操作した人が出る
+  assert.ok(full.view.recent.some((r) => r.actor === PLANNER_ALL), '最近の操作の人');
+  assert.ok(full.view.boot.steps.some((s) => s.by), '手順の進みの人');
+  assert.ok(full.basis.between.some((b) => b.actor === PLANNER_ALL), '前回からの間の操作の人');
+  assert.deepEqual([full.latest.latest.actor_email, full.latest.runs[0].actor], [APPROVER, APPROVER]);
+  const v1 = full.ver.versions.find((v) => v.versionId === sub.version.versionId);
+  assert.deepEqual([v1.submittedBy, v1.decidedBy], [PLANNER_ALL, APPROVER]);
+  for (const who of [MEMBER, PLANNER_ELSEWHERE]) {
+    const x = read(who);
+    assert.ok(x.view.recent.length && x.view.recent.every((r) => r.actor === ''), who + ': 最近の操作の人は空');
+    assert.ok(x.view.boot.steps.every((s) => s.by === '') && (x.view.boot.runLog || []).every((r) => r.by === ''), who + ': 旧来の手順の進みと実行の記録の人は空');
+    assert.ok(x.basis.between.length && x.basis.between.every((b) => b.actor === ''), who + ': 前回からの間の操作の人は空');
+    assert.equal(x.latest.latest.actor_email, '', who + ': 最新の予測の人（行まるごとの actor_email）は空');
+    assert.ok(x.latest.runs.every((r) => r.actor === ''), who + ': 予測の回の人は空');
+    assert.ok(x.ver.versions.every((v) => v.submittedBy === '' && v.decidedBy === ''), who + ': 公式版を出した人・判断した人は空');
+    assert.deepEqual([x.ver.official.submittedBy, x.ver.official.decidedBy], ['', '']);
+    // 自分のメール（公式版の一覧の me）のほかに、人のメールを返さない
+    const rest = Object.assign({}, x.ver); delete rest.me;
+    assert.deepEqual(emails([x.view, x.basis, x.latest, rest]), [], who + ': 人のメールを返さない');
+    // 数字などはそのまま
+    assert.deepEqual([x.latest.latest.run_id, x.latest.runs.length, x.ver.versions.length], [full.latest.latest.run_id, full.latest.runs.length, full.ver.versions.length]);
+  }
+  // 控え（最新の予測は計画ごと・見る人によらず同じ）は全部の中身のまま: 閲覧の人が先に読んでも、予算策定担当には人が出る
+  assert.equal(read(PLANNER_ALL).latest.latest.actor_email, APPROVER);
+  // 画面: 空にした人は「-」。止まらない・undefined を出さない
+  const viewer = read(MEMBER);
+  const js = uiHtml.slice(uiHtml.indexOf('<script>') + 8, uiHtml.lastIndexOf('</script>'))
+    .replace('<?!= charsJs ?>', 'var YOMI_POSE = new Proxy({}, { get: () => "" }); var CHAR_SVG = new Proxy({}, { get: () => "" });')
+    .replace('<?!= bootJson ?>', JSON.stringify({ app: { name: 'T', version: 'x' }, user: { email: MEMBER, isOwner: false, isAdmin: false, roles: [{ role: 'VIEWER' }, { role: 'CONTRIBUTOR' }] }, setUp: true, allowed: true }));
+  const el = () => ({ innerHTML: '', classList: { add() {}, remove() {} }, set outerHTML(v) {} });
+  const ui = vm.createContext({ document: { getElementById: el, querySelector: () => null, addEventListener() {} }, setTimeout: () => 0, clearTimeout() {}, confirm: () => false, window: { addEventListener() {}, innerWidth: 1280, innerHeight: 800 },
+    google: { script: { run: new Proxy({}, { get: (tg, k) => (k === 'withSuccessHandler' || k === 'withFailureHandler' ? () => ui.google.script.run : () => {}) }) } } });
+  vm.runInContext(js, ui);
+  Object.assign(ui, { __v: viewer.view, __d: viewer.latest, __b: viewer.basis, __r: viewer.ver });
+  vm.runInContext(`S.view = 'forecast'; S.fc.plans = [{ planId: __v.plan.planId, clientName: 'x', fy: '2026' }]; S.fc.planId = __v.plan.planId; S.fc.view = __v; S.fc.data = __d; S.fc.basis = __b; S.fc.ver = __r;`, ui);
+  const tabs = {};
+  for (const tab of ['forecast', 'basis', 'version', 'steps']) tabs[tab] = vm.runInContext(`S.fc.tab = '${tab}'; viewForecast()`, ui);
+  for (const [tab, html] of Object.entries(tabs)) {
+    assert.ok(!/このタブを表示できませんでした/.test(html), tab + ' タブを描ける');
+    assert.ok(!/undefined|NaN/.test(html), tab + ' タブに undefined や NaN を出さない');
+    assert.deepEqual(emails(html), [], tab + ' タブに人のメールを出さない');
+  }
+  assert.match(tabs.steps, /この計画の最近の操作[\s\S]*<td>-<\/td>/, '最近の操作の「した人」は「-」');
+  assert.match(tabs.version, /<td>-<\/td><td>-<\/td>/, '公式版の出した人・判断した人は「-」');
+  assert.doesNotMatch(tabs.forecast, /最新 [^<]*・-/, '最新の予測の時刻の後ろに「・-」を付けない');
+  assert.equal(vm.runInContext(`[fcWho(''), fcWho(null), fcWho('a.b@bigm2y.com')].join()`, ui), '-,-,a.b');
 }
 
 console.log('app-plan-privacy: all tests passed');

@@ -55,13 +55,14 @@ function appNum_(v) { const n = typeof v === 'number' ? v : Number(v); return v 
 /**
  * 見る人に合わせた根拠。月ごとの押したものの、人や話題ごとの内訳（keys: 名前・押し・信頼度）は、その計画のメーカーで予算策定担当以上の人だけに出す
  * （appInsightDetailFor_。メーカーに限った担当は、そのメーカーの計画だけ。2026-10-13）。ほかの人（閲覧・情報提供）には、情報源の種類ごとの押し（種類・名前・押し・数）だけ。
- * 見解の一文（opinion）は入力の見解をまとめたもの（入力の画面に出すもの）なので、これまでどおり出す。
+ * 見解の一文（opinion）は入力の見解をまとめたもの（入力の画面に出すもの）なので、これまでどおり出す。前回からの間の操作（between）の操作した人は空にする。
  * 控えは見る人によらず同じものを使うので、写しを直す（控えそのものは変えない）
  */
 function appBasisFor_(ctx, basis, plan) {
   if (appInsightDetailFor_(ctx, plan && plan.client_id) === 'full' || !basis) return basis;
   const out = appSerialize_(basis);
   (out.monthly || []).forEach(m => (m.sources || []).forEach(s => { s.keys = []; }));
+  (out.between || []).forEach(x => { x.actor = ''; });   // 前回からの間の操作の、操作した人のメールも出さない（2026-10-13。画面は「-」）
   return out;
 }
 

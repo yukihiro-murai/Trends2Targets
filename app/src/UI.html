@@ -2223,7 +2223,8 @@ function fcDate(s, time){
 }
 /** 月の短い名前（2026/04 → 4月。グラフの横の名前） */
 function fcMon(ym){ var m = /(\d{4})[\/-](\d{1,2})/.exec(String(ym || '')); return m ? Number(m[2]) + '月' : String(ym || ''); }
-function fcWho(email){ return String(email || '').split('@')[0]; }
+/** 操作した人（メールの @ の前）。閲覧の人にはサーバーが空で渡すので「-」 */
+function fcWho(email){ return String(email || '').split('@')[0] || '-'; }
 /** 月/日（10/01。年は無い）を、今日より前の一番近い日の yyyy/MM/dd に */
 function fcMd(md){
   var m = /^(\d{1,2})\/(\d{1,2})$/.exec(String(md || '')), now = new Date();
@@ -2275,7 +2276,7 @@ function fcForecastTab(d, v){
   // 本番の計画では、過去の売上だけの予測とこれまでの実行の中心は旧来の計算の年度合計（記録の値）なので、そう言う
   var runInfo = '過去の売上だけの予測（' + (lv ? '旧来の計算の年度合計' : '年度合計') + '）: ' + qName('p10') + ' ' + yen(obj.p10) + '・' + qName('p50') + ' ' + yen(obj.p50) + '・' + qName('p90') + ' ' + yenU(obj.p90)
     + (d.runs && d.runs.length > 1 ? '\nこれまでの実行' + (lv ? '（旧来の計算の中心）' : '') + ': ' + d.runs.map(function(r){ return fcDate(r.finishedAt, true).slice(5) + ' ' + qName('p50') + ' ' + yenShort(r.p50); }).join('、') : '');
-  var meta = '<span class="meta" data-tip="' + esc(runInfo + (canPlan ? '' : '\n予測の実行は予算策定担当ができます')) + '">' + (l ? '最新 ' + esc(fcDate(l.finished_at, true)) + '・' + esc(fcWho(l.actor_email)) : '予測の記録なし') + '</span>';
+  var meta = '<span class="meta" data-tip="' + esc(runInfo + (canPlan ? '' : '\n予測の実行は予算策定担当ができます')) + '">' + (l ? '最新 ' + esc(fcDate(l.finished_at, true)) + (l.actor_email ? '・' + esc(fcWho(l.actor_email)) : '') : '予測の記録なし') + '</span>';
   // 予測の実行は予算策定担当だけ（見るだけの人には、中身の無いカードを出さない。最新の日時は下の表の見出しの右に）
   var runCard = canPlan ? '<div class="card fc-run"><div class="card-head"><h2>予測の実行</h2>' + meta + '</div><div class="btngrid">'
     + actBtn('<button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="fcForecastRun()">予測を実行</button>', 'データ本体の内容で予測を計算し、結果を残します（4〜6 分ほど。続けて実行するときは速くなります）') + '</div></div>' : '';

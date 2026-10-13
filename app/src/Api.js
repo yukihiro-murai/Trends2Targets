@@ -129,8 +129,8 @@ function apiHome() {
  * 今日の日付でも変わるので、予測の控えとは別に足す。読めなければ null）
  */
 function apiForecastLatest(input) {
-  return api_('FORECAST.LATEST', { minRole: 'VIEWER', audit: false }, () => Object.assign(
-    appCachedRead_('LATEST\u0001' + (input && input.planId), () => appForecastLatest_(input && input.planId)), { shadow: appPlanShadow_(input && input.planId) }));
+  return api_('FORECAST.LATEST', { minRole: 'VIEWER', audit: false }, ctx => appForecastLatestFor_(ctx, Object.assign(
+    appCachedRead_('LATEST\u0001' + (input && input.planId), () => appForecastLatest_(input && input.planId)), { shadow: appPlanShadow_(input && input.planId) })));
 }
 
 /**

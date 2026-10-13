@@ -115,11 +115,13 @@ function appVersionReachCols_(plan, nums, run) {
 /**
  * 画面: 計画の版の一覧と、今の数字（出す前に見比べる）。測る専用の計画（measure）は出せない（can.submit が false）。
  * current = 今の数字（appPlanNumbers_。annual は旧来の計算の年度合計のまま）+ shown（見せる年度の中心 { p50, basis, live }: appVersionShownNow_）。
- * versions[].shownCenter = 版の中心（年度）として見せる値（appVersionShownCenter_）
+ * versions[].shownCenter = 版の中心（年度）として見せる値（appVersionShownCenter_）。versions[].submittedBy・decidedBy は、閲覧の人には空
  */
 function appVersionList_(ctx, input) {
   const plan = appPlanOf_(input && input.planId);
-  const versions = appVersionRows_(plan.plan_id).map(appVersionOut_);
+  // 出した人・判断した人のメールは、その計画のメーカーで予算策定担当以上の人だけ（閲覧の人には空。画面は「-」。2026-10-13）。控えは見る人ごと
+  const seesActors = appHasRole_(ctx.roles, 'PLANNER', plan.client_id);
+  const versions = appVersionRows_(plan.plan_id).map(appVersionOut_).map(v => (seesActors ? v : Object.assign(v, { submittedBy: '', decidedBy: '' })));
   const official = versions.filter(v => v.state === 'APPROVED')[0] || null;
   const pending = versions.filter(v => v.state === 'SUBMITTED')[0] || null;
   const inputHash = appPlanInputHash_(plan.plan_id);

@@ -238,6 +238,8 @@ function appPlanView_(ctx, planId) {
     if (view.builtMs > 20000) appRunLog_({ requestId: ctx.requestId, kind: 'PLAN.VIEW', status: 'SLOW', durationMs: view.builtMs, detail: { planId: plan.plan_id } });
   }
   const shown = appPlanViewFor_(ctx, view, plan);
+  // 操作した人のメールは、その計画のメーカーで予算策定担当以上の人だけ（閲覧の人には空。画面は「-」。2026-10-13）
+  const seesActors = appInsightDetailFor_(ctx, plan.client_id) === 'full';
   return Object.assign({
     plan: { planId: plan.plan_id, clientName: clients[plan.client_id] || plan.client_label, fy: plan.fy, frozen: frozen, measure: appPlanIsMeasure_(plan) },
     inputHash: inputHash,
@@ -252,7 +254,7 @@ function appPlanView_(ctx, planId) {
       minRole: APP_PLAN_ACTIONS[k].minRole, paused: APP_PLAN_ACTIONS[k].paused || appMeasureActionRefusal_(plan, k) })),
     recent: appReadTable_('PLAN_ACTIONS').filter(r => r.plan_id === plan.plan_id).map(appStripRow_)
       .sort((a, b) => (a.finished_at < b.finished_at ? 1 : -1)).slice(0, 10)
-      .map(r => ({ action: r.action, label: (APP_PLAN_ACTIONS[r.action] || {}).label || r.action, finishedAt: r.finished_at, actor: r.actor_email,
+      .map(r => ({ action: r.action, label: (APP_PLAN_ACTIONS[r.action] || {}).label || r.action, finishedAt: r.finished_at, actor: seesActors ? r.actor_email : '',
         changed: appParseJsonList_(r.changed_sheets_json) }))
   }, shown, { boot: appPlanViewBudgetDraft_(shown && shown.boot, plan) },
   { inputLog: appInputLogView_(ctx, plan) });   // 入力の記録は見る人ごと（InputLog.js。覚えておく中身には入れない）
@@ -396,6 +398,7 @@ function appPlanOwnerNote_(c) {
  *   - 検証の記入（boot.eval.insights）: 担当は空
  *   - 予測の注記（OUTPUT!A6 の写し: boot.output.policyLines・engineNote）: 信頼度の行（旧来の buildReliabilityText_）のうち、
  *     効かせている人や話題ごとの一覧（「 / 適用中=opinion:<名前>=1.10, …」）だけ除く。ON/OFF・数・SPOT上限基準とほかの行はそのまま
+ *   - 操作した人（旧来の実行の記録 boot.runLog[].by・手順の進み boot.steps[].by）: 空（2026-10-13。旧来の計算は変えず、ここで空にする）
  * 入力の行・担当者の一覧は、これまでどおり出す（入力の画面に出すもの）。
  * 覚えておいた中身は見る人によらず同じものを使うので、写しを直す（覚えておいたものは変えない）
  */
@@ -411,6 +414,8 @@ function appPlanViewFor_(ctx, view, plan) {
     p.target = appInsightTarget_(p.target, true).target;
   });
   ((out.boot.eval && out.boot.eval.insights) || []).forEach(r => { r.owner = ''; });
+  (out.boot.runLog || []).forEach(r => { r.by = ''; });
+  (out.boot.steps || []).forEach(s => { s.by = ''; });
   // 一覧の終わりは「 / SPOT上限基準=」。見つからなければ、その行の終わりまで除く（出さない側）
   const o = out.boot.output;
   const strip = t => String(t || '').replace(/ \/ 適用中=.*?(?= \/ SPOT上限基準=|\n|$)/g, '');

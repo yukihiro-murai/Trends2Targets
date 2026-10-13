@@ -227,6 +227,19 @@ function appStoredHeadline_(planId) {
     objective: { p10: num(cell(65, 2)), p50: num(cell(65, 3)), p90: num(cell(65, 4)) }, monthly: monthly };
 }
 
+/**
+ * 見る人に合わせた最新の予測（apiForecastLatest。控えは見る人によらず同じものを使うので、写しを直す。控えそのものは変えない）。
+ * 操作した人のメール（latest.actor_email・runs[].actor）は、その計画のメーカーで予算策定担当以上の人だけに出す（閲覧の人には空。画面は「-」。2026-10-13）
+ */
+function appForecastLatestFor_(ctx, out) {
+  if (!out || !out.plan) return out;
+  if (appInsightDetailFor_(ctx, appPlanOf_(out.plan.planId).client_id) === 'full') return out;
+  const o = appSerialize_(out);
+  if (o.latest) o.latest.actor_email = '';
+  (o.runs || []).forEach(r => { r.actor = ''; });
+  return o;
+}
+
 /** 画面: 計画の最新の予測（新アプリで動かした記録）と、データ本体の OUTPUT の結果 */
 function appForecastLatest_(planId) {
   const plan = appPlanOf_(planId);
