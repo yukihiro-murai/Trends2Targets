@@ -111,6 +111,7 @@ const jobProps = (env) => Object.keys(env.props).filter((k) => /^APP_JOB_(?!RESU
 }
 
 const env = setUpEnv();
+env.boot();   // 初期設定の後の最初の操作で動く一度だけの写し（写しごとに監査に SCHEMA.BACKFILL が残る）を、先に済ませておく
 const currentFy = env.run('appFy_(new Date())');
 const past = currentFy - 1;
 

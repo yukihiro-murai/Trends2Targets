@@ -189,7 +189,8 @@ function appMigrateSchemaRow_(ctx, name) {
  * 版を上げて表を足したとき、最初の操作（画面を開く・裏の処理を含む）で足りない表を作る。「初期設定」をもう一度実行しなくてよい。
  * 2026-10-02 に版 3 の表（FORECAST_RUNS）が無くて「予測」の画面が開けなかったため。
  * 作った表は実行ログに残す。失敗しても操作は止めずエラーのログに残す（その表を使う操作がそこで止まる。列を足す前の表は読むだけで使える）。
- * 版がそろっていれば、版ごとの一度だけの写しを動かす（appRunBackfills_。済んだものは飛ばす）
+ * 版がそろっていれば、版ごとの一度だけの写しを動かす（appRunBackfills_。済んだものは飛ばす。写しごとに監査の記録つき）。
+ * どちらも役割の判定より前（社内の人の最初の操作。閲覧の人の操作でも）に動くので、データを書く写しは誰の操作で動いたかを監査に残す
  */
 function appAutoEnsureTables_(ctx) {
   try {
@@ -228,8 +229,11 @@ function appBackfillFn_(name) {
 
 /**
  * 一度だけの写しを、名前の順に動かす（表の版がそろった後の操作の初め。appAutoEnsureTables_ から）。済んだものは飛ばす。
- * 写しの返り値: { skipped: true } = 中身のない仮のもの（記録せず、次の操作でまた呼ぶ）・{ more: true } = 続きがある（次の操作でまた呼ぶ）・
+ * 写しの返り値: { skipped: true } = 中身のない仮のもの（済みの控えに記録せず、次の操作でまた呼ぶ。監査には動かしたことが残る）・{ more: true } = 続きがある（次の操作でまた呼ぶ）・
  * それ以外 = 済み（{ rows } を控える）。投げたらエラーのログに残し、操作は止めず、10 分たってからやり直す。
+ * 写しごとに監査の記録つきで動かす（appAudited_。操作の名前 SCHEMA.BACKFILL・対象は写しの名前・した人は動かした操作の人。2026-10-13）。
+ * 開始を記録できなければ写さない（失敗の控えも残さず、次の操作でまたやり直す）。写しは何度動いても同じ結果になる（キーは中身から決める）ので、
+ * 記録が書けずに止まっても、書きかけにはならない。
  * ここではロックを取らずに写しを動かす（写しが自分で appWithLock_ の中で書く。2 つの操作が同時に呼んでも二重にならないよう、キーは中身から決める）。
  * 済み・失敗の控えは、最後にロックの中で読み直してから、この回の分だけを足して書く（ほかの操作が先に書いた「済み」を消さない。済んだ写しの失敗は書かない）
  */
@@ -241,16 +245,22 @@ function appRunBackfills_(ctx) {
   const done = {}, failed = {}, ran = {};
   todo.forEach(name => {
     const t0 = new Date().getTime();
+    const fn = appBackfillFn_(name);
+    let started = false;   // 監査の開始を書けて、写しを動かし始めたか
     try {
-      const fn = appBackfillFn_(name);
       if (!fn) throw new Error('一度だけの写しの関数がありません: ' + name);
-      const res = fn(ctx) || {};
+      const res = appAudited_(ctx, 'SCHEMA.BACKFILL', { entityType: 'SCHEMA', entityId: name, detail: { name: name, version: APP_SCHEMA_VERSION },
+        after: r => ({ rows: Number(r && r.rows) || 0, more: !!(r && r.more), skipped: !!(r && r.skipped) }) }, () => { started = true; return fn(ctx) || {}; }) || {};
       if (res.skipped) return;
       appRunLog_({ requestId: ctx.requestId, kind: 'SCHEMA.BACKFILL', status: res.more ? 'MORE' : 'OK', durationMs: new Date().getTime() - t0,
         detail: { name: name, result: res } });
       ran[name] = true;
       if (!res.more) done[name] = { at: appNowIso_(), v: APP_SCHEMA_VERSION, rows: Number(res.rows) || 0 };
     } catch (e) {
+      if (fn && !started) {   // 開始を記録できなかった（写していない）: 失敗の控えは残さず、次の操作でまたやり直す
+        appLogError_('SCHEMA.BACKFILL', e, ctx);
+        return;
+      }
       const prev = st.failed[name];
       failed[name] = { at: now, error: String(e && e.message ? e.message : e).slice(0, 200), tries: (prev ? Number(prev.tries) || 0 : 0) + 1 };
       appLogError_('SCHEMA.BACKFILL', e, ctx);

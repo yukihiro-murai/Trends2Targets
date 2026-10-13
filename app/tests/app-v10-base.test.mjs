@@ -69,15 +69,15 @@ function planBook(client, fy) {
   for (const n of env.call('APP_V10_BACKFILLS')) env.run(n + ' = function(ctx) { return { skipped: true }; };');
   env.run('appBackfillNames_ = function () { return APP_V10_BACKFILLS.slice(); };');   // ここでは版 10 の写しの決まりだけを見る（版 11 の写しは app-v11-drafts-migrate.test.mjs）
   for (const n of env.call('APP_V10_BACKFILLS')) assert.deepEqual(env.call(n + '({})'), { skipped: true }, n + ' は仮のもの');
+  const a0 = env.audit().length;
   env.call('apiListPlans()');
   assert.equal(env.props.APP_BACKFILLS, undefined, '仮のものは記録しない');
-  // 何もすることが無い操作ではロックを取らず、表も読まない
-  env.call('apiListPlans()');
-  const locks = env.state.locks;
-  for (const k of Object.keys(STATS)) STATS[k] = k === 'bySheet' ? {} : 0;
-  env.call('apiListPlans()');
-  assert.equal(env.state.locks, locks, 'ロックを取らない');
-  assert.equal(STATS.reads, 0, '表を読まない（一覧は控えから）');
+  // 写しごとに監査の記録つき（2026-10-13。役割の判定より前に、閲覧の人の操作でも動くため）: 操作の名前 SCHEMA.BACKFILL・対象は写しの名前・
+  // した人は動かした操作の人。仮のもの（skipped）も、動かしたことは残る
+  const names = env.call('APP_V10_BACKFILLS');
+  assert.deepEqual(env.audit().slice(a0).map((a) => [a.action, a.phase, a.result, a.entity_type, a.entity_id, a.actor_email]),
+    names.flatMap((n) => [['SCHEMA.BACKFILL', 'START', '', 'SCHEMA', n, OWNER], ['SCHEMA.BACKFILL', 'END', 'OK', 'SCHEMA', n, OWNER]]));
+  assert.deepEqual(JSON.parse(env.audit().slice(-1)[0].after_json), { rows: 0, more: false, skipped: true });
   // 済む写し・続きがある写し・投げる写し
   env.run(`__calls = { a: 0, b: 0, c: 0 };
     appV10BackfillInputLog_ = function(ctx) { __calls.a++; return { rows: 4 }; };
@@ -103,6 +103,34 @@ function planBook(client, fy) {
   st = JSON.parse(env.props.APP_BACKFILLS);
   assert.equal(Object.keys(st.done).length, 3);
   assert.deepEqual(st.failed, {}, 'やり直して済んだら失敗の控えを消す');
+  const ends = env.audit().filter((a) => a.action === 'SCHEMA.BACKFILL' && a.phase === 'END');
+  assert.deepEqual(ends.filter((a) => a.entity_id === 'appV10BackfillInputLog_' && a.result === 'OK').map((a) => JSON.parse(a.after_json).rows).slice(-1), [4], '写した行の数を終わりに残す');
+  assert.ok(ends.some((a) => a.entity_id === 'appV10BackfillHitRecords_' && a.result === 'FAILED' && /まだ読めない/.test(a.error)), '失敗も記録に残す');
+  // 全部済めば、何もすることが無い操作ではロックを取らず、表も読まず、記録も増やさない
+  env.call('apiListPlans()');
+  const locks = env.state.locks;
+  const a1 = env.audit().length;
+  for (const k of Object.keys(STATS)) STATS[k] = k === 'bySheet' ? {} : 0;
+  env.call('apiListPlans()');
+  assert.equal(env.state.locks, locks, 'ロックを取らない');
+  assert.equal(STATS.reads, 0, '表を読まない（一覧は控えから）');
+  assert.equal(env.audit().length, a1, '記録を増やさない');
+  // 監査の開始を書けなければ写さない。失敗の控えも残さず、10 分を待たずに次の操作でやり直す（写しは何度動いても同じ結果）
+  env.props.APP_BACKFILLS = JSON.stringify({ done: {}, failed: {} });
+  env.run(`__calls = { a: 0, b: 0, c: 0 };
+    appV10BackfillInputLog_ = function(ctx) { __calls.a++; return { rows: 0 }; };
+    appV10BackfillAiResearchLog_ = function(ctx) { __calls.b++; return { rows: 0 }; };
+    appV10BackfillHitRecords_ = function(ctx) { __calls.c++; return { rows: 0 }; };`);
+  env.auditSheet().failWrites = true;
+  env.call('apiListPlans()');   // 読むだけの操作は止めない
+  assert.deepEqual(env.call('__calls'), { a: 0, b: 0, c: 0 }, '開始を記録できなければ写さない');
+  assert.deepEqual(JSON.parse(env.props.APP_BACKFILLS), { done: {}, failed: {} }, '失敗の控えも残さない');
+  assert.ok(env.errors().some((e) => e.where === 'SCHEMA.BACKFILL' && /write failed/.test(e.message)), 'エラーのログに残す');
+  env.auditSheet().failWrites = false;
+  env.call('apiListPlans()');
+  assert.deepEqual(env.call('__calls'), { a: 1, b: 1, c: 1 }, '次の操作で写す');
+  st = JSON.parse(env.props.APP_BACKFILLS);
+  assert.deepEqual([Object.keys(st.done).length, st.failed], [3, {}]);
   const h = env.task('health()');
   assert.deepEqual([h.backfills.pending, h.backfills.done.length, h.backfills.failed], [[], 3, []]);
   // 表の版がそろっていなければ動かさない（移行の後に動かす）

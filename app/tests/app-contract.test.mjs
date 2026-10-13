@@ -180,7 +180,14 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.equal(Object.keys(env.files).length, fileCount);
   assert.equal(env.table('_SCHEMA').length, Object.keys(tables).length);
   assert.equal(env.table('MEMBERS').length, 1);
-  assert.equal(env.audit().length, 2, '実行のたびに記録は残す');
+  assert.equal(env.audit().filter((a) => a.action === 'SETUP.INIT').length, 2, '実行のたびに記録は残す');
+  // 初期設定の後の最初の操作で、版ごとの一度だけの写しが動く（役割の判定より前）。写しごとに監査の記録つき（2026-10-13）。2 回目からは動かない
+  const names = env.call('appBackfillNames_()');
+  assert.ok(names.length >= 4);
+  assert.deepEqual(env.audit().filter((a) => a.action === 'SCHEMA.BACKFILL').map((a) => [a.phase, a.result, a.entity_id, a.actor_email]),
+    names.flatMap((n) => [['START', '', n, OWNER], ['END', 'OK', n, OWNER]]), '写しごとに開始と終わり');
+  assert.equal(env.audit().length, 2 + names.length * 2);
+  assert.deepEqual(Object.keys(JSON.parse(env.props.APP_BACKFILLS).done).sort(), [...names].sort());
   // 表が 1 つ消えていたら作り直す（ほかの表はそのまま）
   env.data().deleteSheet(env.data().getSheetByName('CLIENTS'));
   assert.deepEqual(env.call('apiSetup()').tables, ['CLIENTS']);
@@ -460,6 +467,7 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
 // ==== 10b. 以前（終わりの年で呼んでいた）のログのファイル名を一度だけ直す ====
 {
   const env = setUpEnv();
+  env.boot();   // 最初の操作の一度だけの写し（監査に残る）を先に済ませる
   assert.equal(env.props.APP_FY_NAMING, 'start', '新しい環境は最初から始まりの年で呼ぶ');
   const logId = JSON.parse(env.props.APP_LOG_SPREADSHEETS_JSON)[FY];
   assert.equal(env.files[logId].name, 'Trends2Targets_Logs_' + FY);
@@ -602,6 +610,8 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
 // ==== 13. 画面を開く（doGet） ====
 {
   const env = setUpEnv();
+  env.boot();   // 最初の操作の一度だけの写し（監査に残る）を先に済ませる
+  const audit0 = env.audit().length;
   const out = env.run('doGet({})');
   assert.equal(out.title, 'Trends2Targets', 'タブは英語の名前だけ');
   assert.match(out.favicon, /^data:image\/png;base64,.+#favicon\.png$/);
@@ -611,7 +621,7 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.match(html, /var CHAR_SVG = \{/);
   assert.match(html, /var YOMI_POSE = \{/);
   assert.doesNotMatch(html, /<\?/);
-  assert.equal(env.audit().length, 1, '画面を開くだけでは記録しない（読むだけの操作は記録しない）');
+  assert.equal(env.audit().length, audit0, '画面を開くだけでは記録しない（読むだけの操作は記録しない）');
   env.as(OUTSIDER);
   const b2 = JSON.parse(/var B = (.*);\n/.exec(env.run('doGet({})').getContent())[1]);
   assert.deepEqual([b2.allowed, b2.user.roles, b2.user.isAdmin], [false, [], false], '社外の人には役割も出さない');

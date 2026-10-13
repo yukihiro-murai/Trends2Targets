@@ -25,6 +25,7 @@ const dropBackupTriggers = (env) => { for (let i = env.triggers.length - 1; i >=
 // ==== 1. 所有者が開くと 1 つ作る（appEnableBackup_ と同じ作り方）。バックアップそのものは取らない。記録は実行ログだけ ====
 {
   const env = setUpEnv();
+  env.boot();   // 初期設定の後の最初の操作で動く一度だけの写し（監査に残る）を先に済ませる
   const audits = env.audit().length;
   const { out, boot } = open(env);
   assert.equal(out.title, 'Trends2Targets');

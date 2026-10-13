@@ -120,6 +120,7 @@ const LEGACY_FAIL = 'AI調査エラー: Vertex調査エラー: Vertex AI への�
 // ==== 1. トリガー: 所有者が開いたとき・毎日の手入れで、無ければ作る（1 日 1 回だけ確かめる・二重にしない・上限・止めるスイッチ） ====
 {
   const env = setUpEnv();
+  env.boot();   // 初期設定の後の最初の操作で動く一度だけの写し（監査に残る）を先に済ませる
   const audits = env.audit().length;
   env.run('doGet({})');
   assert.equal(autoTriggers(env).length, 1, '所有者が開くとトリガーを作る');
