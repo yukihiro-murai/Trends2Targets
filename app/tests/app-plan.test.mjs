@@ -318,7 +318,9 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   // 空模様はいつも 8 つ（猛暑 → 快晴 → 晴れのち曇り → 曇り → 雨 → 雪 → 天変地異 → 霧）。押すと分析へ
   assert.match(homeHtml, /猛暑[\s\S]*快晴[\s\S]*晴れのち曇り[\s\S]*曇り[\s\S]*雨[\s\S]*雪[\s\S]*天変地異[\s\S]*霧/);
   assert.equal((homeHtml.match(/class="sky( none)?"/g) || []).length, 8);
-  assert.match(homeHtml, /class="sky[^"]*" onclick="go\('analysis'\)"/);
+  // ホームは全体だけ: 空模様は数だけで、押しても画面を移らない・メーカーの名前を出さない（行き来は左のメニューから。2026-10-13）
+  assert.match(homeHtml, /<div class="sky[^"]*" tabindex="0" role="img"/);
+  assert.doesNotMatch(homeHtml, /onclick="go\('analysis'\)"/);
   // 2026-10-06 村井さん: ホームは全体の概要だけ（個社の表・名前は出さない。最近の動き・あなたの役割も出さない）
   assert.doesNotMatch(homeHtml, /最近の動き|あなたの役割|クライアント|計画の状態/);
   const visible = homeHtml.replace(/data-tip="[^"]*"/g, '');

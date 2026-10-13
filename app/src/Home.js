@@ -19,21 +19,33 @@ function appPortfolioCached_() {
 }
 
 /** その人のホーム（数字・計画の状態・着地見込みと空模様・見せる年度の合計・承認待ち）＋ 管理者には仕組みの状態 */
-function appHome_(ctx) {
-  const out = appCachedRead_('HOME\u0001' + ctx.actor + '\u0001' + appToday_(), () => appHomeData_(ctx));
+/** 選べる年度: 今の年度の前後 2 年（5 つ。古い順）。ホームの年度のプルダウン */
+const APP_HOME_FY_SPAN = 2;
+function appHomeFyOptions_() {
+  const t = Number(appFy_(new Date()));
+  const out = [];
+  for (let y = t - APP_HOME_FY_SPAN; y <= t + APP_HOME_FY_SPAN; y++) out.push(String(y));
+  return out;
+}
+
+function appHome_(ctx, fyAsked) {
+  // 頼まれた年度は、選べる年度のうちのどれかだけ（ほかは既定の年度にする）
+  const ask = String(fyAsked || '');
+  const fy = appHomeFyOptions_().indexOf(ask) >= 0 ? ask : '';
+  const out = appCachedRead_('HOME\u0001' + ctx.actor + '\u0001' + appToday_() + '\u0001' + fy, () => appHomeData_(ctx, fy));
   if (appHasRole_(ctx.roles, 'ADMIN')) out.system = appHomeSystem_();
   out.at = appNowIso_();
   return out;
 }
 
-function appHomeData_(ctx) {
+function appHomeData_(ctx, fyAsked) {
   const all = appPortfolioAll_();
   const plans = all.plans;
-  // 見せる年度: 今の年度の計画があればそれ、無ければ一番新しい年度（予算を立てる計画があれば、それだけで決める。測る専用の計画は前の年度が多い）
+  // 見せる年度: 選んだ年度。選んでいなければ、今の年度の計画があればそれ、無ければ一番新しい年度（予算を立てる計画があれば、それだけで決める。測る専用の計画は前の年度が多い）
   const thisFy = String(appFy_(new Date()));
   const budgeted = appBudgetPlanRows_(plans);
   const pick = budgeted.length ? budgeted : plans;
-  const fy = pick.some(p => String(p.fy) === thisFy) ? thisFy : pick.reduce((m, p) => (m === null || String(p.fy) > m ? String(p.fy) : m), null) || thisFy;
+  const fy = fyAsked || (pick.some(p => String(p.fy) === thisFy) ? thisFy : pick.reduce((m, p) => (m === null || String(p.fy) > m ? String(p.fy) : m), null) || thisFy);
   const planRows = appReadTable_('PLANS');
   const clientOf = {};
   planRows.forEach(p => { clientOf[p.plan_id] = p.client_id; });
@@ -49,7 +61,7 @@ function appHomeData_(ctx) {
     if ((v.submitted_by !== ctx.actor || ctx.user.isOwner) && appHasRole_(ctx.roles, 'APPROVER', clientOf[v.plan_id])) approvals.push(o);
   });
   return {
-    fy: fy,
+    fy: fy, thisFy: thisFy, fyOptions: appHomeFyOptions_(),
     plans: plans.map(p => ({ planId: p.planId, clientName: p.clientName, fy: String(p.fy), p10: p.p10, p50: p.p50, p90: p.p90, prevP50: p.prevP50, budget: p.budget, mape: p.mape,
       mapeMonths: p.mapeMonths, runs: p.runs, lastRunAt: p.lastRunAt, stepErrors: p.stepErrors, stepsDone: p.stepsDone, stepsTotal: p.stepsTotal,
       officialNo: p.officialNo, officialFinal: p.officialFinal, pendingNo: p.pendingNo,

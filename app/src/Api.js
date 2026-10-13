@@ -119,9 +119,9 @@ function apiVersionDecide(input) {
     after: res => ({ versionNo: res.version.no, state: res.version.state, superseded: res.superseded, selfApproved: res.selfApproved }) }, ctx => appVersionDecide_(ctx, input));
 }
 
-/** ホーム（最重要のことだけ。よみのセリフの材料）。閲覧は社内全員 */
-function apiHome() {
-  return api_('HOME', { minRole: 'VIEWER', audit: false }, ctx => appHome_(ctx));
+/** ホーム（最重要のことだけ。よみのセリフの材料）。閲覧は社内全員。input.fy で見る年度を選ぶ（今の年度の前後 2 年まで。無ければ既定の年度） */
+function apiHome(input) {
+  return api_('HOME', { minRole: 'VIEWER', audit: false }, ctx => appHome_(ctx, input && input.fy));
 }
 
 /**

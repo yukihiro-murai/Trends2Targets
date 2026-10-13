@@ -5,7 +5,8 @@
  *   node app/tests/app-home.test.mjs
  */
 import assert from 'node:assert/strict';
-import { OWNER, MEMBER, setUpEnv, STATS, makeEnv, J, sources } from './gas-mock.mjs';
+import vm from 'node:vm';
+import { OWNER, MEMBER, setUpEnv, STATS, makeEnv, J, sources, uiHtml } from './gas-mock.mjs';
 
 const D = (y, m, d = 1) => new Date(y, m - 1, d);
 const env = setUpEnv();
@@ -135,6 +136,39 @@ const planId = env.seedPlan(book);
   const zero = { '2026/04': { actual: 100, p50: 100, out: 0 }, '2026/05': { actual: null, p50: 100, out: null }, '2026/06': { actual: 100, p50: 100, out: 0 } };
   const r4 = J(env.run(`appPlanYtd_('2026', ${JSON.stringify(zero)}, '2026/07')`));
   assert.deepEqual([r4.actualYtd, r4.actualMonths, r4.forecastYtd, r4.rangeOut, r4.rangeN, r4.actual], [200, 3, 300, 0, 2, { '2026/04': 100, '2026/05': 0, '2026/06': 100 }], JSON.stringify(r4));
+}
+
+// ==== 年度を選ぶ（今の年度の前後 2 年。2026-10-13 村井さん）: 選んだ年度の中身・計画の無い年度・選べない年度 ====
+{
+  const E = setUpEnv();
+  const t = Number(String(E.run('appFy_(new Date())')));
+  const h0 = E.call('apiHome()');
+  assert.deepEqual(J(h0.fyOptions), [t - 2, t - 1, t, t + 1, t + 2].map(String), '選べる年度は前後 2 年の 5 つ');
+  assert.equal(h0.thisFy, String(t));
+  const past = E.call('apiHome(__in)', { __in: { fy: String(t - 2) } });
+  assert.equal(past.fy, String(t - 2), '選んだ年度で返す');
+  const odd = E.call('apiHome(__in)', { __in: { fy: String(t + 9) } });
+  assert.equal(odd.fy, h0.fy, '選べない年度は既定の年度');
+  // 画面: 題の横のプルダウン（説明のカーソルなし）・計画の無い過去の年度はよみが「ありません」と言う（「まだ」と言わない）・リンクのボタンを出さない
+  const js = uiHtml.slice(uiHtml.indexOf('<script>') + 8, uiHtml.lastIndexOf('</script>'))
+    .replace('<?!= charsJs ?>', 'var YOMI_POSE = new Proxy({}, { get: () => "" }); var CHAR_SVG = new Proxy({}, { get: () => "" });')
+    .replace('<?!= bootJson ?>', JSON.stringify({ app: { name: 'T', version: 'x' }, user: { email: OWNER, isOwner: true, isAdmin: true, roles: [] }, setUp: true, allowed: true }));
+  const calls = [];
+  const el = () => ({ innerHTML: '', textContent: '', classList: { add() {}, remove() {} }, set outerHTML(v) {} });
+  const runner = { withSuccessHandler() { return runner; }, withFailureHandler() { return runner; }, apiHome(a) { calls.push(a); } };
+  const ui = vm.createContext({ document: { getElementById: el, querySelector: () => null, addEventListener() {} }, setTimeout: () => 0, clearTimeout() {}, window: { addEventListener() {}, innerWidth: 1280, innerHeight: 800 },
+    google: { script: { run: new Proxy(runner, { get: (o, k) => (k in o ? o[k] : () => {}) }) } } });
+  vm.runInContext(js, ui);
+  ui.__h = JSON.parse(JSON.stringify(past));
+  const html = vm.runInContext(`B.home = __h; S.view = 'home'; viewHome()`, ui);
+  assert.match(html, new RegExp('<h1>ホーム</h1><select class="inp sm hm-fysel" id="hm_fy" data-near="1" aria-label="見る年度"'), '題のすぐ横に年度のプルダウン');
+  assert.equal((html.match(/<option /g) || []).length, 5);
+  assert.doesNotMatch(html.slice(0, html.indexOf('</select>')), /data-tip/, '年度に説明のカーソルを付けない');
+  assert.match(html, new RegExp('FY' + (t - 2) + ' の計画はありません。'), '過去の年度で計画が無ければ、よみがそう言う');
+  assert.doesNotMatch(html, /<button/, 'ホームのよみの話・カードにリンクのボタンを出さない');
+  vm.runInContext(`homeSetFy('${t + 1}')`, ui);
+  assert.equal(JSON.stringify(calls[calls.length - 1]), JSON.stringify({ fy: String(t + 1) }), '選ぶと、その年度で読み直す');
+  assert.equal(vm.runInContext('B.home', ui), null, '読み直す間は前の年度の中身を出さない');
 }
 
 console.log('app-home: all tests passed');

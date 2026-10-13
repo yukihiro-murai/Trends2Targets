@@ -323,7 +323,7 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   assert.match(a, /<p class="note anx" data-tip="測る専用の計画です。予算は立てず、合計・空模様・予算と比べるグラフには入れません（外れ幅・読みのクセ・見直しの流れには入れます）\nテスト薬品">測る専用 1<\/p>/);
   const board = /<div class="ansky">([\s\S]*?)<\/div><\/div>(?=<p|<div class="guide"|<div class="card")/.exec(a);
   assert.ok(board && !board[1].includes('テスト薬品') && board[1].includes('テスト製薬'), '空模様の板は予算を立てるメーカーだけ');
-  assert.match(a, /<div class="k">年間予算<\/div><div class="v">960<span class="u">円<\/span><\/div>/, '合計の年間予算は 960');
+  assert.doesNotMatch(a, /<div class="k">年間予算<\/div>/, '年度の合計の数字はホームだけ（分析はメーカーを並べて読み解く画面。2026-10-13）');
   // 測る専用の計画だけの年度: 合計と空模様は出さず、数を出す
   const onlyM = Object.assign({}, an, { plans: an.plans.filter((p) => p.measure) });
   const a2 = clean(run(`S.an.data = __a; viewAnalysis()`, { __a: onlyM }), '分析（測る専用だけ）');

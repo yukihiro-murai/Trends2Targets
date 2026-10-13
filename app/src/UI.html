@@ -84,6 +84,7 @@ svg.i{width:20px;height:20px;flex:0 0 20px}
 .viewtitle .vtools .inp{width:var(--w-inp-md)}
 .viewtitle .vnear{display:flex;align-items:center}
 .viewtitle .vnear .inp{width:var(--col)}
+.viewtitle .vnear select.inp{font-size:var(--fs-h3);font-weight:600;color:var(--navy)}   /* 題の横の選ぶ欄（年度・メーカー）は、題と同じ並びで目立たせる（どの画面も同じ） */
 .viewtitle .vnear .inp.md{width:var(--col2)}
 .viewtitle .vnear .chip{margin:0}
 .ttlic{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex:0 0 44px;border-radius:14px;background:var(--primary-soft);color:var(--primary-dark)}
@@ -118,7 +119,13 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 .hero{display:flex;gap:var(--s5);align-items:flex-start}
 .hero .charbox{width:96px;height:96px;flex:0 0 96px}
 .hero .bubble{font-size:var(--fs-h3);line-height:1.6;padding:var(--s4) var(--s5)}
-.hero .bubble::before{top:36px}
+.hero .bubble::before{top:40px}   /* 吹き出しの三角は、キャラ（96px）の真ん中の高さ */
+.hero .bubble{min-height:96px}
+.bubble .says{list-style:none;display:grid;gap:var(--s2);margin:0;font-size:var(--fs-b);line-height:1.6}
+.bubble .says li{display:flex;align-items:baseline;gap:var(--s3)}
+.bubble .says li .lvl{flex:0 0 auto;transform:translateY(-1px)}
+.bubble .says li .t{flex:1;min-width:0}
+.vrole{margin:calc(-1 * var(--s4)) 0 var(--s6);font-size:var(--fs-s);color:var(--muted)}   /* 画面の役割（題のすぐ下に 1 行） */
 .hero .say-act{margin-top:var(--s3)}
 /* 天気のキャラ（小さく並べるとき。大きさは skyChar の引数） */
 .skych{display:inline-block;vertical-align:middle;flex:0 0 auto;width:var(--sz,32px);height:var(--sz,32px)}
@@ -516,6 +523,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .viewtitle h1,h1{font-size:var(--fs-h2)}
   .kpis,.kpis.k5{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
   .hero .charbox{width:64px;height:64px;flex-basis:64px}
+  /* スマホ: よみは吹き出しの上に置き、吹き出しを幅いっぱいに（横に並べると吹き出しが細くなり、話が縦に長くなる）。三角は上向きでキャラを指す */
+  .hero{flex-direction:column;gap:var(--s3)}
+  .hero .bubble{min-height:0;width:100%}.hero .bubble::before{top:-8px;left:24px;border:8px solid transparent;border-bottom-color:var(--primary-soft);border-top:none}
   .hero .bubble{font-size:var(--fs-b)}
   .kpi{padding:var(--s3) var(--s4)}
   .kpi .v{font-size:var(--fs-h3)}
@@ -546,7 +556,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 <body>
 <header class="topbar">
   <span class="logo" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14.5 7.5 10l3 3L17 6.5"/><path d="M12.6 6.5H17v4.4"/></svg></span>
-  <span class="ttl">Trends2Targets</span><span class="tsub">売上予測と予算策定</span><span class="spacer"></span><span class="meta" id="hdrUser"></span><span class="meta" id="hdrVer"></span>
+  <span class="ttl">Trends2Targets</span><span class="tsub">売上予測と予算策定</span><span class="spacer"></span><span class="meta" id="hdrUser"></span>
 </header>
 <div class="layout"><nav class="sidenav" id="nav"></nav><main class="main" id="main"></main></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -821,14 +831,18 @@ var NAV_ICON = {
 };
 function navItems(){ return B.setUp && B.allowed ? NAV : [['home','ホーム']]; }
 /** 画面の題: 印（淡い水色の角丸）+ 題名。右の道具（計画を選ぶ欄など）は右端へ、data-near の道具（年度など）は題のすぐ横へ */
+/** 画面ごとの役割（題の下の 1 行。何を見る画面かをはっきりさせる。2026-10-13 村井さん） */
+var VIEW_ROLE = { home: '全体の見通しと、よみからの気づき', makers: 'メーカーごとに、予算と実績・着地を比べる', forecast: '1 つのメーカーの予測を見て、予算を決める',
+  analysis: 'メーカーを並べて、ずれと傾向を読み解く', learning: '当たり外れから学び、次の予測に活かす' };
+function viewRole(){ var r = VIEW_ROLE[S.view]; return r ? '<p class="vrole">' + esc(r) + '</p>' : ''; }
 function viewTitle(head){
   if (!head) return '';
   var icon = '<span class="ttlic" aria-hidden="true">' + (NAV_ICON[S.view] || NAV_ICON.home) + '</span>';
   var m = /^<div class="page-head"><h1>([\s\S]*?)<\/h1>([\s\S]*)<\/div>$/.exec(head);
-  if (m && /^<[^>]*data-near/.test(m[2])) return '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + m[1] + '</h1><span class="vnear">' + m[2] + '</span></div></div>';
-  if (m) return '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + m[1] + '</h1></div>' + (m[2] ? '<div class="vtools">' + m[2] + '</div>' : '') + '</div>';
+  if (m && /^<[^>]*data-near/.test(m[2])) return '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + m[1] + '</h1><span class="vnear">' + m[2] + '</span></div></div>' + viewRole();
+  if (m) return '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + m[1] + '</h1></div>' + (m[2] ? '<div class="vtools">' + m[2] + '</div>' : '') + '</div>' + viewRole();
   var h = /^<h1>([\s\S]*?)<\/h1>$/.exec(head);
-  return h ? '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + h[1] + '</h1></div></div>' : head;
+  return h ? '<div class="viewtitle"><div class="vt">' + icon + '<h1 id="vh" tabindex="-1">' + h[1] + '</h1></div></div>' + viewRole() : head;
 }
 /** 画面の中のタブ（下線）。list: [[key, 名前]]、onclick: 押したときに呼ぶ関数の名前（key を渡す） */
 function subTabs(list, cur, onclick){ return '<div class="tabs" role="tablist">' + list.map(function(t){ return '<button class="tab' + (cur === t[0] ? ' on' : '') + '" role="tab" aria-selected="' + (cur === t[0]) + '" onclick="' + onclick + '(\'' + t[0] + '\')">' + t[1] + '</button>'; }).join('') + '</div>'; }
@@ -861,7 +875,6 @@ function focusRestore(f){
 function render(){
   var fk = focusSave();
   $('hdrUser').innerHTML = B.user && B.user.email ? '<b>' + esc(B.user.email.split('@')[0]) + '</b>' : '';
-  $('hdrVer').textContent = B.user && B.user.isAdmin && B.app ? 'v' + B.app.version : '';
   var nav = navItems();
   $('nav').innerHTML = nav.map(function(n){ return '<button type="button" class="navbtn' + (S.view === n[0] ? ' on' : '') + '"' + (S.view === n[0] ? ' aria-current="page"' : '') + ' onclick="go(\'' + n[0] + '\')">' + (NAV_ICON[n[0]] || NAV_ICON.home) + '<span>' + n[1] + '</span></button>'; }).join('');
   var v = { home: viewHome, makers: viewMakers, forecast: viewForecast, analysis: viewAnalysis, learning: viewLearning }[S.view] || viewHome;
@@ -1646,7 +1659,9 @@ function chartArrows(rows, opts){
 /** ホームを開く: 中身が無い・10 分より古い・古いの印があるときだけ読む（戻るたびには読まない。LD_KEEP） */
 function homeEnter(){ if (B.setUp && B.allowed && ldNeed('home', !!B.home)) homeLoad(); }
 /** ホームの中身を読む（開いた直後は初期データの B.home を使う）。読めたら学びの進み（apiAiLearning。学びの画面と同じ読み込み）を読む */
-function homeLoad(){ load('home', function(ok, fail){ call('apiHome', [], ok, fail); }, null, function(r){ B.home = r; if (S.view === 'home') lrNeed('ai'); }); }
+function homeLoad(){ var fy = S.homeFy || ''; load('home', function(ok, fail){ call('apiHome', [fy ? { fy: fy } : {}], ok, fail); }, null, function(r){ if ((S.homeFy || '') !== fy) return; B.home = r; if (S.view === 'home') lrNeed('ai'); }); }
+/** ホームの年度を選ぶ（今の年度の前後 2 年。サーバーの fyOptions）。選んだ年度で読み直す */
+function homeSetFy(fy){ S.homeFy = String(fy || ''); B.home = null; homeLoad(); render(); }
 /** 学びの進みは、ホームを描いた後に読む（まだ一度も読んでいないときだけ。失敗したら、このカードの「もう一度読み込む」で読み直す） */
 function homeLearnKick(){
   if (S.ld.lrAi || S.lr.ai || S.homeKick) return;
@@ -1665,30 +1680,33 @@ function viewHome(){
     return '<h1>Trends2Targets</h1>' + guide('observe', '準備中です。もうしばらくお待ちください。');
   }
   var h = B.home;
-  if (!h) return '<h1>ホーム</h1>' + (slot('home', 'ホームを読み込んでいます', 'homeLoad()') || loading('ホームを読み込んでいます'));
+  if (!h) return '<h1>ホーム</h1>' + (slot('home', 'ホームを読み込んでいます', 'homeLoad()') || loading(S.homeFy ? 'FY' + S.homeFy + ' を読み込んでいます' : 'ホームを読み込んでいます'));
   var plans = homePlans(h);
-  var head = '<div class="page-head"><h1>ホーム</h1><span class="chip hm-fy" data-near="1" data-tip="' + esc('見せている年度です（今の年度の計画があればそれ、無ければいちばん新しい年度）') + '">FY' + esc(h.fy) + '</span></div>';
+  var head = '<div class="page-head"><h1>ホーム</h1>' + homeFySelect(h) + '</div>';
   // 計画が無い年度は、よみの案内 1 枚だけ（「まだありません」を重ねない）
   if (!plans.length) return head + homeHero(h);
   homeLearnKick();
   return head + homeHero(h) + homeKpis(h, plans) + homeSkyCard(plans) + homeLearnCard(h, plans) + homeInsightCard(plans);
 }
-/** よみ（いちばん気になること）と、続く 4 つまで。残りは「ほかに n 件」の説明に */
+/** 見る年度のプルダウン（今の年度の前後 2 年。題のすぐ横。選ぶとその年度で読み直す） */
+function homeFySelect(h){
+  var opts = (h.fyOptions && h.fyOptions.length ? h.fyOptions : [String(h.fy)]).slice();
+  if (opts.indexOf(String(h.fy)) < 0) opts.push(String(h.fy));
+  opts.sort();
+  return '<select class="inp sm hm-fysel" id="hm_fy" data-near="1" aria-label="見る年度" onchange="homeSetFy(this.value)">'
+    + opts.map(function(f){ return '<option value="' + esc(f) + '"' + (String(f) === String(h.fy) ? ' selected' : '') + '>FY' + esc(f) + '</option>'; }).join('') + '</select>';
+}
+/** よみ（伝えること）。全部をよみの吹き出しの中で言う（リンクのボタンは出さない。画面の行き来は左のメニューから。2026-10-13 村井さん） */
 /** 気になる度合いの印の名前（色だけに頼らない。形も変える: CSS の .lvl） */
 var LVL_NAME = { ng: '至急', warn: '要確認', info: 'お知らせ', ok: '良好' };
 function homeLvl(l){ return '<span class="lvl ' + l + '" role="img" aria-label="' + (LVL_NAME[l] || '') + '"></span>'; }
 function homeHero(h){
   var says = yomiSays(h), top = says[0];
   var tipAttr = function(x){ return x.tip ? ' data-tip="' + esc(x.tip) + '"' : ''; };
-  var rest = says.slice(1, 5), more = says.slice(5);
-  // 仕組みの確認（管理者だけ。直し方は説明に）は「ほかに n 件」に入れない（4 つ目と入れ替える）
-  var si = more.map(function(x){ return !!x.sys; }).indexOf(true);
-  if (si >= 0 && rest.length) { var sx = more.splice(si, 1)[0]; more.unshift(rest.pop()); rest.push(sx); }
-  return '<div class="card"><div class="hero"><div class="charbox">' + YOMI_POSE[top.pose] + '</div><div class="bubble"><span' + tipAttr(top) + '>' + esc(top.text) + '</span>'
-    + (top.act ? '<div class="say-act"><button class="btn' + (top.lvl === 'ok' || top.lvl === 'info' ? ' btn-ghost' : '') + '" onclick="' + top.act[1] + '">' + esc(top.act[0]) + '</button></div>' : '') + '</div></div>'
-    + (rest.length ? '<ul class="todo">' + rest.map(function(x){ return '<li>' + homeLvl(x.lvl) + '<span class="t"' + tipAttr(x) + '>' + esc(x.text) + '</span>'
-      + (x.act ? '<button class="btn btn-ghost btn-sm' + (x.act[1] === "go('makers')" ? ' hm-mk' : '') + '" onclick="' + x.act[1] + '">' + esc(x.act[0]) + '</button>' : '') + '</li>'; }).join('') + '</ul>' : '')
-    + (more.length ? '<p class="meta mt8" data-tip="' + esc(more.map(function(x){ return x.text; }).join('\n')) + '">ほかに ' + more.length + ' 件</p>' : '') + '</div>';
+  // 1 つだけなら、そのまま話す。2 つ以上は、気になる順に並べて話す（印の形と色で度合い）
+  var body = says.length === 1 ? '<span' + tipAttr(top) + '>' + esc(top.text) + '</span>'
+    : '<ul class="says">' + says.map(function(x){ return '<li>' + homeLvl(x.lvl) + '<span class="t"' + tipAttr(x) + '>' + esc(x.text) + '</span></li>'; }).join('') + '</ul>';
+  return '<div class="card"><div class="hero"><div class="charbox">' + YOMI_POSE[top.pose] + '</div><div class="bubble">' + body + '</div></div></div>';
 }
 
 // ---- 数字（合計。サーバーの h.totals を使い、無ければ画面で足す。値の無いメーカーは飛ばす） ----
@@ -1772,13 +1790,13 @@ function homeKpis(h, plans){
   var actTip = '暫定実績の合計: ' + yenU(t.actualYtd) + '\n締まった月（月末から 5 日たってから取り込んだ月）の実績を足しています' + (months ? '（最大 ' + months + ' か月）' : '');
   var mapeTip = '締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計です。メーカーごとの外れ幅を、さらにメーカーで平均しています'
     + (m.n ? '（' + m.n + ' メーカー）' : '\n' + homeNoMape(plans));
-  return '<div class="kpis hm-kpis">'
+  return '<div class="card"><div class="card-head"><h2>FY' + esc(h.fy) + ' の数字</h2></div><div class="kpis hm-kpis">'
     + homeKpi('年間予算', yenShort(t.budget), '円', budgetTip, true, isNum(t.budget) ? (t.budgetPlans < all ? t.budgetPlans + ' / ' + all + ' メーカー' : all + ' メーカー') : '')
     + homeKpi('着地の推定', yenShort(t.landing), '円', landTip, false, isNum(t.landing) ? [(t.landingPlans < all ? t.landingPlans + ' / ' + all + ' メーカー' : all + ' メーカー'),
       isNum(t.ratio) ? '予算の ' + (t.ratio * 100).toFixed(1) + '%' + (same ? '' : '（同じ ' + t.ratioPlans + '）') : ''] : '')
     + homeKpi('暫定実績', yenShort(t.actualYtd), '円', actTip, false, months ? months + ' か月分' : '')
     + homeKpi('外れ幅', m.v === null ? '-' : (m.v * 100).toFixed(1), '%', mapeTip, false, m.n ? m.n + ' メーカーの平均' : '')
-    + '</div>';
+    + '</div></div>';
 }
 
 // ---- 見通しの空模様（サーバーの推定 p.sky。いつも 8 つ・決まった順。押すと分析へ） ----
@@ -1786,10 +1804,10 @@ function homeSkyCard(plans){
   var by = {}; plans.forEach(function(p){ var k = skyKey(p); (by[k] = by[k] || []).push(p.clientName); });
   var tiles = SKY8.map(function(s){
     var names = by[s.key] || [];
-    return '<button type="button" class="sky' + (names.length ? '' : ' none') + '" onclick="go(\'analysis\')" aria-label="' + esc(s.name + ' ' + names.length + ' メーカー') + '" data-tip="' + esc(s.name + '：' + s.rule + (names.length ? '\n' + names.join('、') : '')) + '">'
-      + '<span class="ch">' + (CHAR_SVG[s.key] || '') + '</span><span class="nm">' + esc(s.name).replace('のち', 'のち<wbr>') + '</span><span class="ct">' + names.length + '</span></button>';
+    return '<div class="sky' + (names.length ? '' : ' none') + '" tabindex="0" role="img" aria-label="' + esc(s.name + ' ' + names.length + ' メーカー') + '" data-tip="' + esc(s.name + '：' + s.rule) + '">'
+      + '<span class="ch">' + (CHAR_SVG[s.key] || '') + '</span><span class="nm">' + esc(s.name).replace('のち', 'のち<wbr>') + '</span><span class="ct">' + names.length + '</span></div>';
   }).join('');
-  return '<div class="card"><div class="card-head"><h2>見通しの空模様' + tip('締まった月の実績と予測から推定した着地を予算と比べ、メーカーを 8 つの空模様に分けます。カーソルを合わせると決まりとメーカーが、押すと分析が出ます') + '</h2></div><div class="skys">' + tiles + '</div></div>';
+  return '<div class="card"><div class="card-head"><h2>見通しの空模様' + tip('締まった月の実績と予測から推定した着地を予算と比べ、メーカーを 8 つの空模様に分けます。カーソルを合わせると決まりが出ます。どのメーカーがどれかは、メーカーと分析の画面で見られます') + '</h2></div><div class="skys">' + tiles + '</div></div>';
 }
 
 // ---- 学びの進み（精度の天気・承認待ちの見直し案。apiAiLearning は学びの画面と同じ読み込み S.lr.ai。失敗はこのカードだけ） ----
@@ -1829,7 +1847,7 @@ function homeLearnCard(h, plans){
   return '<div class="card">' + head + '<div class="hm-lr">'
     + '<div class="hm-lrbox" data-tip="' + esc(wTip) + '">' + skyChar(key, 64) + '<span class="hm-lrt"><span class="k">精度の天気</span><span class="t1">' + esc(skyName(key)) + '</span><span class="t2">' + esc(sub) + '</span></span></div>'
     + '<div class="hm-lrbox"><span class="hm-lrt" data-tip="' + esc(pTip) + '"><span class="k">承認待ちの見直し案</span><span class="t1 num">' + nProp + '<span class="u"> 件</span></span><span class="t2">' + (pend.length ? pend.length + ' メーカー' : 'いまはありません') + '</span></span>'
-    + '<button class="btn btn-ghost btn-sm" onclick="homeToLearn()">学びを見る</button></div>'
+    + '</div>'
     + '</div></div>';
 }
 
@@ -1977,7 +1995,10 @@ function yomiSays(h){
   if (mine.length) add(10, 'info', 'observe', '出した公式版 ' + mine.length + ' 件が、承認を待っています。', '承認者が確認すると、承認済みになります', null);
   // 測る専用の計画だけの年度は「計画が無い」とは言わない（予算を立てる計画が無いと言い、測る専用の数を添える）
   var nM = (h.plans || []).filter(function(p){ return String(p.fy) === String(h.fy) && planMeasure(p); }).length;
-  if (!plans.length) add(11, 'info', 'guide', nM ? 'FY' + h.fy + ' の予算を立てる計画はまだありません（測る専用 ' + nM + '）。' : 'FY' + h.fy + ' の計画はまだありません。所有者が計画を作ると、ここに見通しが出ます。', nM ? MEASURE_TIP : '', nM ? mk : null);
+  var past = h.thisFy && Number(h.fy) < Number(h.thisFy);
+  if (!plans.length) add(11, 'info', 'guide', nM ? 'FY' + h.fy + ' の予算を立てる計画は' + (past ? 'ありません' : 'まだありません') + '（測る専用 ' + nM + '）。'
+    : past ? 'FY' + h.fy + ' の計画はありません。この年度の見通しと実績は記録されていません。ほかの年度を選んでください。'
+    : 'FY' + h.fy + ' の計画はまだありません。所有者が計画を作ると、ここに見通しが出ます。', nM ? MEASURE_TIP : '', null);
   out.sort(function(a, b){ return a.rank - b.rank; });
   if (!out.length) out.push({ rank: 99, lvl: 'ok', pose: 'done', text: '今日の観測では、大きな崩れはありません。予報です。FY' + h.fy + ' の見通しは、おおむね晴れでしょう。', tip: '', act: mk });
   return out;
@@ -3556,7 +3577,7 @@ function anOverview(d){
   var g = !miss.length ? '' : closed ? guide('explain', esc(none ? '着地の推定や、予測と実績の比べ' : miss.join('・')) + 'はありません' + esc(why) + (none ? '' : esc(zeroHow)))
     : none ? guide('explain', (z.zero ? 'まだ数字がそろっていないため、グラフは出していません。' : 'まだ着地の推定や、予測と実績の比べがないため、グラフは出していません。') + more + esc(accHow))
     : guide('explain', (onlyAcc && z.zero && !z.rest ? '' : 'まだ数字がそろっていないため、') + esc(miss.join('・')) + 'は出していません。' + (onlyAcc ? '' : more) + esc(accHow));
-  return (bud.length ? anTotals(d, bud) + anSkyBoard(bud) : '') + anMeasure(ms) + g + body + anBacktestCard(d);   // 出していないグラフの案内は、グラフより先に。物差しは最後（動かした計画があるときだけ）
+  return (bud.length ? anSkyBoard(bud) : '') + anMeasure(ms) + g + body + anBacktestCard(d);   // 出していないグラフの案内は、グラフより先に。物差しは最後（動かした計画があるときだけ）
 }
 /** 測る専用の計画の数（名前と、どこに入れたかはカーソルで）。無ければ空 */
 function anMeasure(ms){

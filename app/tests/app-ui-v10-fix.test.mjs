@@ -192,7 +192,7 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
   assert.equal(say.length, 1, says.map((x) => x.text).join(' | '));
   assert.equal(say[0].text, 'FY' + home.fy + ' の予算を立てる計画はまだありません（測る専用 1）。');
   assert.ok(say[0].tip.startsWith('測る専用の計画です。'), '説明はカーソルで');
-  assert.deepEqual(say[0].act, ['メーカー一覧', "go('makers')"], 'メーカーの一覧で測る専用の計画を見られる');
+  assert.equal(say[0].act, null, 'よみの話にリンクのボタンは付けない（行き来は左のメニューから。2026-10-13）');
   const h = run('viewHome()');
   assert.doesNotMatch(h, /計画はまだありません。所有者が/);
   assert.match(h, /予算を立てる計画はまだありません（測る専用 1）/);
