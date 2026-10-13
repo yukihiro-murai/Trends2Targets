@@ -751,7 +751,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   // 外れ幅のグラフから除いたメーカーの理由
   const withAcc = Object.assign({}, AN_PLAN, { planId: 'P9', clientName: '当たる製薬', accuracy: { mape: 0.12, bias: 0.04, n: 5, leaks: 0, coverage: 0.8, coverageN: 5 } });
   const mc = run('anMapeCard(__p)', { __p: [withAcc, az, an2] });
-  assert.match(mc, /data-tip="数字がそろわないため除いたメーカー\nテスト製薬（比べた月は、どれも売上が 0 円）\n別の製薬（まだ実績と比べられる月がありません）"/);
+  assert.doesNotMatch(mc, /除いたメーカー/, 'グラフの下の注記は出さない（2026-10-13 村井さん）');
 
   // 学び > AI の学び: 今の年度のメーカー（ホームの中身）の比べた月がどれも売上 0 円
   const keepHome = run('B.home');

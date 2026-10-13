@@ -172,9 +172,7 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
   assert.ok(an.plans.some((p) => p.planId === planM && p.measure), '分析の計画に測る専用の印');
   an.plans.forEach((p) => { if (p.planId === planA) p.topics = [{ topic: 'market', rowType: 'event', direction: 'up', impact: 10, confidence: 0.6, score: 12, position: '', percentile: null, horizon: '3M', asOf: fy + '/09' }]; });
   const mk = run(`anMarket(__a)`, { __a: an });
-  const none = /<p class="note anx" data-tip="まだ調べていないメーカー\n([^"]*)">まだ調べていないメーカー (\d+)<\/p>/.exec(mk);
-  assert.ok(none, mk);
-  assert.deepEqual([none[1].split('\n'), none[2]], [['テスト化学'], '1'], '測る専用の計画は入れない');
+  assert.doesNotMatch(mk, /まだ調べていないメーカー|最後の調査/, '細かい注記は出さない（2026-10-13 村井さん）');
   // 測る専用の計画だけが調べていないときは、案内の行を出さない
   const onlyM = Object.assign({}, an, { plans: an.plans.filter((p) => p.planId !== planB) });
   assert.doesNotMatch(run(`anMarket(__a)`, { __a: onlyM }), /まだ調べていないメーカー/);

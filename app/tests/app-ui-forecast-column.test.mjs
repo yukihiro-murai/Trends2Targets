@@ -171,7 +171,7 @@ run('fcDropDrafts(); S.job = null');   // 保存の終わりは待たない（�
   const css = uiHtml.slice(uiHtml.indexOf('<style>'), uiHtml.indexOf('</style>'));
   assert.ok(css.includes('.fc-sels{display:flex;align-items:center;gap:var(--s3)}'), '題の横の 2 つの欄は、格子の間 12px で並べる');
   assert.ok(css.includes('.viewtitle .vnear .inp{width:var(--selw, var(--col))}'), '欄は 1 マスから、いちばん長い名前が見切れない幅まで（共通の決まり）');
-  assert.ok(css.includes('.viewtitle .vnear .fc-sels{flex:1 1 100%}.viewtitle .vnear .fc-sels .inp{flex:1 1 0;min-width:0}'), 'スマホは次の行に半分ずつ');
+  assert.ok(css.includes('.viewtitle .vnear .fc-sels{flex:1 1 100%;flex-direction:column;align-items:stretch}.viewtitle .vnear .fc-sels .inp{width:100%}'), 'スマホは次の行に 1 つずつ幅いっぱい（2026-10-13 メーカーの名前が切れていた）');
   assert.match(css, /\.fcsec \.card:not\(\.caution\):not\(\.alert\):not\(\.soft\)\{background:none;border:0;border-top:1px solid var\(--line-soft\)/, '中のカードは区切りの中の段（枠を付けない）');
   assert.ok(!/\.fc-link|\.fc-open|fc-pick/.test(css), '使わなくなった決まりを残さない');
 }

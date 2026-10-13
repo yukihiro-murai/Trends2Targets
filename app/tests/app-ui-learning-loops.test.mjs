@@ -132,7 +132,7 @@ const item = (p, a, k) => run('lrReviewItems(__p, __a).filter(function(x){ retur
     repeats: [{ clientName: '甲', month: '05', fys: ['2025', '2026'] }] }, __a: Object.assign(sh([0.1, 0.2]), { unsourced: { events: 4, unsourced: 4, makers: [] }, persistence: { rho: 0.5, ci80: [0.3, 0.6], pairs: 9, plans: 2, sticky: true } }) });
   assert.equal((card.match(/<li class="lr-q">/g) || []).length, 5);
   assert.match(card, />ほか 3 件<\/button>/);
-  assert.match(card, /<span class="meta">8 件<\/span>/);
+  assert.doesNotMatch(card, /<span class="meta">\d+ 件<\/span>/, '件数の注記は出さない（2026-10-13）');
   assert.match(card, /<span class="lr-qsay" tabindex="0" data-tip="見解: 当たり 6 \/ 20 回/);
   assert.match(run('".lr-q [data-tip]" && TIP_FOCUS'), /\.lr-q \[data-tip\]/, 'キーボードでも説明が出る');
   // 何も無ければ短い一文。比べた月も無ければカードを出さない

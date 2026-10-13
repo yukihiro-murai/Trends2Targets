@@ -429,7 +429,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .fc-wxnm{min-width:0;flex:1 1 auto}
   .fc-stats{flex-basis:100%;grid-template-columns:repeat(2,minmax(0,1fr))}
   .fc-say{font-size:var(--fs-b)}
-  .viewtitle .vnear .fc-sels{flex:1 1 100%}.viewtitle .vnear .fc-sels .inp{flex:1 1 0;min-width:0}   /* 年度とメーカーは次の行に半分ずつ */
+  .viewtitle .vnear .fc-sels{flex:1 1 100%;flex-direction:column;align-items:stretch}.viewtitle .vnear .fc-sels .inp{width:100%}   /* 年度とメーカーは次の行に 1 つずつ幅いっぱい（半分ずつだとメーカーの名前が切れる） */
   .tbl.fc-notes td.clamp,.tbl.fc-props td.clamp{min-width:var(--col)}   /* 振り返りの文の列（見立て・理由）: 欄の列に押されて 1 行 3 文字にならないように */
 }
 
@@ -580,7 +580,7 @@ h1 + .lr-sec{margin-top:0}
 /* 幅 400px 以下のスマホ（375・360px）: 下のメニューの 5 つは同じ幅で画面に収め（「学び」が右で切れない）、予測の 6 つのタブは間を詰めて「進み」まで見せる */
 @media (max-width:400px){
   .sidenav{grid-auto-columns:minmax(0,1fr)}
-  .navbtn{min-width:0;padding:0 2px}
+  .navbtn{min-width:0;padding:0 2px}.navbtn span{font-size:11px;letter-spacing:-.02em;white-space:nowrap}   /* 「メーカー一覧」が隣とくっつかない字の大きさ */
   .tabs{gap:var(--s1)}
   .tab{padding-left:1px;padding-right:1px}
 }
@@ -2203,10 +2203,10 @@ function mkTable(rows){
   var cnt = function(n){ return n < all ? '<div class="note">' + n + ' メーカー分</div>' : ''; };
   var foot = !all ? '' : '<tr class="total"><td>合計</td><td colspan="2"' + (ms.length ? ' data-tip="' + esc('測る専用の ' + ms.length + ' メーカーは入れていません') + '"' : '') + '>' + all + ' メーカー</td><td class="num">' + yen(tot.budget) + cnt(nB) + '</td><td class="num">' + yen(tot.actual) + '</td>'
     + '<td class="num" data-tip="' + esc(homeRangeTip(r, all)) + '">' + yen(r ? r.landing : null) + cnt(r ? r.n : 0) + '</td><td class="mk-fill"></td></tr>';
-  // 列の幅: メーカーの名前は、いちばん長い名前が 1 行に入る幅（1〜2 マス）・空模様 144・ステータス 128（同じ幅の札 112）・金額は 1 マス（YEN_COL）。
+  // 列の幅: メーカーの名前は、いちばん長い名前が 1 行に入る幅（1〜2 マス）・空模様 144・ステータス 128（同じ幅の札 112）・金額 128（1280px の画面の枠に収める）。
   // 残りは最後の空の列へ（名前の列を広げない）。「開く」の列は置かない（名前を押すと開く。2026-10-13 村井さん）
   var nameW = Math.max(160, Math.min(332, Math.max.apply(null, rows.map(function(p){ return String(p.clientName || '').length * 15 + 24; }).concat([0]))));
-  return '<table class="tbl mk"><colgroup><col style="width:' + nameW + 'px"><col style="width:144px"><col style="width:128px"><col style="width:' + YEN_COL + 'px"><col style="width:' + YEN_COL + 'px"><col style="width:' + YEN_COL + 'px"><col class="mk-fill"></colgroup>'
+  return '<table class="tbl mk"><colgroup><col style="width:' + nameW + 'px"><col style="width:144px"><col style="width:128px"><col style="width:128px"><col style="width:128px"><col style="width:128px"><col class="mk-fill"></colgroup>'
     + '<thead><tr><th>メーカー</th><th data-tip="締まった月の実績と予測から推定した着地を、予算と比べた見通しです">空模様</th><th data-tip="未着手 = まだ予測がない・策定中 = 予測はあるが公式版をまだ出していない・承認待ち = 出した版を承認者が確認中・承認済み = 公式版が承認された">ステータス</th><th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">年間予算</th><th class="num" data-tip="締まった月（月末から 5 日たってから取り込んだ月）の実績の合計">暫定実績</th><th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th><th class="mk-fill"></th></tr></thead><tbody>'
     + body + foot + rest + '</tbody></table>';
 }
@@ -3102,10 +3102,11 @@ function fcInputCard(v, kind){
   // 自信の列は 96px（高い・ふつう・低い が入る幅）。変わった跡の (i) は、理由・補足・案件名のマスの中の右に置く（列を足さない）。
   // 製品の列は 1 マス（160px）: 1280px の画面で、製品の表を枠からはみ出さずに、理由の欄に 6 字ほどを残す
   var conf = showConf ? [['selfConf','自信','selfconf',96]] : [];
-  var cols = { product: [['person','担当者','people',140],['product','製品','products',160],['ym','対象月','month',128],['step','増減率','step',112]].concat(conf, [['reason','理由','text']]),
-    client: [['person','担当者','people',140],['ym','対象月','month',128],['step','増減率','step',112]].concat(conf, [['reason','理由','text']]),
-    opinions: [['person','担当者','people',140],['ym','対象月','month',128],['step','増減率','step',112],['conf','確度（0〜1）','conf',112],['note','補足','text']],
-    devspot: [['person','担当者','people',140],['ym','対象月','month',128],['project','案件名','text',220],['amount','金額（円）','money',144],['conf','確度（0〜1）','conf',112]] }[kind];
+  // 決まった列は中身の入る幅に詰め（担当者 128・対象月 112・増減率と確度 96）、残りを理由・補足に（2026-10-13 理由の欄が狭すぎた）
+  var cols = { product: [['person','担当者','people',128],['product','製品','products',160],['ym','対象月','month',112],['step','増減率','step',96]].concat(conf, [['reason','理由','text']]),
+    client: [['person','担当者','people',128],['ym','対象月','month',112],['step','増減率','step',96]].concat(conf, [['reason','理由','text']]),
+    opinions: [['person','担当者','people',128],['ym','対象月','month',112],['step','増減率','step',96],['conf','確度','conf',96],['note','補足','text']],
+    devspot: [['person','担当者','people',128],['ym','対象月','month',112],['project','案件名','text'],['amount','金額（円）','money',YEN_COL],['conf','確度','conf',96]] }[kind];
   var histAt = { product: 'reason', client: 'reason', opinions: 'note', devspot: 'project' }[kind];
   // 狭い PC の画面（1280px 未満。表は枠の中で横に送る）では、理由・補足の欄に 200px を残す。1280px からは枠に入れる（.tbl.fc-in の --inw）
   var fixedW = cols.reduce(function(n, c){ return n + (c[3] || 0); }, 0) + (canPlan ? 152 : 0);
@@ -3365,14 +3366,16 @@ function fcRvNotes(ins, canPlan){
   var clamp = function(t){ return '<td class="clamp"' + (t ? ' data-tip="' + esc(t) + '"' : '') + '><span>' + esc(t || '-') + '</span></td>'; };
   var rows = fcInsRows(ins);
   // 列の幅: 見るだけの表も、書く表と同じ左右 8px の余白（.fc-notes）。月は「2026/04」、対応は「前提を更新（自動）」が切れない幅
-  var cols = canPlan ? [88, 0, 168, 136, 192, 80, 112] : [88, 0, 184, 152, 184].concat(who ? [96] : []).concat([96]);
-  var head = '<th>月</th><th data-tip="当たり具合の計算から出た見立て">見立て</th><th>原因の仮説</th><th data-tip="外れに対して決めた対応。（自動）は計算が付けたものです">対応</th><th>次に反映すること</th>' + (canPlan || who ? '<th>担当</th>' : '') + '<th>状態</th>';
+  // 見立て（当たり具合の計算から出た文）は列にせず、月のカーソルの説明に（列が狭く途中で切れていた。2026-10-13）。原因の仮説と次に反映することに残りの幅を分ける
+  var cols = canPlan ? [96, 0, 160, 0, 112, 128] : [96, 0, 160, 0].concat(who ? [112] : []).concat([112]);
+  var head = '<th data-tip="月にカーソルを合わせると、当たり具合の計算から出た見立てが出ます">月</th><th>原因の仮説</th><th data-tip="外れに対して決めた対応。（自動）は計算が付けたものです">対応</th><th>次に反映すること</th>' + (canPlan || who ? '<th>担当</th>' : '') + '<th>状態</th>';
   var feeds = fcPaused('REVIEW.GENERATE') ? '次の予測' : '次の予測と AI の見直し案';   // 見直し案を作る操作を止めている間は、見直し案の材料とは言わない
   return '<div class="card"><div class="card-head"><h2>人の記入' + tip('外れた月の原因の仮説・対応・担当を書きます。' + feeds + 'の材料になります。同じ月の行は 1 つにまとめています（人が書いた行を出します）') + '</h2></div><div class="tblwrap"><table class="tbl scroll fc-notes' + (canPlan ? ' edit' : '') + '"><colgroup>'
     + cols.map(function(x){ return x ? '<col style="width:' + x + 'px">' : '<col>'; }).join('') + '</colgroup>'
     + '<thead><tr>' + head + '</tr></thead><tbody>'
     + rows.map(function(o){ var r = o.r;
-      return '<tr><td' + (o.hidden ? ' data-tip="' + esc('同じ月の自動の行 ' + o.hidden + ' 件はまとめています') + '"' : '') + '>' + esc(r.month) + '</td>' + clamp(r.insight + (r.nextAction ? '\n' + r.nextAction : ''))
+      var mt = [r.insight, r.nextAction, o.hidden ? '同じ月の自動の行 ' + o.hidden + ' 件はまとめています' : ''].filter(Boolean).join('\n');
+      return '<tr><td' + (mt ? ' data-tip="' + esc(mt) + '"' : '') + '>' + esc(r.month) + '</td>'
       + (canPlan ? '<td>' + txt(r, 'hypothesis', '原因の仮説') + '</td><td' + (r.actionType === 'update' && !fcInsHuman(r) ? ' data-tip="自動で付いた対応です"' : '') + '>' + sel(r, 'actionType', ['', '前提を更新', '入力を修正', '様子見', 'エスカレーション'], '対応') + '</td><td>' + txt(r, 'reflection', '次に反映すること') + '</td><td>' + txt(r, 'owner', '担当') + '</td><td>' + sel(r, 'status', ['', 'open', 'in_progress', 'done'], '状態') + '</td>'
         : clamp(r.hypothesis) + '<td>' + esc(fcInsAct(r)) + '</td>' + clamp(r.reflection) + (who ? '<td>' + esc(r.owner || '-') + '</td>' : '') + '<td>' + esc(fcInsLabel('status', r.status)) + '</td>') + '</tr>'; }).join('')
     + '</tbody></table></div>' + (canPlan ? '<div class="card-foot">' + actBtn(fcSaveBtn('記入を保存', 'fcSaveIns()', dirty), '原因の仮説・対応・担当・状態を保存します。' + feeds + 'の材料になります') + (dirty ? '<span class="chip warn">未保存</span>' : '') + '</div>' : '') + '</div>';
@@ -3730,6 +3733,7 @@ function anTable(cols, head, rows, cls){
 }
 /** グラフに入れなかったメーカー（数は見せ、名前と理由はカーソルで） */
 function anOut(list, label){
+  return '';   // 見える所に注記を出さない（2026-10-13 村井さん「細かいテキストは不要」）
   if (!list.length) return '';
   return '<p class="note anx" data-tip="' + esc((label || '数字がそろわないため除いたメーカー') + '\n' + list.map(function(x){ return x[0] + (x[1] ? '（' + x[1] + '）' : ''); }).join('\n')) + '">'
     + esc(label ? label : '除いたメーカー') + ' ' + list.length + '</p>';
@@ -4258,7 +4262,7 @@ function anMarket(d){
     + keys.map(function(k){ return '<th data-tip="' + esc(anTopicName(k) + 'の向き（↑ 上向き・→ 横ばい・↓ 下向き）。点数の平均が ±' + AN_FLAT + ' 未満は横ばい') + '">' + esc(anTopicName(k)) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows + sumRow + '</tbody></table>';
   // まだ調べていないメーカー: 測る専用の計画は市場を調べないので入れない（週に 1 回の自動の調査の対象ではない）
   var none = plans.filter(function(p){ return !(p.topics || []).length && !planMeasure(p); }).map(function(p){ return [p.clientName, '']; });
-  var right = last ? '<span class="meta" data-tip="AI が市場・競合・販路・DX の動きを、週に 1 回自動で調べます">最後の調査 ' + esc(anMonth(last)) + '</span>' : '';
+  var right = '';   // 最後の調査の月は出さない（2026-10-13 村井さん「細かいテキストは不要」）
   return anCard('話題ごとの向き', 'AI が調べた、メーカーごとの市場・競合・販路・DX の向きです（↑ 上向き・↓ 下向き・→ 横ばい。点数の平均が ±' + AN_FLAT + ' 未満は横ばい）。マスにカーソルを合わせると、点数と確からしさが出ます。調査は週に 1 回、自動で動きます',
     '<div class="tblwrap">' + tbl + '</div>' + anOut(none, 'まだ調べていないメーカー'), right);
 }
@@ -4284,13 +4288,13 @@ function lrLoad(t){
   else load('lrPeople', function(ok, fail){ call('apiPeopleLearning', [], ok, fail); }, null, function(r){ S.lr.people = r; });
 }
 /** 区切りの見出し（ふつうの言葉。学びの型の名前は説明に） */
-function lrSec(id, title, tipText, sub){ return '<div class="lr-sec" id="' + id + '"><h2>' + esc(title) + tip(tipText) + '</h2>' + (sub ? '<span class="meta">' + esc(sub) + '</span>' : '') + '</div>'; }
+function lrSec(id, title, tipText){ return '<div class="lr-sec" id="' + id + '"><h2>' + esc(title) + tip(tipText) + '</h2></div>'; }
 var LR_SEC_HUMAN = 'ダブルループ学習: 補正の数字を直すだけでは足りない外れを、人に返します。何の情報を早く集めるべきだったか、何を根拠に置くべきかなど、前提そのものを見直すための材料です';
 var LR_SEC_TUNE = 'シングルループ学習: 前提はそのままで、外れ方から AI が補正や重みの数字を直します。見直し案は、承認して反映するまで予測に効きません';
 function viewLearning(){
   var p = S.lr.people, a = S.lr.ai;
   var html = '<h1>学び</h1>' + lrSec('lr-human', '前提と情報の見直し', LR_SEC_HUMAN, '人に返す学び');
-  html += p ? lrReviewCard(p, a) + lrPeopleView(p) : (slot('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')") || loading('人の学びを読み込んでいます'));
+  html += p ? lrPeopleView(p, lrReviewCard(p, a)) : (slot('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')") || loading('人の学びを読み込んでいます'));
   html += lrSec('lr-tune', '補正と重みの調整', LR_SEC_TUNE, 'AI が直す学び');
   html += a ? lrAiView(a) : (slot('lrAi', 'AI の学びを読み込んでいます', "lrLoad('ai')") || loading('AI の学びを読み込んでいます'));
   return html;
@@ -4343,7 +4347,12 @@ function lrActName(l){ l = String(l || ''); return !l ? '-' : /^[\x00-\x7F]+$/.t
 function lrMultiFy(xs){ var f = {}; (xs || []).forEach(function(x){ f[x.fy] = 1; }); return Object.keys(f).length > 1; }
 function lrName(x, multi){ return String(x.clientName || '') + (multi ? ' FY' + x.fy : ''); }
 /** カード（見出し + 説明の印。right は見出しの右に置くもの） */
-function lrCard(title, tipText, body, right){ return '<div class="card"><div class="card-head"><h2>' + esc(title) + tip(tipText) + '</h2>' + (right || '') + '</div>' + body + '</div>'; }
+function lrCard(title, tipText, body, right){
+  // 右に「詳しく」（lrMore）があれば、その中身は見出しの ⓘ の説明の後ろへ（見出しの右に小さい文字を出さない。2026-10-13）
+  var more = [];
+  right = String(right || '').replace(/<span class="lr-more" tabindex="0" data-tip="([^"]*)">詳しく<\/span>/g, function(m, t){ more.push(t.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')); return ''; });
+  return '<div class="card"><div class="card-head"><h2>' + esc(title) + tip(tipText + (more.length ? '\n\n' + more.join('\n\n') : '')) + '</h2>' + right + '</div>' + body + '</div>';
+}
 /** 「詳しく」（専門の名前・式はここだけ。カーソルで出す） */
 function lrMore(text){ return '<span class="lr-more" tabindex="0" data-tip="' + esc(text) + '">詳しく</span>'; }
 /**
@@ -4479,14 +4488,16 @@ function lrReviewCard(p, a){
     : (wait ? '' : '<p class="note">今のところ、前提の見直しを促す偏りは見つかっていません。</p>');
   if (wait) body += '<div class="hm-wait lr-qwait" role="status"><span class="hm-yomi">' + YOMI_POSE.observe + '</span><span>観測中…</span><span class="note">AI の学びの数字を読み込んでいます</span></div>';
   return lrCard('次の予測で見直すこと', '外れ方と当たり方の数字から、前提・情報の集め方・根拠の置き方で見直したいことを、気になる順に並べました。数字は傾向で、原因を決めつけるものではありません。文にカーソルを合わせると、もとの数字が出ます',
-    body, xs.length ? '<span class="meta">' + xs.length + ' 件</span>' : '');
+    body, '');
 }
-function lrPeopleView(d){
+/** 人の学び。review = 「次の予測で見直すこと」のカード（よみの話の次に置く。ほかの画面と同じく、よみが先頭） */
+function lrPeopleView(d, review){
+  review = review || '';
   var full = d.detail === 'full' || d.detail === 'partial';   // 人ごとの中身がある（partial は担当のメーカーの計画だけ。行ごとに lrNamed で決める）
   // 何も無いときは、よみの案内 1 つだけ（空の注記を並べない）。中身の無いカードは出さない
   if (!((d.lessons || []).length || (d.openActions || []).length || (d.causes || []).length || (d.scoreboard || []).length || (d.decisions || []).length || (d.uplift || []).length || lrHitAny(d.hits)))
-    return guide('guide', '実績が締まって、' + runWhen(['EVAL.REPORT', 'EVAL.INSIGHTS']) + '、大きく外れた月の振り返りと、読みの当たりがここに並びます。');
-  return lrPeopleHero(d) + lrLessonCard(d, full) + lrCauseCard(d) + lrScoreCard(d, full) + lrHitCard(d.hits) + lrDecisionCard(d, full) + lrUpliftCard(d);
+    return guide('guide', '実績が締まって、' + runWhen(['EVAL.REPORT', 'EVAL.INSIGHTS']) + '、大きく外れた月の振り返りと、読みの当たりがここに並びます。') + review;
+  return lrPeopleHero(d) + review + lrLessonCard(d, full) + lrCauseCard(d) + lrScoreCard(d, full) + lrHitCard(d.hits) + lrDecisionCard(d, full) + lrUpliftCard(d);
 }
 /**
  * よみのまとめ（数だけ。メーカーの名前は出さない）。外れた月の振り返りが無いときは「外れた月はありません」とは言わず、何がまだかと動かし方を言う:
