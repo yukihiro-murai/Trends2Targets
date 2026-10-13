@@ -3814,7 +3814,7 @@ var LR_STATUS = { open: ['未着手', 'off'], in_progress: ['対応中', 'warn']
 /** 学びの気になる点（サーバーの説明には P10〜P90 などが入るので、ここの言葉で出す）: [短い名前, 説明] */
 var LR_HEALTH = {
   factor_clamp: ['補正が限度', '予測に掛ける補正の倍率が、限度（0.75 か 1.25）に張りついています'],
-  shadow_worse: ['寄せると悪化', '全体に寄せた補正を試すと、今より外れが大きくなります'],
+  shadow_worse: ['寄せると悪化', '補正を外した予測に、全体に寄せて学んだ倍率を掛けると、今より外れが大きくなります'],
   coverage_low: ['幅が狭すぎる', '実績が見通しの幅（下振れ〜上振れ）に収まる割合が 80% より低く、幅が狭すぎます'],
   coverage_high: ['幅が広すぎる', '実績が見通しの幅（下振れ〜上振れ）に収まる割合が 80% より高く、幅が広すぎます']
 };
@@ -4238,21 +4238,32 @@ function lrCurveCard(curves){
     chartOrTable('lrCurve', key + '<div class="lr-mult">' + panels + '</div>', table),
     lrMore('破線 = 事前分布（全計画から作った見立て。無ければ Beta(2, 2)）。実線 = 四半期ごとに当たり・外れを足した事後分布 Beta(α + 当たり, β + 外れ)。80% の幅は 10%〜90% 点です'));
 }
-/** 偏りの縮め: 計画ごとの読みのクセを、全計画の平均の方へ寄せた値（予測には効かせず、見比べるだけ） */
+/**
+ * 偏りの縮め: 計画ごとの読みのクセを、全計画の平均の方へ寄せた値（予測には効かせず、見比べるだけ）。
+ * 偏り（bias）は今の補正を外した予測で測る（サーバーが掛けていた補正で割り戻す。2026-10-13）。倍率（factorShadow）は今の補正の代わりに掛ける値なので、
+ * 今の補正（factorNow）と並べても「補正を外せ」と読めないように言う。寄せると の外れ幅は、倍率を決めたのと同じ月で測るので良く見えやすいと断る
+ */
 function lrShrinkCard(sh){
   var ps = (sh.plans || []).filter(function(p){ return isNum(p.bias) || isNum(p.shrunk); });
   if (!ps.length) return '';
   var multi = lrMultiFy(ps);
   ps = ps.slice().sort(function(a, b){ return (isNum(b.shrunk) ? b.shrunk : -1e9) - (isNum(a.shrunk) ? a.shrunk : -1e9); });
-  var tipOf = function(p){ return lrName(p, multi) + '\n元の偏り ' + pct1(p.bias) + ' → 全体に寄せた偏り ' + pct1(p.shrunk) + '\n' + (isNum(p.se) ? '偏りのぶれ ±' + pct0(p.se) + '・' : '') + '月の数 ' + (p.n || 0)
-    + (isNum(p.factorShadow) ? '\n寄せた補正の倍率 ' + p.factorShadow.toFixed(3) : '') + (isNum(p.mapeNow) ? '\n外れ幅 今 ' + pct0(p.mapeNow) + ' → 寄せると ' + pct0(p.mapeShadow) : ''); };
+  var fac = function(v){ return isNum(v) ? v.toFixed(3) : '-'; };
+  var facTip = function(p){ return '補正を外した予測から学んだ倍率 ' + fac(p.factorShadow) + (isNum(p.factorNow) ? '（今の補正 ' + fac(p.factorNow) + ' の代わりに掛ける値。今の補正に重ねて掛けるものではありません）' : '（今の補正の代わりに掛ける値）'); };
+  var tipOf = function(p){ return lrName(p, multi) + '\n補正を外した予測の偏り ' + pct1(p.bias) + ' → 全体に寄せた偏り ' + pct1(p.shrunk)
+    + (p.corrected ? '\n' + p.corrected + ' か月は、そのとき掛けていた補正を外して測りました' + (isNum(p.biasNow) ? '（補正を掛けた今の予測の偏りは ' + pct1(p.biasNow) + '）' : '') : '')
+    + '\n' + (isNum(p.se) ? '偏りのぶれ ±' + pct0(p.se) + '・' : '') + '月の数 ' + (p.n || 0)
+    + (isNum(p.factorShadow) ? '\n' + facTip(p) : '') + (isNum(p.mapeNow) ? '\n外れ幅 今 ' + pct0(p.mapeNow) + ' → 寄せると ' + pct0(p.mapeShadow) + '（倍率を決めたのと同じ月で測るので、良く見えやすい値です）' : ''); };
   var chart = chartArrows(ps.map(function(p){ return { label: lrName(p, multi), raw: p.bias, shrunk: p.shrunk, tip: tipOf(p) }; }),
     { mu: sh.mu, tau: sh.tau, fmt: lrSPct, rawLabel: '元の偏り', shrunkLabel: '寄せた偏り', bandLabel: '全体の平均 ± ばらつき', label: '偏りの縮め', labelW: chW() < 480 ? 128 : 168 });
-  var table = lrTable([['メーカー', 'wrap colmin'], ['月の数', 'num', 80], ['元の偏り', 'num', 104, 'プラスは予測が高すぎる（強気）、マイナスは低すぎる（弱気）'], ['寄せた偏り', 'num', 104, '全体に寄せた偏り'], ['倍率', 'num', 88, '寄せた偏りで補正するときの、予測に掛ける倍率'], ['外れ幅 今', 'num', 104], ['寄せると', 'num', 96, '寄せた補正を試したときの外れ幅']],
-    ps.map(function(p){ return [{ h: esc(lrName(p, multi)), tip: tipOf(p) }, p.n, pct1(p.bias), pct1(p.shrunk), isNum(p.factorShadow) ? p.factorShadow.toFixed(3) : '-', pct0(p.mapeNow), pct0(p.mapeShadow)]; }));
-  return lrCard('偏りの縮め', '計画ごとの読みのクセ（偏り）を、全計画の平均の方へ寄せた値です。月が少ない・ぶれが大きい計画ほど強く寄せます。帯は全体の平均 ± ばらつき。プラスは予測が高すぎる（強気）、マイナスは低すぎる（弱気）。予測には効かせず、見比べるだけです',
+  var table = lrTable([['メーカー', 'wrap colmin'], ['月の数', 'num', 80], ['元の偏り', 'num', 104, '今の補正を外した予測の偏り（予測の合計 ÷ 実績の合計 − 1。新しい月ほど重く）。プラスは予測が高すぎる（強気）、マイナスは低すぎる（弱気）'],
+    ['寄せた偏り', 'num', 104, '全体に寄せた偏り'], ['倍率', 'num', 88, '補正を外した予測から学んだ倍率です。今の補正の代わりに掛ける値で、今の補正に重ねて掛けるものではありません（1 = 補正なし）'],
+    ['外れ幅 今', 'num', 104, '今の予測（補正を掛けた後）の外れ幅'], ['寄せると', 'num', 96, '補正を外した予測に、学んだ倍率だけを掛けたときの外れ幅です。倍率を決めたのと同じ月で測るので、実際より良く見えやすい値です']],
+    ps.map(function(p){ return [{ h: esc(lrName(p, multi)), tip: tipOf(p) }, p.n, pct1(p.bias), pct1(p.shrunk), isNum(p.factorShadow) ? { h: fac(p.factorShadow), tip: facTip(p) } : '-', pct0(p.mapeNow), pct0(p.mapeShadow)]; }));
+  return lrCard('偏りの縮め', '計画ごとの読みのクセ（偏り）を、全計画の平均の方へ寄せた値です。偏りは今の補正を外した予測で測ります（補正で直った分を、偏りが無いとは見ません）。月が少ない・ぶれが大きい計画ほど強く寄せます。帯は全体の平均 ± ばらつき。プラスは予測が高すぎる（強気）、マイナスは低すぎる（弱気）。予測には効かせず、見比べるだけです',
     chartOrTable('lrShrink', chart, table),
-    lrMore('経験ベイズ（DerSimonian–Laird の τ²）で、計画ごとの偏りを全体の平均 μ へ、標準誤差に応じて縮めます。帯は μ ± τ' + (isNum(sh.mu) ? '（μ = ' + pct1(sh.mu) + '・τ = ' + pct0(sh.tau) + '）' : '') + '。計画が 1 つだけのときは 0 へ縮めます'));
+    lrMore('経験ベイズ（DerSimonian–Laird の τ²）で、計画ごとの偏りを全体の平均 μ へ、標準誤差に応じて縮めます。帯は μ ± τ' + (isNum(sh.mu) ? '（μ = ' + pct1(sh.mu) + '・τ = ' + pct0(sh.tau) + '）' : '') + '。計画が 1 つだけのときは 0 へ縮めます。'
+      + '偏り = Σw(予測 − 実績) ÷ Σw|実績|（予測は、掛けていた係数 ×（1 + 月ごとの補正）で割り戻したもの）。倍率 = 1 ÷（1 + 寄せた偏り）'));
 }
 /** 外れ幅と幅の当たり（全計画の月ごと）: 月の外れ幅と 3 か月の平均・見通しの幅に収まった割合（目標 80%）と、その確かさの幅 */
 function lrTimeCard(tl){

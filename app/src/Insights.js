@@ -213,7 +213,9 @@ function appInsightAccuracies_(ids, tab) {
   has.forEach(id => {
     if (found(id)) { accs[id] = hits[keys[id]].value; return; }
     try {
-      const v = appAccuracyOf_(id, tab('EVAL_LOG', few)[id] || [], typeof cut[id] === 'string' ? cut[id] : appLandingCutoff_(tab('PROCESS_STATUS', few)[id] || []));
+      // FORECAST_SNAPSHOT は、月ごとに掛かっていた補正を割り戻すため（全計画で縮めた偏りは補正を外した予測で測る。appEvalAppliedK_）
+      const v = appAccuracyOf_(id, tab('EVAL_LOG', few)[id] || [], typeof cut[id] === 'string' ? cut[id] : appLandingCutoff_(tab('PROCESS_STATUS', few)[id] || []),
+        tab('FORECAST_SNAPSHOT', few)[id] || []);
       try { appJobPutResult_(keys[id], v); } catch (e) { /* 控えられなくても返す */ }
       accs[id] = v;
     } catch (e) { Logger.log('精度を出せない計画: ' + id + ' ' + (e && e.message ? e.message : e)); }
@@ -930,7 +932,8 @@ function appInsightUplift_(ids) {
  *   curves:      [{ type, label, prior: { alpha0, beta0, mu, precision, from, mean, ci80 }, n, hit,
  *                   quarters: [{ quarter, n, hit, cumN, cumHit, alpha, beta, mean, ci80 }] }]（四半期ごとに積み上げた事後。画面がベータ分布の曲線を描く）
  *   noPreMonth:  その月が始まる前の予測が無いので当たりを数えなかった、締まった月の数（人の学びと同じ。D6）
- *   shrinkage:   { mu, tau, tau2, pooled, plans: [{ planId, clientName, fy, n, bias, se, shrunk, factorShadow, mapeNow, mapeShadow }] }
+ *   shrinkage:   { mu, tau, tau2, pooled, plans: [{ planId, clientName, fy, n, bias（補正を外した予測の偏り）, biasNow（今の予測の偏り）, corrected（補正を割り戻した月の数）,
+ *                  se, shrunk, factorShadow（補正を外した予測から学んだ倍率）, factorNow（今の補正）, mapeNow, mapeShadow }] }
  *   timeline:    [{ ym, n, mape, coverage, coverageN, coverageCi80: [下, 上], target, rolling3, rolling3N }]（全計画の締まった月ごと。締まった後の予測の月は除く）
  *   calibration: [{ planId, clientName, fy, factorNow, path: [{ at, factor, factorLabel, old, new, source, sourceLabel, quarter }] }]
  *                  （summary では信頼度の factor は種類まで: reliability:<種類>・「見解の信頼度」）
@@ -971,18 +974,19 @@ function appAiLearning_(ctx) {
   plans.forEach(p => { info[p.planId] = p; });
   const accs = appInsightAccuracies_(ids, tab);
   const shadow = appBiasShadow_(accs);
-  const shrinkage = { mu: shadow.mu, tau: Math.sqrt(shadow.tau2), tau2: shadow.tau2, pooled: shadow.pooled,
-    plans: plans.filter(p => shadow.plans[p.planId]).map(p => {
-      const s = shadow.plans[p.planId];
-      return { planId: p.planId, clientName: p.clientName, fy: p.fy, n: accs[p.planId].n, bias: s.bias, se: s.se, shrunk: s.shrunk,
-        factorShadow: s.factorShadow, mapeNow: s.mapeNow, mapeShadow: s.mapeShadow };
-    }) };
   // 今の補正: CONFIG!B2 のメーカーの行（予測に効く行。最後の行ではない。appLandingCalRow_。2026-10-13）
   const state = tab('CALIBRATION_STATE');
   let clients = {};
   try { clients = appPlanClients_(ids); } catch (e) { Logger.log('メーカーの名前を読めません: ' + (e && e.message ? e.message : e)); }
   const factorNow = {};
   ids.forEach(id => { const c = appLandingCalRow_(state[id] || [], clients[id] || ''); factorNow[id] = c ? appNum_(c.bias_correction_factor) : null; });
+  // 縮めた偏りは補正を外した予測で測る（bias。biasNow = 今の予測の偏り）。倍率は今の補正の代わりに掛ける値なので、今の補正（factorNow）と並べて見せる
+  const shrinkage = { mu: shadow.mu, tau: Math.sqrt(shadow.tau2), tau2: shadow.tau2, pooled: shadow.pooled,
+    plans: plans.filter(p => shadow.plans[p.planId]).map(p => {
+      const s = shadow.plans[p.planId];
+      return { planId: p.planId, clientName: p.clientName, fy: p.fy, n: accs[p.planId].n, bias: s.bias, biasNow: s.biasNow, corrected: s.corrected, se: s.se, shrunk: s.shrunk,
+        factorShadow: s.factorShadow, factorNow: factorNow[p.planId] === undefined ? null : factorNow[p.planId], mapeNow: s.mapeNow, mapeShadow: s.mapeShadow };
+    }) };
   return {
     detail: detail, curves: curves, noPreMonth: appInsightCountMonths_(noPre), shrinkage: shrinkage, timeline: appInsightTimeline_(accs),
     calibration: appInsightCalibration_(plans, tab('CALIBRATION_HISTORY'), factorNow, hide),

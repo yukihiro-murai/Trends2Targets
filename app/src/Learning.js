@@ -10,7 +10,9 @@
  *       EVAL_LOG の行は消さずに読み飛ばす）。どの回の予測で測るか（その月が始まる前の最後の回。D6）は、EVAL_LOG を書く旧来の B-2 が決める。
  *       そのため、今の検証の版（APP_EVAL_POLICY_VERSION）で B-2 が書いた行だけを使う（appEvalRowCurrent_。前の版の行は、月が始まった後の
  *       予測や途中の実績で測った行なので、締まった月の行でも消さずに読み飛ばす。旧来の B-3〜C-1 と同じ）
- *     - 全計画で縮めた偏りの補正（階層ベイズ / 経験ベイズ）: 計画ごとの偏りを、全計画の平均へ、ばらつきに応じて縮める
+ *     - 全計画で縮めた偏りの補正（階層ベイズ / 経験ベイズ）: 計画ごとの偏りを、全計画の平均へ、ばらつきに応じて縮める。
+ *       偏りは、補正（係数 ×（1 + 暦月の補正））を外した予測で測る（2026-10-13。旧来の B-5 と同じく、その予測に掛かっていた補正で割り戻す。
+ *       appEvalAppliedK_）。掛けた後の予測で測ると、補正でちょうど直った計画は偏り 0・倍率 1 に見え、「補正を外せ」と読めてしまう
  *     - P10〜P90 の幅の較正（コンフォーマル）: 実績の 80% が入る幅にするには、今の幅を何倍にすればよいか
  *   人の判断で入れるもの
  *     - 情報源の信頼度の事前分布（ベータ二項の経験ベイズ）: 全計画の RELIABILITY_EVIDENCE（当たった数 / 数）から作り、
@@ -25,6 +27,7 @@ const APP_POOL_MIN_SAMPLES = 5;    // 計画ごとに、これだけの数があ
 const APP_POOL_PRECISION_MIN = 2;
 const APP_POOL_PRECISION_MAX = 50;
 const APP_BIAS_HALF_LIFE = 4;      // 旧来の B-5 と同じ（月）
+const APP_CAL_MONTH_BIAS_CAP = 0.25;   // 旧来の AUTOLEARN_FORECAST_BIAS_CAP（A-9 が暦月の補正を掛けるときの上限。補正を割り戻すときも同じに切る）
 
 /**
  * 今の検証の版（旧来の EVALUATION_POLICY_VERSION と同じ値にする。旧来の側の直しが入っていれば app/tests が照合する）。
@@ -140,7 +143,8 @@ function appQuantile_(xs, q) {
 
 /**
  * 精度の形の印（控えの鍵に入れる）。測り方を変えたら変える（同じ版のまま出しても、前の測り方の控えを使わない）。
- * wape-1 = 2026-10-13: 外れ幅と偏りを合計の比（appWape_）にした
+ * wape-1 = 2026-10-13: 外れ幅と偏りを合計の比（appWape_）にした。月ごとに掛かっていた補正の倍率（months[].k）と、
+ * 補正を外した予測の偏り（raw）を足した
  */
 const APP_ACCURACY_FORM = 'wape-1';
 
@@ -186,6 +190,49 @@ function appAccuracyAll_(planIds) {
 }
 
 /**
+ * 検証の月ごとに、その月を測った予測に掛かっていた補正の倍率 k = 係数 ×（1 + その暦月の補正）（2026-10-13）。
+ * 旧来の B-5 が補正を割り戻すとき（attachAppliedCalibration_）と同じものを読む: EVAL_LOG の中心を作った FORECAST_SNAPSHOT の回を、B-2 と同じ決まり
+ * （その月が始まる前の回のうち一番新しい回。締まった後の回 = forecast_source が actual_closed・印の無い回で中心が実績と同じ、は使わない）で選び、
+ * その回の中心が EVAL_LOG の中心と同じなら、その回の calibration_applied_json の係数（正の数でなければ 1）と、その暦月の補正（±0.25 で切る。A-9 と同じ）。
+ * 回が無い・中心が違う（B-2 の後に予測し直した）・読めない月は入れない（= 1。補正なしとして扱う。旧来と同じ）。Vertex の補正は学ぶ補正ではないので割り戻さない。
+ * snapRows = FORECAST_SNAPSHOT の行（見出し → 値）、months = appEvalMonths_ の月。返り値 { 'yyyy/MM': k }。
+ * 計画のブックは 1 つのメーカーの分なので、メーカーの名前では分けない（旧来は名前でも分ける）
+ */
+function appEvalAppliedK_(snapRows, months) {
+  const want = {};
+  (months || []).forEach(m => { want[m.month] = m; });
+  const best = {};
+  (snapRows || []).forEach((r, i) => {
+    if (String(r.scenario || '') !== 'neutral') return;
+    const ym = appYm_(r.target_month);
+    const m = want[ym];
+    if (!m) return;
+    const t = appEvidenceMs_(r.run_date), start = appMonthStartMs_(ym);
+    if (t === null || start === null || t >= start) return;   // その月が始まる前の回だけ（D6）
+    let src = '';
+    try { src = String((JSON.parse(String(r.key_factors_json || '{}')) || {}).forecast_source || ''); } catch (e) { src = ''; }
+    const pred = appNum_(r.final_pred);
+    if (src === 'actual_closed' || (!src && pred !== null && Math.abs(pred - m.actual) < 1e-6)) return;   // 締まった後の回は使わない
+    const b = best[ym];
+    if (!b || t > b.t || (t === b.t && i > b.i)) best[ym] = { t: t, i: i, pred: pred, cal: r.calibration_applied_json };
+  });
+  const out = {};
+  Object.keys(best).forEach(ym => {
+    const b = best[ym], p50 = want[ym].p50;
+    if (b.pred === null || Math.abs(b.pred - p50) > Math.max(1e-6, 1e-9 * Math.abs(b.pred))) return;
+    let cal = b.cal;
+    if (typeof cal === 'string') { try { cal = JSON.parse(cal); } catch (e) { cal = null; } }
+    if (!cal || typeof cal !== 'object') return;
+    const f = Number(cal.bias_correction_factor);
+    let mb = 0;
+    try { mb = Number(JSON.parse(appCalibrationStoredMonthJson_(cal.residual_month_bias_json))[String(Number(ym.slice(5)))] || 0); } catch (e) { mb = 0; }
+    const k = (isFinite(f) && f > 0 ? f : 1) * (1 + Math.min(APP_CAL_MONTH_BIAS_CAP, Math.max(-APP_CAL_MONTH_BIAS_CAP, isFinite(mb) ? mb : 0)));
+    if (isFinite(k) && k > 0) out[ym] = k;
+  });
+  return out;
+}
+
+/**
  * 計画の締まった月の境目（appLandingCutoff_。stRows = その計画の PROCESS_STATUS の行）。計画の一覧（appPortfolioData_）と同じく、
  * 実績の取り込み（B-1）の後に当たり具合の計算（B-2）がまだの間は、消さずに足す記録（appPortfolioStepHist_）を渡して、最後に成功した
  * B-2 の前の B-1 の境目で数え続ける（2026-10-13。前は記録を渡さず、その間は締まった月が 0 か月になり、計画の一覧とずれていた）。
@@ -201,19 +248,24 @@ function appPlanCutoff_(planId, stRows) {
  * 計画の精度（影）。leak = 予測が実績とまったく同じ月（締まった後に予測し直した月。旧来の検証が拾ってしまう）。evalRows は appEvalMonths_ と同じ。
  * 締まった月の、今の検証の版の行だけで測る（D4〜D6。appEvalRowCurrent_）。cutoffYm（締まった月の境目。appLandingCutoff_）を省くと、
  * その計画の PROCESS_STATUS を読んで決める。scoredMonths = 今の決まりで B-2 が測った月の数（appEvalScoredMonths_。実績 0 円の月も数える。
- * months・n は実績 0 円の月を除くので、「まだ比べていない」と「比べた月がどれも売上 0 円」を見分けるのに使う）
+ * months・n は実績 0 円の月を除くので、「まだ比べていない」と「比べた月がどれも売上 0 円」を見分けるのに使う）。
+ * snapRows = その計画の FORECAST_SNAPSHOT の行（省くと読む）。月ごとに、その月を測った予測に掛かっていた補正の倍率 k（appEvalAppliedK_。
+ * 分からなければ 1）を months[].k に入れ、raw = 補正を外した予測（中心 ÷ k）の偏り { bias, errVar, corrected（k が 1 でない月の数） } を返す
+ * （全計画で縮めた偏り appBiasShadow_ が使う。2026-10-13）
  */
-function appAccuracyOf_(planId, evalRows, cutoffYm) {
-  const need = (evalRows ? [] : ['EVAL_LOG']).concat(typeof cutoffYm === 'string' ? [] : ['PROCESS_STATUS']);
+function appAccuracyOf_(planId, evalRows, cutoffYm, snapRows) {
+  const need = (evalRows ? [] : ['EVAL_LOG']).concat(typeof cutoffYm === 'string' ? [] : ['PROCESS_STATUS']).concat(snapRows ? [] : ['FORECAST_SNAPSHOT']);
   const t = need.length ? appEngTableObjects_(planId, need) : {};
   const cutoff = typeof cutoffYm === 'string' ? cutoffYm : appPlanCutoff_(planId, t.PROCESS_STATUS);
   const scoredMonths = appEvalScoredMonths_(evalRows || t.EVAL_LOG, cutoff).length;
-  const ms = appEvalMonths_(planId, evalRows || t.EVAL_LOG, cutoff).map(m => {
+  const base = appEvalMonths_(planId, evalRows || t.EVAL_LOG, cutoff);
+  const kOf = appEvalAppliedK_(snapRows || t.FORECAST_SNAPSHOT, base);
+  const ms = base.map(m => {
     const err = (m.p50 - m.actual) / Math.abs(m.actual);
     const hasRange = m.p10 !== null && m.p10 !== undefined && m.p90 !== null && m.p90 !== undefined && m.p90 > m.p10;
     return Object.assign({}, m, { err: err, ape: Math.abs(err), leak: Math.abs(m.p50 - m.actual) < 1e-6,
       inside: hasRange ? (m.actual >= m.p10 && m.actual <= m.p90) : null,
-      z: hasRange ? Math.abs(m.actual - m.p50) / ((m.p90 - m.p10) / 2) : null });
+      z: hasRange ? Math.abs(m.actual - m.p50) / ((m.p90 - m.p10) / 2) : null, k: kOf[m.month] || 1 });
   });
   const use = ms.filter(m => !m.leak);
   const inside = use.filter(m => m.inside !== null);
@@ -222,10 +274,12 @@ function appAccuracyOf_(planId, evalRows, cutoffYm) {
   const w = use.map((m, i) => Math.pow(0.5, (use.length - 1 - i) / APP_BIAS_HALF_LIFE));
   const half = Math.floor(use.length / 2);
   const wapeOf = xs => appWape_(xs).mape;
+  const raw = use.map(m => ({ p50: m.p50 / m.k, actual: m.actual }));   // 補正を外した予測（旧来の B-5 と同じく割り戻す）
   return {
     months: ms, n: use.length, leaks: ms.length - use.length, cutoffYm: cutoff, scoredMonths: scoredMonths,
     mape: wapeOf(use), bias: appWape_(use, w).bias, biasW: w.reduce((a, b) => a + b, 0),
     errVar: appWapeVar_(use),
+    raw: { bias: appWape_(raw, w).bias, errVar: appWapeVar_(raw), corrected: use.filter(m => m.k !== 1).length },
     coverage: inside.length ? inside.filter(m => m.inside).length / inside.length : null, coverageN: inside.length,
     // 実績の 80% が入る幅は、今の幅の何倍か（1 より大きければ今の幅は狭すぎる）
     widthScale: zs.length >= 3 ? appQuantile_(zs, 0.8) : null,
@@ -237,28 +291,40 @@ function appAccuracyOf_(planId, evalRows, cutoffYm) {
 /**
  * 全計画の偏りの補正を、全体の平均へ縮める（経験ベイズ・DerSimonian–Laird の τ²）。影: 予測には効かない。
  * 使う月は accs（appAccuracyOf_）の月 = 締まった月だけ（D4）。
- * 返り値: { mu, tau2, plans: { planId: { bias, se, shrunk, factorShadow, mapeNow, mapeShadow } } }（se = 偏りの標準誤差。縮める強さを決めたもの）
+ * 偏りは補正を外した予測で測る（accs[].raw。2026-10-13）。測っている予測は、補正（係数 ×（1 + 暦月の補正））を掛けた後の値なので、
+ * そのまま縮めると、補正で直った計画（補正前 +25% を係数 0.8 で直した計画）の倍率は 1 に見え、補正の無い計画の偏りと混ざる。
+ * 旧来の B-5 と同じく割り戻してから縮めるので、倍率（factorShadow = 1 ÷（1 + 縮めた偏り））は「今の補正の代わりに掛ける倍率」（今の補正に重ねて掛けるものではない）。
+ * mapeNow = 今の予測（補正を掛けた後）の外れ幅、mapeShadow = 補正を外した予測に倍率だけを掛けたときの外れ幅（どちらも合計の比）。
+ * mapeShadow は倍率を決めたのと同じ月で測るので、実際より良く見えやすい（画面で断る）。
+ * 返り値: { mu, tau2, plans: { planId: { bias（補正を外した予測の偏り）, biasNow（今の予測の偏り）, corrected（割り戻した月の数）, se, shrunk,
+ *   factorShadow, mapeNow, mapeShadow } } }（se = 偏りの標準誤差。縮める強さを決めたもの）
  */
 function appBiasShadow_(accs) {
-  const ids = Object.keys(accs).filter(id => accs[id].n >= 3 && accs[id].bias !== null);
-  const v = id => { const a = accs[id]; const s2 = a.errVar === null ? 0.04 : Math.max(a.errVar, 1e-4); return s2 / Math.max(1, a.biasW); };
+  // 前の形の控え（raw が無い）は、補正を掛けた後の偏りのまま（割り戻す材料が無い）
+  const rawOf = id => { const a = accs[id]; return a.raw && typeof a.raw.bias === 'number' ? a.raw : { bias: a.bias, errVar: a.errVar, corrected: 0 }; };
+  const ids = Object.keys(accs).filter(id => accs[id].n >= 3 && typeof rawOf(id).bias === 'number' && isFinite(rawOf(id).bias));
+  const v = id => { const r = rawOf(id); const s2 = r.errVar === null || r.errVar === undefined ? 0.04 : Math.max(r.errVar, 1e-4); return s2 / Math.max(1, accs[id].biasW); };
   let mu = 0, tau2 = 0;
   if (ids.length >= 2) {
     const w = ids.map(id => 1 / v(id));
-    mu = appWMean_(ids.map(id => accs[id].bias), w);
-    const q = ids.reduce((s, id, i) => s + w[i] * Math.pow(accs[id].bias - mu, 2), 0);
+    mu = appWMean_(ids.map(id => rawOf(id).bias), w);
+    const q = ids.reduce((s, id, i) => s + w[i] * Math.pow(rawOf(id).bias - mu, 2), 0);
     const c = w.reduce((a, b) => a + b, 0) - w.reduce((a, b) => a + b * b, 0) / w.reduce((a, b) => a + b, 0);
     tau2 = Math.max(0, (q - (ids.length - 1)) / (c || 1));
   }
   const plans = {};
   ids.forEach(id => {
-    const a = accs[id];
+    const a = accs[id], r = rawOf(id);
     // 計画が 1 つだけのときは、旧来と同じく 0 へ縮める（事前の精度 3 = 旧来の kG）
-    const shrunk = ids.length >= 2 ? (tau2 > 0 ? (a.bias / v(id) + mu / tau2) / (1 / v(id) + 1 / tau2) : mu) : a.bias * a.biasW / (a.biasW + 3);
-    const factor = Math.min(1.25, Math.max(0.75, 1 - shrunk));
+    const shrunk = ids.length >= 2 ? (tau2 > 0 ? (r.bias / v(id) + mu / tau2) / (1 / v(id) + 1 / tau2) : mu) : r.bias * a.biasW / (a.biasW + 3);
+    // 倍率 = 1 ÷（1 + 縮めた偏り）（偏りは合計の比なので、倍率を掛けた予測の合計が実績の合計に合う値。2026-10-13）。
+    // 前の 1 − 偏り は偏りが小さいときの近似で、補正の前に +25% の計画では 0.75（下限）になり、今の補正 0.8 と食い違って見えた。上下限は旧来と同じ
+    const factor = Math.min(1.25, Math.max(0.75, 1 + shrunk > 0 ? 1 / (1 + shrunk) : 1.25));
     const use = a.months.filter(m => !m.leak);
-    const mapeAt = f => appWape_(use.map(m => ({ p50: m.p50 * f, actual: m.actual }))).mape;   // 外れ幅は精度と同じ合計の比
-    plans[id] = { bias: a.bias, se: Math.sqrt(v(id)), shrunk: shrunk, factorShadow: factor, mapeNow: mapeAt(1), mapeShadow: mapeAt(factor) };
+    const kOf = m => (typeof m.k === 'number' && m.k > 0 ? m.k : 1);
+    const mapeNow = appWape_(use).mape;
+    const mapeShadow = appWape_(use.map(m => ({ p50: m.p50 / kOf(m) * factor, actual: m.actual }))).mape;   // 補正を外した予測に、倍率だけを掛ける
+    plans[id] = { bias: r.bias, biasNow: a.bias, corrected: r.corrected || 0, se: Math.sqrt(v(id)), shrunk: shrunk, factorShadow: factor, mapeNow: mapeNow, mapeShadow: mapeShadow };
   });
   return { mu: mu, tau2: tau2, pooled: ids.length >= 2, plans: plans };
 }

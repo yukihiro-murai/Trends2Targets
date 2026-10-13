@@ -150,6 +150,67 @@ const B1 = new Date(2026, 6, 6, 10), B2old = new Date(2026, 5, 6, 11), B2now = n
   assert.equal(J(env.run(`appPlanCutoff_('X-none', [{ step_key: 'step2_status', status: 'success', last_run_date: __b1 }])`, { __b1: B1 })), '');
 }
 
+// ==== 2. 全計画で縮めた偏りは、補正を外した予測で測る（提案 7） ====
+{
+  // 月ごとに掛かっていた補正の倍率（旧来の B-5 の attachAppliedCalibration_ と同じ読み方）
+  const snapRow = (ym, runDate, pred, cal, src = 'forecast_open') => ({ snapshot_id: 'S' + runDate, run_date: runDate, client: 'x', target_month: ym, scenario: 'neutral',
+    final_pred: pred, key_factors_json: JSON.stringify(src ? { opinion: '', forecast_source: src } : { opinion: '' }), calibration_applied_json: typeof cal === 'string' ? cal : JSON.stringify(cal) });
+  const c = (f, mb) => ({ version: 'x', bias_correction_factor: f, residual_month_bias_json: mb || '' });
+  const months = [{ month: '2026/04', p50: 80, actual: 100 }, { month: '2026/05', p50: 90, actual: 100 }, { month: '2026/06', p50: 95, actual: 100 },
+    { month: '2026/07', p50: 70, actual: 100 }, { month: '2026/08', p50: 60, actual: 100 }, { month: '2026/09', p50: 100, actual: 50 }];
+  const k = run('appEvalAppliedK_(__s, __m)', { __m: months, __s: [
+    snapRow('2026/04', '2026-03-10T10:00:00+0900', 70, c(0.7)), snapRow('2026/04', '2026-03-20T10:00:00+0900', 80, c(0.8, '{"4":-0.3}')),   // 一番新しい前の回。暦月は −0.25 で切る
+    snapRow('2026/04', '2026-04-03T10:00:00+0900', 80, c(0.5)),                                    // 月が始まった後の回は使わない
+    snapRow('2026/05', '2026-04-20T10:00:00+0900', 90, c(0.9, '{"5":0.1}')), snapRow('2026/05', '2026-04-25T10:00:00+0900', 100, c(0.6), 'actual_closed'),   // 締まった後の回は使わない
+    snapRow('2026/06', '2026-05-20T10:00:00+0900', 96, c(0.9)),                                    // 中心が EVAL_LOG と違う（予測し直した）→ 補正なし
+    snapRow('2026/07', '2026-06-20T10:00:00+0900', 70, '{broken'),                                 // 読めない → 補正なし
+    snapRow('2026/08', '2026-07-20T10:00:00+0900', 60, c(-1)),                                     // 係数が正でない → 1
+    snapRow('2026/09', '2026-08-20T10:00:00+0900', 50, c(0.5), ''),                                // 印の無い回で中心が実績と同じ（締まった後の回）→ 使わない
+    { ...snapRow('2026/09', '2026-08-10T10:00:00+0900', 100, c(1.2)), scenario: 'posi' }] });          // 中心でない行は見ない
+  assert.deepEqual(k, { '2026/04': 0.8 * 0.75, '2026/05': 0.9 * 1.1, '2026/08': 1 });
+  assert.equal(pure.run('APP_CAL_MONTH_BIAS_CAP'), 0.25);
+
+  const { env, seed } = pipelineEnv();
+  // 計画 A: 補正の前は 25% 強気。今の係数 0.8 で直した予測（中心 = 補正の前 × 0.8）で、実績とほぼ同じ
+  const actsA = [[100, 1.01], [120, 0.99], [110, 1.005]];
+  const ymsA = ['2026/04', '2026/05', '2026/06'];
+  const runOf = (ym) => { const [y, m] = ym.split('/').map(Number); return new Date(y, m - 2, 20, 10); };   // 前の月の 20 日（その月が始まる前）
+  const idA = seed('甲製薬', { b1: B1, b2: B2now, months: ymsA.map((ym, i) => [ym, actsA[i][0], actsA[i][0] * actsA[i][1]]),
+    cal: [{ client: '甲製薬', bias_correction_factor: 0.8, residual_month_bias_json: '{}', auto_update_enabled: 0, note: 'owner-approved' }],
+    snap: ymsA.map((ym, i) => ({ snapshot_id: 'S' + i, run_date: runOf(ym), client: '甲製薬', target_month: ym, scenario: 'neutral', final_pred: actsA[i][0] * actsA[i][1],
+      key_factors_json: '{"forecast_source":"forecast_open"}', calibration_applied_json: JSON.stringify(c(0.8)) })) });
+  // 計画 B: 補正なしで 10% 強気
+  const idB = seed('乙製薬', { b1: B1, b2: B2now, months: ymsA.map((ym, i) => [ym, 200 + 10 * i, (200 + 10 * i) * 1.1]) });
+  const ai = env.call('apiAiLearning()');
+  const sh = Object.fromEntries(ai.shrinkage.plans.map((p) => [p.planId, p]));
+  const a = sh[idA], b = sh[idB];
+  const wt = [Math.pow(0.5, 2 / 4), Math.pow(0.5, 1 / 4), 1];
+  const ratio = (xs) => xs.reduce((s, [act, p], i) => s + wt[i] * (p - act), 0) / xs.reduce((s, [act], i) => s + wt[i] * act, 0);
+  close(a.biasNow, ratio(actsA.map(([x, r]) => [x, x * r])), 1e-12, '今の予測の偏りはほぼ 0');
+  close(a.bias, ratio(actsA.map(([x, r]) => [x, x * r / 0.8])), 1e-12, '補正を外した予測の偏り（+25% ほど）');
+  assert.ok(a.bias > 0.24 && a.bias < 0.27 && Math.abs(a.biasNow) < 0.01, JSON.stringify(a));
+  assert.deepEqual([a.corrected, b.corrected, a.factorNow, b.factorNow], [3, 0, 0.8, null]);
+  close(b.bias, 0.1, 1e-12, '補正の無い計画はそのまま');
+  close(b.biasNow, 0.1, 1e-12);
+  assert.ok(ai.shrinkage.mu > 0.1 && ai.shrinkage.mu < 0.25, '全体の平均は補正を外した偏りどうしで: ' + ai.shrinkage.mu);
+  // 倍率 = 1 ÷（1 + 縮めた偏り）: 補正の前に +25% なら 0.8 ほど（今の補正と同じ。1 − 偏り の近似なら下限 0.75 に張りついた）
+  close(a.factorShadow, 1 / (1 + a.shrunk), 1e-12, '倍率');
+  assert.ok(Math.abs(a.factorShadow - 0.8) < 0.005, '補正を外した予測から学んだ倍率は、今の補正 0.8 に近い（1 ではない）: ' + a.factorShadow);
+  assert.ok(Math.abs(b.factorShadow - 1 / 1.1) < 0.005, '補正の無い +10% の計画は 1 ÷ 1.1 ほど: ' + b.factorShadow);
+  assert.ok(!ai.health.some((h) => h.key === 'shadow_worse'), '寄せても悪くならない（近似で下限に張りついた倍率を試していた）');
+  // 寄せると: 補正を外した予測に倍率だけを掛けた外れ幅（今の外れ幅は補正を掛けた後の予測）
+  const rawA = actsA.map(([x, r]) => [x, x * r / 0.8]);
+  close(a.mapeShadow, rawA.reduce((s, [x, p]) => s + Math.abs(p * a.factorShadow - x), 0) / rawA.reduce((s, [x]) => s + x, 0), 1e-12, '寄せると');
+  close(a.mapeNow, actsA.reduce((s, [x, r]) => s + Math.abs(x * r - x), 0) / actsA.reduce((s, [x]) => s + x, 0), 1e-12, '今');
+  // 前の測り方（補正を掛けた後の予測のまま縮める）なら、A の倍率は 1 に近く「補正を外せ」と読めた
+  const before = J(env.run(`(() => { const o = {}; [__a, __b].forEach(id => { o[id] = appAccuracyOf_(id, null, null, []); }); return appBiasShadow_(o); })()`, { __a: idA, __b: idB }));
+  assert.ok(before.plans[idA].factorShadow > 0.95, '前: ' + before.plans[idA].factorShadow);
+  // 検証の画面（計画 1 つ）の影も同じ
+  const lv = env.call('apiLearningView(__in)', { __in: { planId: idA } });
+  close(lv.shadow.factorShadow, a.factorShadow, 1e-12);
+  assert.equal(lv.factorNow, 0.8);
+}
+
 // ==== 4. 「今の補正」は CONFIG!B2 のメーカーの行（最後の行ではない。提案 10） ====
 {
   const { env, seed } = pipelineEnv();
