@@ -231,7 +231,7 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
     { name: '鷹野', own: true, n: 2, hit: 2, rate: 1, makers: 2, quarters: [q('FY2026-Q2', 'メーカーB', 0.03, 1), q('FY2026-Q1', 'メーカーC', 0.03, 1)] },
   ], hidden: 0, quarters: 2 };
   const ph = run('lrHitCard(__h)', { __h: people });
-  const names = [...ph.matchAll(/<td class="wrap colmin" data-tip="[^"]*">([\s\S]*?)<\/td>/g)].map((m) => m[1]);
+  const names = [...ph.matchAll(/<td class="lr-wr lr-kw" data-tip="[^"]*">([\s\S]*?)<\/td>/g)].map((m) => m[1]);
   assert.deepEqual(names, ['佐藤', '鷹野 <span class="meta">メーカーA</span>', '鷹野 <span class="meta">メーカーB ほか 1</span> <span class="chip">自分</span>'], names.join(' | '));
   assert.doesNotMatch(ph, /undefined|NaN|null/);
 

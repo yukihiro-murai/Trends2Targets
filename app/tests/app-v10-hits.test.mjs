@@ -563,10 +563,10 @@ const learn = (env, planId) => env.table('LEARNING_LOG').filter((r) => planId ==
   const only = run('lrPeopleView(__d)', { __d: { detail: 'summary', lessons: [], openActions: [], causes: [], scoreboard: [], decisions: [], uplift: [], summary: {}, hits: { people: [], hidden: 3, quarters: 1 } } });
   assert.match(only, /人ごとの当たり/);
   // 学びの画面に渡る中身（本物の応答）で描いても空の値が出ない
-  run('S.lr.people = __p; S.lr.ai = __a; S.lr.tab = "people"', { __p: people, __a: ai });
-  assert.doesNotMatch(run('viewLearning()'), /undefined|NaN/);
-  run('S.lr.tab = "ai"');
-  assert.doesNotMatch(run('viewLearning()'), /undefined|NaN/);
+  run('S.lr.people = __p; S.lr.ai = __a', { __p: people, __a: ai });
+  const page = run('viewLearning()');
+  assert.doesNotMatch(page, /undefined|NaN/);
+  assert.ok(page.indexOf('人ごとの当たり') < page.indexOf('id="lr-tune"') && page.indexOf('id="lr-tune"') < page.indexOf('調査ごとの当たり'), '人ごとの当たりは人に返す学び、調査ごとの当たりは AI が直す学び');
 }
 
 console.log('app-v10-hits: ok');

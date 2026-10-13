@@ -270,7 +270,7 @@ const upKo = (5 + 3 * 0.75) / 9, upOtsu = (4 + 3 * 0.75) / 9;
   run('S.cv.lrScore = "table"');
   const tbl = clean(run('lrScoreCard(__d, true)', { __d: pl }), '当たりの確かさ（表）');
   run('S.cv.lrScore = "chart"');
-  const names = [...tbl.matchAll(/<td class="wrap colmin" data-tip="[^"]*">([\s\S]*?)<\/td>/g)].map((m) => m[1].replace(/ <span class="chip"[^>]*>/, '|').replace(/<\/span>/, ''));
+  const names = [...tbl.matchAll(/<td class="lr-wr" data-tip="[^"]*">([\s\S]*?)<\/td>/g)].map((m) => m[1].replace(/ <span class="chip"[^>]*>/, '|').replace(/<\/span>/, ''));
   assert.deepEqual(names, ['見解・読田|上回る', '見解・上田', '見解・逆田|下回る']);
   assert.match(tbl, /<th class="num" data-tip="いつも同じ向きと言った場合に当たる割合[^"]*">基準<\/th>/);
   assert.match(tbl, /<td class="num">75%<\/td>/, '上田の基準 75%');

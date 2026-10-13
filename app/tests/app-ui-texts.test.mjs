@@ -282,11 +282,11 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
   assert.match(a, /外れ幅・読みのクセ[^<]*は出していません。[^<]*各計画の振り返りで「当たり具合を計算」を動かすと/);
   assert.doesNotMatch(a, /<h2>外れ幅<span|<h2>読みのクセ<span/);
   // 学び: 人の学びは「まだ比べた月がありません」、AI の学びも外れ幅が無いことを言う
-  const lp = clean(run(`S.view = 'learning'; S.lr.tab = 'people'; S.lr.people = __p; viewLearning()`, { __p: people }), '人の学び');
+  const lp = clean(run(`S.view = 'learning'; S.lr.people = __p; S.lr.ai = null; lrReviewCard(__p, null) + lrPeopleView(__p)`, { __p: people }), '人の学び');
   assert.match(lp, /まだ実績と比べた月がありません。/);
   assert.doesNotMatch(lp, /今の決まり/, '中の言葉（今の決まり）は出さない');
   assert.doesNotMatch(lp, /大きく外れた月はありません/);
-  const la = clean(run(`S.lr.tab = 'ai'; S.lr.ai = __ai; viewLearning()`, { __ai: ai }), 'AI の学び');
+  const la = clean(run(`S.lr.ai = __ai; viewLearning()`, { __ai: ai }), '学びの画面（AI の学びの区切り）');
   assert.match(la, /<div class="bubble">まだ実績と比べた月がありません。各計画の振り返りで「当たり具合を計算」を動かすと、外れ幅がここに出ます。<\/div>/);
   assert.match(la, /<span class="nm">霧<\/span><span class="v">比べる実績なし<\/span>/);
   assert.match(lp, /締まった月のうち のべ 3 か月は、その月が始まる前の予測が無いので比べていません/, '月が始まる前の予測が無い月の数（本物の中身）');
