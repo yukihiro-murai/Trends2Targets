@@ -4,6 +4,8 @@
  * 旧来の計算は変えない。ここで計算するものは、次の 2 つに分ける:
  *   影（予測に効かない。画面に出すだけ）
  *     - 精度の推移: 月の誤差・偏り・P10〜P90 に実績が入った割合（目標 80%）。締まった後の予測（誤差 0）は除いて数える。
+ *       外れ幅と偏りは、月ごとの外れの平均ではなく、誤差の合計 ÷ 実績の合計（WAPE。appWape_。2026-10-13 村井さん承認）。
+ *       実績が 0 に近い月が 1 つあっても、値が何千 % に飛ばない（その月の外れは金額のとおりに数える）。月ごとの外れ（err）は月ごとの値のまま
  *       締まった月（月末から 5 日たってから取り込んだ月。appLandingCutoff_）だけを使う（2026-10-07 村井さん承認 D4。締まっていない月の
  *       EVAL_LOG の行は消さずに読み飛ばす）。どの回の予測で測るか（その月が始まる前の最後の回。D6）は、EVAL_LOG を書く旧来の B-2 が決める。
  *       そのため、今の検証の版（APP_EVAL_POLICY_VERSION）で B-2 が書いた行だけを使う（appEvalRowCurrent_。前の版の行は、月が始まった後の
@@ -100,6 +102,35 @@ function appEvalPolicySince_(evalRows, runRows) {
 /** 重み付きの平均 */
 function appWMean_(xs, ws) { const sw = ws.reduce((a, b) => a + b, 0); return sw ? xs.reduce((a, x, i) => a + x * ws[i], 0) / sw : null; }
 
+/**
+ * 外れ幅と偏り（2026-10-13 村井さん承認。WAPE）: 外れ幅 = Σw|中心 − 実績| ÷ Σw|実績|、偏り = Σw(中心 − 実績) ÷ Σw|実績|。
+ * ms = [{ p50, actual }]、ws = 月ごとの重み（省くとどの月も 1）。月ごとの外れ（(中心 − 実績) ÷ |実績|）の平均は、実績が 0 に近い月が
+ * 1 つあるだけで何千 % にもなる（中心 1 億・実績 1 万円の月は 999,900%）。合計の比なら、その月の外れを金額のとおりに数える。
+ * 実績が正なら、偏り = 中心の合計 ÷ 実績の合計 − 1。Σw|実績| が 0（月が無い）なら、どちらも null
+ */
+function appWape_(ms, ws) {
+  let abs = 0, signed = 0, base = 0;
+  ms.forEach((m, i) => {
+    const w = ws ? ws[i] : 1;
+    abs += w * Math.abs(m.p50 - m.actual);
+    signed += w * (m.p50 - m.actual);
+    base += w * Math.abs(m.actual);
+  });
+  return base > 0 ? { mape: abs / base, bias: signed / base } : { mape: null, bias: null };
+}
+
+/**
+ * 偏りの月ごとのばらつき（全計画で縮める強さ appBiasShadow_ に使う）: 合計の比 R からの月ごとのずれ（中心 − 実績 − R・|実績|）を、
+ * 月の実績の平均で割った値の分散。実績がどの月も同じなら、月ごとの外れ（中心 ÷ 実績 − 1）の分散と同じ。月が 2 つ未満なら null
+ */
+function appWapeVar_(ms) {
+  if (ms.length < 2) return null;
+  const base = ms.reduce((t, m) => t + Math.abs(m.actual), 0);
+  if (!(base > 0)) return null;
+  const r = ms.reduce((t, m) => t + (m.p50 - m.actual), 0) / base, mean = base / ms.length;
+  return ms.reduce((t, m) => t + Math.pow((m.p50 - m.actual - r * Math.abs(m.actual)) / mean, 2), 0) / ms.length;
+}
+
 function appQuantile_(xs, q) {
   if (!xs.length) return null;
   const s = xs.slice().sort((a, b) => a - b);
@@ -107,9 +138,15 @@ function appQuantile_(xs, q) {
   return s[pos];
 }
 
+/**
+ * 精度の形の印（控えの鍵に入れる）。測り方を変えたら変える（同じ版のまま出しても、前の測り方の控えを使わない）。
+ * wape-1 = 2026-10-13: 外れ幅と偏りを合計の比（appWape_）にした
+ */
+const APP_ACCURACY_FORM = 'wape-1';
+
 /** 計画の精度の控えの鍵（入力のハッシュが変われば変わる） */
 function appAccuracyKey_(planId) {
-  return 'ACC_' + appSha256Hex_([planId, appPlanInputHash_(planId), APP_VERSION].join('|')).slice(0, 32);
+  return 'ACC_' + appSha256Hex_([planId, appPlanInputHash_(planId), APP_VERSION, APP_ACCURACY_FORM].join('|')).slice(0, 32);
 }
 
 /**
@@ -167,21 +204,21 @@ function appAccuracyOf_(planId, evalRows, cutoffYm) {
       z: hasRange ? Math.abs(m.actual - m.p50) / ((m.p90 - m.p10) / 2) : null });
   });
   const use = ms.filter(m => !m.leak);
-  const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
   const inside = use.filter(m => m.inside !== null);
   const zs = use.map(m => m.z).filter(z => z !== null);
-  // 偏り（旧来の B-5 と同じく、新しい月ほど重い）
+  // 偏り（旧来の B-5 と同じく、新しい月ほど重い）。外れ幅はどの月も同じ重み（今までと同じ）。どちらも合計の比（appWape_）
   const w = use.map((m, i) => Math.pow(0.5, (use.length - 1 - i) / APP_BIAS_HALF_LIFE));
   const half = Math.floor(use.length / 2);
+  const wapeOf = xs => appWape_(xs).mape;
   return {
     months: ms, n: use.length, leaks: ms.length - use.length, cutoffYm: cutoff, scoredMonths: scoredMonths,
-    mape: mean(use.map(m => m.ape)), bias: appWMean_(use.map(m => m.err), w), biasW: w.reduce((a, b) => a + b, 0),
-    errVar: use.length > 1 ? mean(use.map(m => Math.pow(m.err - mean(use.map(x => x.err)), 2))) : null,
+    mape: wapeOf(use), bias: appWape_(use, w).bias, biasW: w.reduce((a, b) => a + b, 0),
+    errVar: appWapeVar_(use),
     coverage: inside.length ? inside.filter(m => m.inside).length / inside.length : null, coverageN: inside.length,
     // 実績の 80% が入る幅は、今の幅の何倍か（1 より大きければ今の幅は狭すぎる）
     widthScale: zs.length >= 3 ? appQuantile_(zs, 0.8) : null,
-    trend: use.length >= 6 ? { recent: mean(use.slice(-3).map(m => m.ape)), before: mean(use.slice(0, use.length - 3).slice(-3).map(m => m.ape)) }
-      : half >= 2 ? { recent: mean(use.slice(half).map(m => m.ape)), before: mean(use.slice(0, half).map(m => m.ape)) } : null
+    trend: use.length >= 6 ? { recent: wapeOf(use.slice(-3)), before: wapeOf(use.slice(0, use.length - 3).slice(-3)) }
+      : half >= 2 ? { recent: wapeOf(use.slice(half)), before: wapeOf(use.slice(0, half)) } : null
   };
 }
 
@@ -208,7 +245,7 @@ function appBiasShadow_(accs) {
     const shrunk = ids.length >= 2 ? (tau2 > 0 ? (a.bias / v(id) + mu / tau2) / (1 / v(id) + 1 / tau2) : mu) : a.bias * a.biasW / (a.biasW + 3);
     const factor = Math.min(1.25, Math.max(0.75, 1 - shrunk));
     const use = a.months.filter(m => !m.leak);
-    const mapeAt = f => use.reduce((s, m) => s + Math.abs((m.p50 * f - m.actual) / m.actual), 0) / use.length;
+    const mapeAt = f => appWape_(use.map(m => ({ p50: m.p50 * f, actual: m.actual }))).mape;   // 外れ幅は精度と同じ合計の比
     plans[id] = { bias: a.bias, se: Math.sqrt(v(id)), shrunk: shrunk, factorShadow: factor, mapeNow: mapeAt(1), mapeShadow: mapeAt(factor) };
   });
   return { mu: mu, tau2: tau2, pooled: ids.length >= 2, plans: plans };

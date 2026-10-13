@@ -979,22 +979,23 @@ function appAiLearning_(ctx) {
 }
 
 /**
- * 全計画の月ごとの誤差と、P10〜P90 に入った割合（Wilson の 80% の区間）。rolling3 = その月までの 3 か月の誤差の平均（全計画の月をまとめて）。
- * 月は accs（appAccuracyOf_）の月 = 締まった月だけ（D4）
+ * 全計画の月ごとの外れ幅と、P10〜P90 に入った割合（Wilson の 80% の区間）。rolling3 = その月までの 3 か月の外れ幅（全計画の月をまとめて）。
+ * 外れ幅は精度と同じ合計の比（|中心 − 実績| の合計 ÷ 実績の合計。appWape_。2026-10-13）。1 つの計画の実績が 0 に近い月でも値が飛ばない
+ * （金額の大きいメーカーほど重く数える）。月は accs（appAccuracyOf_）の月 = 締まった月だけ（D4）
  */
 function appInsightTimeline_(accs) {
   const by = {};
   Object.keys(accs).forEach(id => (accs[id].months || []).forEach(m => {
     if (m.leak || !/^\d{4}\/\d{2}$/.test(String(m.month))) return;
-    const o = by[m.month] = by[m.month] || { apes: [], inside: 0, rangeN: 0 };
-    if (typeof m.ape === 'number' && isFinite(m.ape)) o.apes.push(m.ape);
+    const o = by[m.month] = by[m.month] || { pts: [], inside: 0, rangeN: 0 };
+    if (typeof m.p50 === 'number' && isFinite(m.p50) && typeof m.actual === 'number' && isFinite(m.actual) && m.actual !== 0) o.pts.push({ p50: m.p50, actual: m.actual });
     if (m.inside === true || m.inside === false) { o.rangeN++; if (m.inside) o.inside++; }
   }));
   return Object.keys(by).sort().map(ym => {
     const o = by[ym];
-    const win = [].concat.apply([], [ym, appInsightPrevYm_(ym, 1), appInsightPrevYm_(ym, 2)].map(k => (by[k] ? by[k].apes : [])));
-    return { ym: ym, n: o.apes.length, mape: appInsightMean_(o.apes), coverage: o.rangeN ? o.inside / o.rangeN : null, coverageN: o.rangeN,
-      coverageCi80: appWilson_(o.inside, o.rangeN, APP_INSIGHT_Z80), target: APP_INSIGHT_COVERAGE_TARGET, rolling3: appInsightMean_(win), rolling3N: win.length };
+    const win = [].concat.apply([], [ym, appInsightPrevYm_(ym, 1), appInsightPrevYm_(ym, 2)].map(k => (by[k] ? by[k].pts : [])));
+    return { ym: ym, n: o.pts.length, mape: appWape_(o.pts).mape, coverage: o.rangeN ? o.inside / o.rangeN : null, coverageN: o.rangeN,
+      coverageCi80: appWilson_(o.inside, o.rangeN, APP_INSIGHT_Z80), target: APP_INSIGHT_COVERAGE_TARGET, rolling3: appWape_(win).mape, rolling3N: win.length };
   });
 }
 

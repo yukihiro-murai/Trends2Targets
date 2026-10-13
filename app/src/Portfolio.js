@@ -168,7 +168,7 @@ function appPortfolioData_() {
   plans.forEach(p => { cut[p.plan_id] = appLandingCutoff_(steps[p.plan_id] || [], hist[p.plan_id] || []); });
   const live = appPortfolioLive_(plans.map(p => p.plan_id), clientOf);   // 年度の見込みを本番にした計画（判断 10・24。appLandingLiveOf_）
   const scored = appPortfolioScored_(plans.map(p => p.plan_id), cut);
-  const ape = {};   // 計画ごとの [{ ym, v }]（外れ幅は、締まった月で今の決まりで測った月の分だけを後で平均する）
+  const ape = {};   // 計画ごとの [{ ym, err, act }]（外れ幅は、締まった月で今の決まりで測った月の分だけを後で合計の比にする）
   const cmp = {};   // 月ごとの実績と P10/P50/P90（検証の表）。暫定実績・着地見込み・予実の差・全計画の学びに使う（読むだけ。計算は変えない）
   const fnum = x => { const n = x === '' || x === null || x === undefined ? null : Number(x); return n !== null && isFinite(n) ? n : null; };
   appReadTable_('ENG_EVAL_COMPARE_MONTHLY').forEach(r => {
@@ -181,7 +181,8 @@ function appPortfolioData_() {
     const p50 = fnum(r.forecast_total_p50);
     // 外れは、今の決まりで測った月だけ（精度と同じ月。締まった後の予測 = 予測と実績がまったく同じ月も、精度と同じく除く）
     if (now && scored[r.plan_id].months[ym] && !blank && isFinite(act) && isFinite(v) && r.ape_p50 !== '' && !(p50 !== null && Math.abs(p50 - act) < 1e-6)) {
-      (ape[r.plan_id] = ape[r.plan_id] || []).push({ ym: ym, v: v });
+      // 外れの金額（|中心 − 実績|。中心が読めなければ月の外れ × |実績|）と実績。外れ幅 = 外れの合計 ÷ 実績の合計（精度 appWape_ と同じ）
+      (ape[r.plan_id] = ape[r.plan_id] || []).push({ ym: ym, err: p50 !== null ? Math.abs(p50 - act) : Math.abs(v * act), act: Math.abs(act) });
     }
     if (ym && (blank ? p50 !== null : isFinite(act))) {
       // 書き直していない計画は、予測と幅の外の印を使わない（実績だけ）
@@ -238,8 +239,10 @@ function appPortfolioData_() {
       pendingCutoffYm: pendingCut, tau: used.tau, w: used.w, runs: rs.slice(0, 2).map(r => ({ p50: r.annual_p50, ageDays: appLandingAgeDays_(r.finished_at, today) })) });
     const st = steps[p.plan_id] || [];
     const errors = st.filter(s => String(s.status).toLowerCase() === 'error').map(s => s.step_key);
-    // 外れ幅は締まった月で、今の決まりで測った月だけ（D4〜D6。精度 appAccuracyOf_ と同じ月。ほかの検証の行は消さずに読み飛ばす。境目が分からなければ数えない）
-    const a = (ape[p.plan_id] || []).filter(x => cut[p.plan_id] && x.ym && x.ym < cut[p.plan_id]).map(x => x.v);
+    // 外れ幅は締まった月で、今の決まりで測った月だけ（D4〜D6。精度 appAccuracyOf_ と同じ月。ほかの検証の行は消さずに読み飛ばす。境目が分からなければ数えない）。
+    // 外れの合計 ÷ 実績の合計（2026-10-13。実績が 0 に近い月 1 つで値が飛ばない。実績の合計が 0 なら出さない）
+    const a = (ape[p.plan_id] || []).filter(x => cut[p.plan_id] && x.ym && x.ym < cut[p.plan_id]);
+    const aBase = a.reduce((s, x) => s + x.act, 0);
     // 年度の見込みの試し。締まった月を数え直している間（初めての取り込みの後の計算待ち）・実績の遅れは幅を出さない（sky.wait。
     // 2026-10-09: B-1 の後に B-2 がまだでも、前の B-1 → B-2 の組の境目で数えている間は数え直していない）
     const aligned = appLandingAligned_(p.fy, months, used.tau, used.w, budgetUsed, { k: sky.k, pending: sky.wait !== '' });
@@ -255,7 +258,7 @@ function appPortfolioData_() {
       prevP50: prev ? prev.annual_p50 : null,
       lastRunAt: latest ? latest.finished_at : '', runs: rs.length,
       budget: budget,
-      mape: a.length ? a.reduce((x, y) => x + y, 0) / a.length : null, mapeMonths: a.length,
+      mape: a.length && aBase > 0 ? a.reduce((s, x) => s + x.err, 0) / aBase : null, mapeMonths: a.length,
       stepsDone: st.filter(s => String(s.status).toLowerCase() === 'success').length, stepsTotal: st.length, stepErrors: errors,
       createdAt: p.created_at,
       officialNo: v.officialNo || null, officialFinal: v.officialFinal === undefined ? null : v.officialFinal,
