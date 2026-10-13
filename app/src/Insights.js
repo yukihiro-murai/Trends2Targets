@@ -1122,10 +1122,51 @@ function appAiLearning_(ctx) {
     }) };
   return {
     detail: view.detail, namedPlans: view.namedPlans, curves: curves, noPreMonth: appInsightCountMonths_(noPre), shrinkage: shrinkage, timeline: appInsightTimeline_(accs),
+    persistence: appInsightPersistence_(accs),
     calibration: appInsightPerPlan_(plans, view.named, (ps, hide) => appInsightCalibration_(ps, tab('CALIBRATION_HISTORY'), factorNow, hide)),
     pending: appInsightPerPlan_(plans, view.named, (ps, hide) => appInsightPending_(ps, tab('QUARTERLY_REVIEW_LOG'), hide)),
     health: appInsightHealth_(plans, accs, shadow, factorNow)
   };
+}
+
+/**
+ * 月の外れの続きやすさ（提案 2。2026-10-13 村井さん承認「推奨どおり」）。着地の推定（Landing.js）は、今年の水準を除いた後の月の外れを
+ * 独立とみなして幅を出すので、月の外れが続きやすいと幅が狭すぎる。それを確かめるため、計画 × 年度ごとに締まった月の log(実績 ÷ 中心) から
+ * その年度の平均（今年の水準）を引き、隣り合う月どうしの相関を全計画でまとめる（読むだけ。幅の計算は変えない）。
+ * 年度の平均を引くと、月が少ないうちは相関が少し負に出る（12 か月で約 −0.09）ので、80% の幅の下の端が 0.2 を超えたときだけ「続きやすい」とする。
+ * 手元の実データ（2026-10-07 の写し・1 メーカー 2 年・22 組）では 0.01（80% の幅 −0.28〜0.29）で、続きやすさは見えていない。
+ * 返り値 { rho, ci80: [下, 上], pairs（組の数）, plans（使った計画の数）, sticky（続きやすい）}。組が 8 より少なければ rho は null
+ */
+const APP_INSIGHT_PERSIST_MIN_PAIRS = 8;
+function appInsightPersistence_(accs) {
+  const pairs = [], used = {};
+  Object.keys(accs).forEach(id => {
+    const byFy = {};
+    (accs[id].months || []).forEach(m => {
+      if (m.leak || !/^\d{4}\/\d{2}$/.test(String(m.month))) return;
+      if (!(typeof m.p50 === 'number' && m.p50 > 0 && typeof m.actual === 'number' && m.actual > 0)) return;
+      (byFy[appInsightFyOfYm_(m.month)] = byFy[appInsightFyOfYm_(m.month)] || []).push({ ym: String(m.month), r: Math.log(m.actual / m.p50) });
+    });
+    Object.keys(byFy).forEach(fy => {
+      const xs = byFy[fy].sort((a, b) => (a.ym < b.ym ? -1 : 1));
+      if (xs.length < 3) return;
+      const mean = xs.reduce((s, x) => s + x.r, 0) / xs.length;
+      for (let i = 1; i < xs.length; i++) {
+        if (appInsightPrevYm_(xs[i].ym, 1) !== xs[i - 1].ym) continue;   // 隣り合う月だけ
+        pairs.push([xs[i - 1].r - mean, xs[i].r - mean]); used[id] = true;
+      }
+    });
+  });
+  const n = pairs.length, plans = Object.keys(used).length;
+  if (n < APP_INSIGHT_PERSIST_MIN_PAIRS) return { rho: null, ci80: null, pairs: n, plans: plans, sticky: false };
+  const mx = pairs.reduce((s, p) => s + p[0], 0) / n, my = pairs.reduce((s, p) => s + p[1], 0) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  pairs.forEach(p => { sxy += (p[0] - mx) * (p[1] - my); sxx += (p[0] - mx) * (p[0] - mx); syy += (p[1] - my) * (p[1] - my); });
+  if (!(sxx > 0 && syy > 0)) return { rho: null, ci80: null, pairs: n, plans: plans, sticky: false };
+  const rho = Math.max(-0.999, Math.min(0.999, sxy / Math.sqrt(sxx * syy)));
+  const z = 0.5 * Math.log((1 + rho) / (1 - rho)), se = 1 / Math.sqrt(Math.max(n - 3, 1));
+  const ci80 = [Math.tanh(z - APP_INSIGHT_Z80 * se), Math.tanh(z + APP_INSIGHT_Z80 * se)];
+  return { rho: rho, ci80: ci80, pairs: n, plans: plans, sticky: ci80[0] > 0.2 };
 }
 
 /**

@@ -4260,7 +4260,7 @@ function lrAiView(d){
     return z.zero ? guide('explain', esc(zeroSay(z, '、AI が何を学んだか（重み・偏り・外れ幅・補正）がここに出ます。')))
       : guide('guide', '実績が締まって、' + runWhen() + '、AI が何を学んだか（重み・偏り・外れ幅・補正）がここに出ます。');
   }
-  return lrAiHero(d) + lrPendingCard(pend) + lrCurveCard(curves) + lrResearchCard(d.research) + lrShrinkCard(sh) + lrTimeCard(tl) + lrCalCard(cal, d.health || []) + lrLandingCard(d.landing);
+  return lrAiHero(d) + lrPendingCard(pend) + lrCurveCard(curves) + lrResearchCard(d.research) + lrShrinkCard(sh) + lrTimeCard(tl, d.persistence) + lrCalCard(cal, d.health || []) + lrLandingCard(d.landing);
 }
 /** 今の年度（ホームと同じ: サーバーが決めた B.home.fy。無ければ今日の日付から。4 月始まり） */
 function lrFy(){
@@ -4433,7 +4433,20 @@ function lrShrinkCard(sh){
       + '偏り = Σw(予測 − 実績) ÷ Σw|実績|（予測は、掛けていた係数 ×（1 + 月ごとの補正）で割り戻したもの）。倍率 = 1 ÷（1 + 寄せた偏り）'));
 }
 /** 外れ幅と幅の当たり（全計画の月ごと）: 月の外れ幅と 3 か月の平均・見通しの幅に収まった割合（目標 80%）と、その確かさの幅 */
-function lrTimeCard(tl){
+/**
+ * 月の外れの続きやすさの札（サーバーの persistence。隣り合う月の外れの相関）。続きやすいと着地の見込みの幅が狭すぎるので、そのときだけ注意の色。
+ * 組が少ないうちは「まだ」
+ */
+function lrPersistChip(ps){
+  if (!ps) return '';
+  var how = '計画と年度ごとに、締まった月の外れ（実績 ÷ 予測の中心）から今年の水準を除き、隣り合う月どうしがどれだけ同じ向きに外れるかを測っています（−1〜1。0 なら続かない）。'
+    + '着地の見込みの幅は、続かないとみなして作っているので、はっきり続くなら幅が狭すぎます';
+  if (!isNum(ps.rho)) return '<span class="chip" tabindex="0" data-tip="' + esc(how + '\nまだ隣り合う月の組が ' + (ps.pairs || 0) + ' 組なので、測っていません（8 組から）') + '">続きやすさ まだ</span>';
+  var v = (ps.rho >= 0 ? '+' : '') + ps.rho.toFixed(2);
+  return '<span class="chip' + (ps.sticky ? ' warn' : '') + '" tabindex="0" data-tip="' + esc(how + '\n今 ' + v + '（80% の幅 ' + ps.ci80[0].toFixed(2) + '〜' + ps.ci80[1].toFixed(2) + '・' + ps.pairs + ' 組・' + ps.plans + ' 計画）'
+    + (ps.sticky ? '\n外れが続きやすいので、着地の見込みの幅は狭すぎるかもしれません' : '\nはっきり続くとは言えません')) + '">続きやすさ ' + esc(v) + '</span>';
+}
+function lrTimeCard(tl, ps){
   if (!tl.length) return '';
   // スマホは月の名前を短く（25/04。正確な月は 表で見る に）
   var narrow = chW() < 480, x = tl.map(function(t){ return narrow && /^\d{4}\/\d{2}$/.test(t.ym) ? t.ym.slice(2) : t.ym; });
@@ -4445,7 +4458,7 @@ function lrTimeCard(tl){
     tl.map(function(t){ return [esc(t.ym), t.n, pct0(t.mape), pct0(t.rolling3), isNum(t.coverage) ? lrPct(t.coverage) + (t.coverageN ? '（' + t.coverageN + '）' : '') : '-', t.coverageCi80 ? lrPct(t.coverageCi80[0]) + '〜' + lrPct(t.coverageCi80[1]) : '-']; }));
   return lrCard('外れ幅と幅の当たり', '全計画の月ごとの外れ幅（下がるほど良い）と、実績が見通しの幅（下振れ〜上振れ）に収まった割合です。収まった割合は 80% が目標で、低いと幅が狭すぎ、高いと広すぎます',
     chartOrTable('lrTime', '<h3 class="lr-h3">月の外れ幅</h3>' + c1 + '<h3 class="lr-h3">見通しの幅に収まった割合</h3>' + c2, table),
-    lrMore('外れ幅 = Σ|予測の中心 − 実績| ÷ Σ|実績|（WAPE。月ごとの外れの平均ではないので、実績が 0 に近い月 1 つで飛ばない。金額の大きいメーカーほど重く数える）。確かさの幅 = 収まった割合の Wilson の 80% 区間。締まった後に予測し直した月は除きます'));
+    lrMore('外れ幅 = Σ|予測の中心 − 実績| ÷ Σ|実績|（WAPE。月ごとの外れの平均ではないので、実績が 0 に近い月 1 つで飛ばない。金額の大きいメーカーほど重く数える）。確かさの幅 = 収まった割合の Wilson の 80% 区間。締まった後に予測し直した月は除きます') + lrPersistChip(ps));
 }
 /** 補正の履歴（選んだ計画の、予測に掛ける倍率の移り変わり。月次の自動学習・承認した見直し案・所有者が承認した値で変わる） */
 function lrCalCard(cal, health){
