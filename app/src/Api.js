@@ -150,7 +150,7 @@ function apiJobStatus(input) {
   return api_('JOB.STATUS', { minRole: 'VIEWER', audit: false }, ctx => appJobStatus_(ctx, input && input.jobId));
 }
 
-/** 処理を裏で動かす（apiStartJob が作った 1 回だけのトリガーから） */
+/** 処理を裏で動かす（apiStartJob が作った 1 回だけのトリガーから。待ち行列の処理のトリガーの UID のときだけ。appTriggerUser_） */
 function triggerRunJob(e) {
   return api_('JOB.RUN', { minRole: 'ADMIN', audit: false, trigger: { event: e, handler: 'triggerRunJob', alsoAccept: appIsJobTrigger_ } },
     ctx => appRunJobs_(ctx, e));
@@ -158,8 +158,8 @@ function triggerRunJob(e) {
 
 /**
  * 毎日のバックアップ（時間主導のトリガーから）。トリガーは所有者として動く。
- * トリガーの中では操作者のメールが空になることがあるので、そのときはイベントの triggerUid が
- * このプロジェクトのバックアップ用トリガーと一致する場合に限り、所有者として扱う（ブラウザからは UID が分からず偽装できない）。
+ * イベントの triggerUid がこのプロジェクトのバックアップ用トリガーと一致するときだけ受け付け、所有者として扱う（appTriggerUser_。
+ * 2026-10-13 から、役割が管理者でも UID の合わない呼び出しは断る。前は管理者がブラウザから呼ぶと、そのたびに管理者への知らせのメールを送れた）。
  */
 function triggerDailyBackup(e) {
   return api_('BACKUP.DAILY', { minRole: 'ADMIN', entityType: 'SYSTEM', trigger: { event: e, handler: 'triggerDailyBackup' },
@@ -168,7 +168,8 @@ function triggerDailyBackup(e) {
 
 /**
  * 市場の動き（A-4 AI 調査）を、計画ごとに週 1 回ずつ自動で集める（毎日 4 時半ごろ、毎日の手入れの後の時間主導のトリガーから。AutoResearch.js）。
- * 本人確認は triggerDailyBackup と同じ（このプロジェクトの、この入口のトリガーの UID のときだけ所有者として扱う）。
+ * 本人確認は triggerDailyBackup と同じ（このプロジェクトの、この入口のトリガーの UID のときだけ受け付け、所有者として扱う。
+ * 2026-10-13 から、管理者がブラウザから呼んでも断る。前は 4〜7 時なら費用のかかる AI 調査を始められた）。
  * 始める A-4 は画面から始めるのと同じ処理（頼んだ人の役割と年度の締めは、裏の処理が段ごとに確かめ直す）
  */
 function triggerAutoResearch(e) {
@@ -182,21 +183,23 @@ function triggerAutoResearch(e) {
  *   ownerOnly          … 所有者だけ（初期設定）
  *   audit              … false なら記録しない（読むだけの入口）。既定は記録する
  *   allowAnonymousView … 役割が足りないときも画面の初期データだけは返す（「権限がありません」を画面で出すため）
+ *   trigger            … { event, handler, alsoAccept }。トリガーからの実行だけを受け付ける入口（appTriggerUser_。合わなければ役割があっても断る）
  *   entityType / entityId / detail / reason / before() / after(res) … 監査の項目
  */
 function api_(action, opts, fn) {
   opts = opts || {};
   APP_STORE_CACHE_ = {};
   let user = appCurrentUser_();
-  const trigUid = opts.trigger && opts.trigger.event && opts.trigger.event.triggerUid ? String(opts.trigger.event.triggerUid) : '';
-  if (opts.trigger && !user.email && (appIsOwnTrigger_(opts.trigger.event, opts.trigger.handler) ||
-      (opts.trigger.alsoAccept && trigUid && appIsSetUp_() && opts.trigger.alsoAccept(trigUid)))) {
-    user = Object.assign({}, user, { email: user.owner, isOwner: !!user.owner });
+  let fromTrigger = true;
+  if (opts.trigger) {
+    const t = appTriggerUser_(user, opts.trigger);
+    user = t.user;
+    fromTrigger = t.ok;
   }
   const roles = appRolesOf_(user);
   const ctx = { user: user, roles: roles, actor: user.email || '(unknown)', requestId: Utilities.getUuid() };
   if (roles.length) appAutoEnsureTables_(ctx);   // 社内の人の最初の操作で、版を上げて足した表を作る
-  const allowed = opts.ownerOnly ? user.isOwner : appHasRole_(roles, opts.minRole || 'ADMIN', opts.clientId);
+  const allowed = fromTrigger && (opts.ownerOnly ? user.isOwner : appHasRole_(roles, opts.minRole || 'ADMIN', opts.clientId));
   try {
     if (!allowed) {
       if (opts.allowAnonymousView) return appSerialize_(appDeniedBootstrap_(ctx));
@@ -215,6 +218,21 @@ function api_(action, opts, fn) {
     appLogError_(action, err, ctx);
     throw new Error(String(err && err.message ? err.message : err));
   }
+}
+
+/**
+ * trigger* の本人確認。イベントの triggerUid が、このプロジェクトのその入口のトリガー（appIsOwnTrigger_）か、alsoAccept が受け付ける UID
+ * （triggerRunJob は待ち行列の処理のトリガー: appIsJobTrigger_。トリガーの一覧から先に消えていても確かめられる）のときだけ受け付ける。
+ * 受け付けたら所有者として動かす（トリガーは所有者が作り、所有者として動く。中では操作者のメールが空のこともある）。
+ * メールがあって所有者でない人は、UID が合っても断る（ブラウザから呼んだ管理者など。トリガーの中のメールは空か所有者）。
+ * 返り値 { ok: 受け付けたか, user: 受け付けたら所有者・断ったら呼んだ人のまま（断ったことの記録に残す） }
+ */
+function appTriggerUser_(user, trigger) {
+  const e = trigger && trigger.event;
+  const uid = e && e.triggerUid ? String(e.triggerUid) : '';
+  const known = !!uid && (appIsOwnTrigger_(e, trigger.handler) || (!!trigger.alsoAccept && appIsSetUp_() && !!trigger.alsoAccept(uid)));
+  if (!known || !user.owner || (user.email && !user.isOwner)) return { ok: false, user: user };
+  return { ok: true, user: Object.assign({}, user, { email: user.owner, isOwner: true }) };
 }
 
 /** e.triggerUid が、このプロジェクトの handler 用のトリガーのものか */

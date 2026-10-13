@@ -540,6 +540,53 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.equal(all().length, 17);
 }
 
+// ==== 12b. トリガーの入口は、このプロジェクトのトリガーからだけ（2026-10-13。管理者・所有者でも、ブラウザからは動かせない） ====
+{
+  const env = setUpEnv();
+  env.task(`saveMember({ email: '${MEMBER}', displayName: 'M' })`);
+  env.task(`grantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
+  env.task('enableBackup()');
+  const uid = env.triggers.find((t) => t.handler === 'triggerDailyBackup').uid;
+  const backups0 = env.backups().length;
+  const mail0 = env.state.mail.length;
+  const daily = () => env.runLog().filter((r) => /BACKUP|HOUSEKEEPING|AUTO/.test(r.kind)).length;
+  const daily0 = daily();
+  const n0 = env.audit().length;
+  const jobs = () => Object.keys(env.props).filter((k) => /^APP_JOB_(?!RESULT_|STAGE)/.test(k)).length;
+  const jobs0 = jobs();
+  const tries = ['triggerDailyBackup()', 'triggerDailyBackup({})', `triggerDailyBackup({ triggerUid: 'forged' })`,
+    'triggerAutoResearch()', `triggerAutoResearch({ triggerUid: 'forged' })`, 'triggerRunJob()', `triggerRunJob({ triggerUid: 'forged' })`];
+  for (const who of [OWNER, MEMBER]) {
+    env.as(who);
+    for (const code of tries) assert.throws(() => env.call(code), /権限がありません/, `${who}: ${code}`);
+  }
+  // 管理者（所有者でない人）は、本物の UID を知っていても動かせない
+  env.as(MEMBER);
+  assert.throws(() => env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`), /権限がありません/);
+  // ほかの入口のトリガーの UID は使えない（入口ごとに確かめる）
+  env.as('');
+  assert.throws(() => env.call(`triggerAutoResearch({ triggerUid: '${uid}' })`), /権限がありません/);
+  assert.throws(() => env.call(`triggerRunJob({ triggerUid: '${uid}' })`), /権限がありません/);
+  assert.equal(env.backups().length, backups0, 'バックアップを取らない');
+  assert.equal(env.state.mail.length, mail0, '知らせのメールを送らない');
+  assert.equal(jobs(), jobs0, '処理を始めない');
+  assert.equal(daily(), daily0, '毎日の処理を動かさない');
+  const denied = env.audit().slice(n0).filter((a) => a.phase === 'DENIED');
+  assert.equal(denied.length, tries.length * 2 + 3, '断ったことは全部記録に残す');
+  assert.deepEqual([...new Set(denied.map((a) => a.action))].sort(), ['AUTO.RESEARCH', 'BACKUP.DAILY', 'JOB.RUN']);
+  assert.ok(denied.filter((a) => a.actor_email === MEMBER).length >= tries.length + 1, '呼んだ人の名前で残す（所有者として扱わない）');
+  // 本物のトリガー（メールが空・所有者のメール）は動く
+  env.as('');
+  env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`);
+  assert.equal(env.backups().length, backups0 + 1);
+  assert.equal(env.audit().slice(-1)[0].actor_email, OWNER, 'トリガーは所有者として記録する');
+  env.as(OWNER);
+  env.call(`triggerDailyBackup({ triggerUid: '${uid}' })`);
+  assert.equal(env.backups().length, backups0 + 2);
+  // 入口はどれも、トリガーの確かめを通す
+  for (const n of ['triggerRunJob', 'triggerDailyBackup', 'triggerAutoResearch']) assert.match(extractFunction(sources['Api.js'], n), new RegExp(`trigger: \\{ event: e, handler: '${n}'`));
+}
+
 // ==== 13. 画面を開く（doGet） ====
 {
   const env = setUpEnv();
