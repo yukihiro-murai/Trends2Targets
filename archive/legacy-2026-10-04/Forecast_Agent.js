@@ -149,7 +149,8 @@ function forecastConfirmOrAbort_(title, message, key) {
 // vNextのbootstrap完了までは既存運用を止めないため移行用fallbackを使用し、
 // runtime property設定後にfallbackを削除する。
 const EXTERNAL_SS_ID_PROPERTY = 'FORECAST_SOURCE_SPREADSHEET_ID';
-const LEGACY_EXTERNAL_SS_ID_FALLBACK = '1qIAb_y3EhM6uiQrtT5hKCjUDHs3ARYBKdr-aCx0OY0c';
+// 実績ソースの既定のスプレッドシート ID は、公開リポジトリに置かないので空にした（2026-10-13）。新アプリは「設定」の値を渡す（app/src/Engine.js）
+const LEGACY_EXTERNAL_SS_ID_FALLBACK = '';
 const EXTERNAL_SHEET_PREFIX = '*';
 const EXTERNAL_SHEET_SUFFIX = '_actual_value';
 

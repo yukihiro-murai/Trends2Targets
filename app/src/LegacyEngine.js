@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.4.0-dev、SHA-256 6a19638d0a20258ea8271db654e30769704239a8c243712563250d4a2a76cae5）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.4.0-dev、SHA-256 7442d8c47f3d3304e00d713ef172d8d3aa7be4738b284b2f37c674935ecf90ae）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -172,7 +172,8 @@ function forecastConfirmOrAbort_(title, message, key) {
 // vNextのbootstrap完了までは既存運用を止めないため移行用fallbackを使用し、
 // runtime property設定後にfallbackを削除する。
 const EXTERNAL_SS_ID_PROPERTY = 'FORECAST_SOURCE_SPREADSHEET_ID';
-const LEGACY_EXTERNAL_SS_ID_FALLBACK = '1qIAb_y3EhM6uiQrtT5hKCjUDHs3ARYBKdr-aCx0OY0c';
+// 実績ソースの既定のスプレッドシート ID は、公開リポジトリに置かないので空にした（2026-10-13）。新アプリは「設定」の値を渡す（app/src/Engine.js）
+const LEGACY_EXTERNAL_SS_ID_FALLBACK = '';
 const EXTERNAL_SHEET_PREFIX = '*';
 const EXTERNAL_SHEET_SUFFIX = '_actual_value';
 
@@ -10690,7 +10691,7 @@ function webAuditLogUrl_() {
     forecastSeasonalWeighted48_: typeof forecastSeasonalWeighted48_ === 'undefined' ? undefined : forecastSeasonalWeighted48_,
     readForecastClosedMonthMode_: typeof readForecastClosedMonthMode_ === 'undefined' ? undefined : readForecastClosedMonthMode_,
     runForecastFYCore_: typeof runForecastFYCore_ === 'undefined' ? undefined : runForecastFYCore_,
-    SOURCE_SHA256: '6a19638d0a20258ea8271db654e30769704239a8c243712563250d4a2a76cae5',
+    SOURCE_SHA256: '7442d8c47f3d3304e00d713ef172d8d3aa7be4738b284b2f37c674935ecf90ae',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }
