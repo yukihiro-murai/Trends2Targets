@@ -178,14 +178,15 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   env.call(`apiGrantRole({ email: '${MEMBER}', role: 'ADMIN' })`);
   const props = env.state;
   let n = 0;
-  const orig = env.ctx.PropertiesService.getScriptProperties;
-  env.ctx.PropertiesService = { getScriptProperties: () => Object.assign(orig(), {
+  const real = env.ctx.PropertiesService;
+  const orig = real.getUserProperties;   // 知らせの控えは所有者の UserProperties
+  env.ctx.PropertiesService = { getScriptProperties: real.getScriptProperties, getUserProperties: () => Object.assign(orig(), {
     setProperty: (k, v) => { if (k === 'APP_MAINTENANCE_NOTICES' && ++n > 1) throw new Error('書けない（テスト）'); orig().setProperty(k, v); } }) };
   const r = notify(env, ['ERRORS']);
   assert.equal(r.status, 'FAILED', '控えの書き込みが失敗したら FAILED');
   assert.equal(r.reason, 'persist');
   assert.ok(env.state.mail.length >= 1, '送れた分は送れている（届いたかの区別は記録に残す）');
-  env.ctx.PropertiesService = { getScriptProperties: orig };
+  env.ctx.PropertiesService = real;
   void props;
 }
 {
@@ -284,13 +285,14 @@ const grant = (env, row) => env.run(`appInsertRows_('ROLES', [__r])`, { __r: Obj
   const env = setUpEnv();
   assert.equal(notify(env, ['ERRORS']).status, 'SENT');
   const sent = JSON.parse(env.props.APP_MAINTENANCE_NOTICES).sent;
-  const origProps = env.ctx.PropertiesService.getScriptProperties;
-  env.ctx.PropertiesService = { getScriptProperties: () => Object.assign(origProps(), {
+  const realPS = env.ctx.PropertiesService;
+  const origProps = realPS.getUserProperties;   // 知らせの控えは所有者の UserProperties
+  env.ctx.PropertiesService = { getScriptProperties: realPS.getScriptProperties, getUserProperties: () => Object.assign(origProps(), {
     getProperty: (k) => { if (k === 'APP_MAINTENANCE_NOTICES') throw new Error('読めない（テスト）'); return origProps().getProperty(k); } }) };
   const r = notify(env, ['ERRORS']);
   assert.equal(r.status, 'FAILED', '控えが読めなければ送らない（読めずに再送しない）');
   assert.equal(env.state.mail.length, 1, '追加で送らない');
-  env.ctx.PropertiesService = { getScriptProperties: origProps };
+  env.ctx.PropertiesService = realPS;
   const r2 = notify(env, ['ERRORS']);
   assert.equal(r2.status, 'SKIPPED', '直れば控えは残っている（同じ人にもう一度送らない）');
   assert.equal(env.state.mail.length, 1);

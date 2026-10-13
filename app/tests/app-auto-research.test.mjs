@@ -97,11 +97,11 @@ function drain(env, until) {
 /** テストの中で動かした A-4 の数（足した過去の記録は数えない） */
 const researched = (env, planId) => env.table('PLAN_ACTIONS').filter((r) => r.plan_id === planId && r.action === 'AI.RESEARCH' && r.status === 'DONE' && !r.action_id.startsWith('ACT-TEST-')).length;
 const autoRuns = (env) => env.runLog().filter((r) => r.kind === 'AUTO.RESEARCH').map((r) => Object.assign(JSON.parse(r.detail_json || '{}'), { status: r.status, error: r.error }));
-/** Script Properties の APP_AUTO_RESEARCH を書けなくする（n 回。Infinity でずっと） */
+/** APP_AUTO_RESEARCH（所有者の UserProperties）を書けなくする（n 回。Infinity でずっと） */
 function failStateWrites(env) {
-  const real = env.ctx.PropertiesService.getScriptProperties;
-  const ctl = { left: 0, restore: () => { env.ctx.PropertiesService.getScriptProperties = real; } };
-  env.ctx.PropertiesService.getScriptProperties = () => {
+  const real = env.ctx.PropertiesService.getUserProperties;
+  const ctl = { left: 0, restore: () => { env.ctx.PropertiesService.getUserProperties = real; } };
+  env.ctx.PropertiesService.getUserProperties = () => {
     const p = real();
     const set = p.setProperty;
     p.setProperty = (k, v) => {

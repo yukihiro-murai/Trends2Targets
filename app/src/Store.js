@@ -6,8 +6,96 @@
 let APP_STORE_CACHE_ = {};
 let APP_LOCK_DEPTH_ = 0;
 
+// ---- 値の置き場（Script Properties と、所有者の UserProperties。2026-10-13）----
+// 所有者は Apps Script のエディタの「スクリプト プロパティ」で OWNER_TASK を書く。同じ Script Properties に、アプリが動くたびに
+// 書き換える状態（監査の鎖の最新ハッシュ・裏の処理の記録・保存の控え・自動の調べの状態・手入れの結果など）があると、
+// エディタの画面で保存したときに、古い値へ書き戻すおそれがある。そこで、アプリの状態は所有者の UserProperties に置く。
+// Web アプリは所有者として動き（executeAs: USER_DEPLOYING）、トリガーもエディタも所有者として動くので、どこからでも同じものが読める。
+// Script Properties に残すもの（appPropsInScript_）:
+//   ・所有者が手で書くもの = APP_ で始まらないキー（OWNER_TASK・OWNER_TASK_RESULT・止めるスイッチ AUTO_RESEARCH_ENABLED・BACKUP_AUTO_ENABLE）
+//   ・初期設定で 1 度だけ決まり、その後アプリが書き換えないもの（フォルダとデータ本体の ID・社内のドメイン）
+// それ以外の APP_ で始まるキーは UserProperties に置く（これから足すアプリの状態も、APP_ で始めればこちらに入る）。
+// 読み書きの形は今までと同じ（getProperty・setProperty・deleteProperty・getProperties・getKeys）。ほかのファイルは appProps_() だけを使う。
+// 一度だけの移し替え: UserProperties に印（APP_PROPS_MOVED）が無ければ、アプリの状態のキーに最初に触れたときに、ロックの中で
+// Script Properties にあるアプリの状態を UserProperties へ写し（UserProperties に無いものだけ）、写せたキーを Script Properties から消す（appPropsMove_）。
+const APP_PROPS_MOVED_KEY = 'APP_PROPS_MOVED';   // 移し替えを済ませた印（UserProperties）
+let APP_PROPS_MOVED_ = false;   // この実行の中で、移し替えが済んでいると確かめた
+let APP_PROPS_FACADE_ = null;
+
+/** Script Properties に置くキーか（所有者が手で書くもの・初期設定で決まって変わらないもの）。それ以外は UserProperties */
+function appPropsInScript_(key) {
+  const k = String(key);
+  if (k.indexOf('APP_') !== 0) return true;
+  return [APP_PROP.folderId, APP_PROP.dataId, APP_PROP.backupFolderId, APP_PROP.archiveFolderId, APP_PROP.internalDomain].indexOf(k) >= 0;
+}
+
+/** 値の読み書き。キーごとに置き場を振り分ける（上の説明）。置き場はその都度 PropertiesService から取る */
 function appProps_() {
-  return PropertiesService.getScriptProperties();
+  if (APP_PROPS_FACADE_) return APP_PROPS_FACADE_;
+  const store = k => {
+    if (appPropsInScript_(k)) return PropertiesService.getScriptProperties();
+    appPropsMoveOnce_();
+    return PropertiesService.getUserProperties();
+  };
+  const facade = {
+    getProperty: k => store(k).getProperty(k),
+    setProperty: (k, v) => { store(k).setProperty(k, v); return facade; },
+    deleteProperty: k => { store(k).deleteProperty(k); return facade; },
+    getProperties: () => appPropsAll_(),
+    getKeys: () => Object.keys(appPropsAll_())
+  };
+  APP_PROPS_FACADE_ = facade;
+  return facade;
+}
+
+/** 2 つの置き場の値をまとめた写し（それぞれの置き場に置くキーだけ。間違った置き場に残った古い値は見ない） */
+function appPropsAll_() {
+  appPropsMoveOnce_();
+  const out = {};
+  const s = PropertiesService.getScriptProperties().getProperties();
+  Object.keys(s).forEach(k => { if (appPropsInScript_(k)) out[k] = s[k]; });
+  const u = PropertiesService.getUserProperties().getProperties();
+  Object.keys(u).forEach(k => { if (!appPropsInScript_(k)) out[k] = u[k]; });
+  return out;
+}
+
+/** 移し替えがまだなら、ロックの中で済ませる（実行ごとに印を 1 回読むだけ）。写したキーは実行ログ（PROPS.MOVE）に残す */
+function appPropsMoveOnce_() {
+  if (APP_PROPS_MOVED_) return;
+  if (PropertiesService.getUserProperties().getProperty(APP_PROPS_MOVED_KEY)) { APP_PROPS_MOVED_ = true; return; }
+  APP_PROPS_MOVED_ = true;   // 先に立てる（ロックの中や実行ログで appProps_() を呼んでも、ここへ戻らない）
+  let moved;
+  try {
+    moved = appWithLock_(() => appPropsMove_());
+  } catch (e) {
+    APP_PROPS_MOVED_ = false;   // 次に触れたときにやり直す
+    throw e;
+  }
+  if (moved && (moved.copied.length || moved.dropped.length)) appRunLog_({ kind: 'PROPS.MOVE', status: 'OK', detail: moved });
+}
+
+/**
+ * 一度だけの移し替え（ロックの中で呼ぶ。監査の鎖の最新ハッシュも、ロックの中で写す）。
+ * UserProperties に無いアプリの状態を Script Properties から写し、UserProperties にあることを確かめたキーだけを Script Properties から消す。
+ * 途中で止まっても、元は Script Properties に残っているので、次の実行が続きから行う（写したものは写し直さない）。
+ * 返り値 { copied: 写したキー, dropped: Script Properties から消したキー }（ほかの実行が済ませていれば null）。値は返さない
+ */
+function appPropsMove_() {
+  const user = PropertiesService.getUserProperties();
+  if (user.getProperty(APP_PROPS_MOVED_KEY)) return null;   // ロックを待つ間に、ほかの実行が済ませた
+  const script = PropertiesService.getScriptProperties();
+  const all = script.getProperties();
+  const keys = Object.keys(all).filter(k => !appPropsInScript_(k)).sort();
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const have = user.getProperties();
+  const copy = {};
+  keys.forEach(k => { if (!has(have, k)) copy[k] = all[k]; });
+  if (Object.keys(copy).length) user.setProperties(copy);   // 先に写す（ここで止まっても、元は Script Properties に残る）
+  const now = user.getProperties();
+  const dropped = keys.filter(k => has(now, k));
+  dropped.forEach(k => script.deleteProperty(k));   // 写せたキーだけ消す
+  user.setProperty(APP_PROPS_MOVED_KEY, JSON.stringify({ at: appNowIso_(), copied: Object.keys(copy).length, dropped: dropped.length }));
+  return { copied: Object.keys(copy), dropped: dropped };
 }
 
 function appNowIso_() {

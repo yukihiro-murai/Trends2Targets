@@ -1,7 +1,7 @@
 /**
  * Audit.js — 操作の記録（監査ログ）・実行ログ・エラーログ。記録先は年度ごとの「Trends2Targets_Logs_FYyyyy」（年度は始まりの年で呼ぶ）。
  * 月ごとのシート AUDIT_yyyy_MM / RUN_yyyy_MM / ERROR_yyyy_MM に追記だけする（上書き・削除しない）。
- * 監査は row_hash = SHA-256(prev_hash + 改行 + 行の内容) の鎖でつなぎ、最新のハッシュを Script Properties に控える。
+ * 監査は row_hash = SHA-256(prev_hash + 改行 + 行の内容) の鎖でつなぎ、最新のハッシュを所有者の UserProperties に控える（置き場は Store.js の appProps_）。
  * 書き込み・実行は開始を記録できなければ行わない（fail-closed）。消さない（前の年度より古いログはアーカイブのフォルダへ移す。Housekeeping.js）。
  */
 /**

@@ -306,17 +306,17 @@ assert.deepEqual([expectNumbers(1200).budget.uplift, expectNumbers(1200).monthly
   env.ctx.CacheService.getScriptCache = orig;
 }
 
-// ==== 6. 処理の記録の一覧は、Script Properties を 1 回で読む（前と同じ一覧） ====
+// ==== 6. 処理の記録の一覧は、置き場（所有者の UserProperties）を 1 回で読む（前と同じ一覧） ====
 {
   for (let i = 0; i < 3; i++) assert.equal(env.runJob('SYSTEM.RECOVER', {}).status, 'DONE');
   env.call('apiStartJob(__in)', { __in: { kind: 'SYSTEM.RECOVER', payload: {} } });   // 待っている処理も 1 つ
   const before = J(env.run(`appProps_().getKeys().filter(k => k.indexOf(APP_JOB_PREFIX) === 0 && k.indexOf(APP_JOB_RESULT_PREFIX) !== 0)
     .map(k => { try { return JSON.parse(appProps_().getProperty(k)); } catch (e) { return null; } }).filter(Boolean).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))`));
-  const orig = env.ctx.PropertiesService.getScriptProperties;
+  const orig = env.ctx.PropertiesService.getUserProperties;
   let gets = 0;
-  env.ctx.PropertiesService.getScriptProperties = () => { const p = orig(); return Object.assign({}, p, { getProperty: (k) => (gets++, p.getProperty(k)) }); };
+  env.ctx.PropertiesService.getUserProperties = () => { const p = orig(); return Object.assign({}, p, { getProperty: (k) => (k.indexOf('APP_JOB_') === 0 && gets++, p.getProperty(k)) }); };
   const now = J(env.run('appJobList_()'));
-  env.ctx.PropertiesService.getScriptProperties = orig;
+  env.ctx.PropertiesService.getUserProperties = orig;
   assert.ok(before.length >= 4, '処理の記録がある: ' + before.length);
   assert.deepEqual(now, before);
   assert.equal(gets, 0, '1 つずつは読まない');

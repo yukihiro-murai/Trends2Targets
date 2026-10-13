@@ -216,11 +216,11 @@ const dropBackupTriggers = (env) => { for (let i = env.triggers.length - 1; i >=
   assert.ok(broken.logs.some((m) => /毎日のバックアップのトリガー: 一覧を読めません/.test(m)), broken.logs.join('\n'));
   assert.equal(broken.props.APP_BACKUP_AUTO_CHECKED, undefined);
   assert.equal(broken.state.lockHeld, false);
-  // 控え（Script Properties）を書けない: 画面は開く
+  // 控え（所有者の UserProperties）を書けない: 画面は開く
   const ro = setUpEnv();
   ro.run(`(() => {
-    const real = PropertiesService.getScriptProperties;
-    PropertiesService.getScriptProperties = () => { const p = real(); const set = p.setProperty; p.setProperty = (k, v) => { if (k === 'APP_BACKUP_AUTO_CHECKED') throw new Error('書けません（テスト）'); return set(k, v); }; return p; };
+    const real = PropertiesService.getUserProperties;
+    PropertiesService.getUserProperties = () => { const p = real(); const set = p.setProperty; p.setProperty = (k, v) => { if (k === 'APP_BACKUP_AUTO_CHECKED') throw new Error('書けません（テスト）'); return set(k, v); }; return p; };
   })()`);
   assert.equal(open(ro).boot.allowed, true);
   assert.ok(ro.logs.some((m) => /毎日のバックアップのトリガー: 書けません/.test(m)), ro.logs.join('\n'));

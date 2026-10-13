@@ -2,7 +2,7 @@
  * Jobs.js — 時間のかかる処理（予測の実行・計画への保存と実行・計画の作成など）を、画面の通信から切り離して動かす。
  * 画面から始めると、1 回だけ動く時間主導のトリガーを作り、裏で最後まで実行する。画面は数秒ごとに状態を尋ねて結果を受け取る。
  * 画面と 1 分以上つながったままにすると通信が切れる（HTTP 503）ことがあるため（2026-10-01 に発生）。
- * 状態は Script Properties（APP_JOB_<id>、小さい）、結果は CacheService（6 時間）に置く。処理そのものの記録は監査ログに残る。
+ * 状態は所有者の UserProperties（APP_JOB_<id>、小さい。置き場は Store.js の appProps_）、結果は CacheService（6 時間）に置く。処理そのものの記録は監査ログに残る。
  */
 const APP_JOB_PREFIX = 'APP_JOB_';
 const APP_JOB_RESULT_PREFIX = 'APP_JOB_RESULT_';
@@ -69,7 +69,7 @@ function appJobOwnerOnly_(spec, payload) {
 }
 
 /**
- * 画面から渡された大きい中身（入力の行など）は、処理の記録（Script Properties、8KB まで）ではなく CacheService に置く。
+ * 画面から渡された大きい中身（入力の行など）は、処理の記録（UserProperties、8KB まで）ではなく CacheService に置く。
  * 処理は数分以内に動くので、6 時間の保存期間で足りる
  */
 function appJobStashArgs_(payload) {
@@ -165,7 +165,7 @@ function appJobExecute_(ctx, job) {
   }
 }
 
-// ---- 保存（Script Properties と CacheService） ----
+// ---- 保存（UserProperties と CacheService） ----
 
 function appJobGet_(id) {
   const raw = appProps_().getProperty(APP_JOB_PREFIX + id);
@@ -178,7 +178,7 @@ function appJobSave_(job) {
   appProps_().setProperty(APP_JOB_PREFIX + job.id, JSON.stringify(job));
 }
 
-/** 処理の記録の一覧（古い順）。Script Properties は 1 回でまとめて読む（getProperties） */
+/** 処理の記録の一覧（古い順）。置き場は 1 回でまとめて読む（getProperties） */
 function appJobList_() {
   const all = appProps_().getProperties();
   return Object.keys(all).filter(k => k.indexOf(APP_JOB_PREFIX) === 0 && k.indexOf(APP_JOB_RESULT_PREFIX) !== 0)
@@ -448,7 +448,7 @@ function appRunJob_(id) {
   done.error = error;
   done.nextJobId = nextJobId;
   done.finishedAt = new Date().toISOString();
-  done.payload = appJobClientPayload_(done.payload);   // 終わった処理は、画面に要る項目だけ残す（Script Properties の全体の上限 500KB）
+  done.payload = appJobClientPayload_(done.payload);   // 終わった処理は、画面に要る項目だけ残す（UserProperties の全体の上限 500KB）
   appJobSave_(done);
   appRunLog_({ requestId: id, kind: 'JOB:' + job.kind, startedAt: job.startedAt, durationMs: new Date().getTime() - t0, status: status,
     detail: { jobId: id, requestedBy: job.requestedBy, attempts: done.attempts }, error: error });

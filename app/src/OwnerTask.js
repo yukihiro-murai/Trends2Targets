@@ -14,6 +14,7 @@
  * 記録はその処理が残す。結果は jobStatus で見る。年度の締めは、画面と同じく yearPreview の指紋（inputHash）が要る。
  * 補正の値（setCalibration）は、所有者が承認した値を計画の旧来の CALIBRATION_STATE に書く（2026-10-07 村井さん決定。Calibration.js）。
  */
+// 頼みと結果は Script Properties に置く（所有者がエディタで書いて読む。APP_ で始まらないキー）。アプリの状態は所有者の UserProperties（Store.js の appProps_）
 const APP_OWNER_TASK_PROP = 'OWNER_TASK';
 const APP_OWNER_RESULT_PROP = 'OWNER_TASK_RESULT';
 const APP_OWNER_RESULT_MAX_BYTES = 8000;   // Script Properties の 1 つの値の上限は約 9KB（バイト数）
