@@ -351,13 +351,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .sky.none .ch{opacity:.4}.sky.none .ct{color:var(--muted)}
 .sky .ch{width:80px;height:80px}.sky .ch svg{width:100%;height:100%;display:block}
 .sky .mk{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%;font-size:var(--fs-s);line-height:1.4;color:var(--navy)}
-.sky .mk span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sky .mk span{max-width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}   /* 名前は 2 行まで（1 行で「サンプルフ…」と切れていた）。「・」の後で折り、入らなければ途中で折る */
 .sky .nm{font-size:var(--fs-s);line-height:1.4;word-break:keep-all;overflow-wrap:normal}
 .sky .ct{font-size:var(--fs-h2);line-height:1.3;font-variant-numeric:tabular-nums}
 /* 学びの進み: 精度の天気と、承認待ちの見直し案（「学びを見る」で AI の学び） */
 .hm-lr{display:grid;grid-template-columns:1fr;gap:var(--s3)}   /* 学びの進みは 1 カラム（2026-10-13 村井さん） */
 .hm-lrbox{display:flex;align-items:center;gap:var(--s4);min-width:0;min-height:96px;padding:var(--s3) var(--s4);border:1px solid var(--line-soft);border-radius:var(--radius-s);background:#fff;font:inherit;color:var(--text);text-align:left}
 .hm-lrt{display:flex;flex-direction:column;flex:1;min-width:0}
+.hm-lric{width:64px;height:64px;flex:0 0 64px;color:var(--primary-dark)}.hm-lric svg{width:100%;height:100%;display:block}
 .hm-lrt .k{font-size:var(--fs-s);color:var(--muted)}
 .hm-lrt .t1{font-size:var(--fs-h3);line-height:1.4;color:var(--navy)}
 .hm-lrt .t1 .u{font-size:var(--fs-s);color:var(--muted)}
@@ -433,6 +434,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .fcsec .card h2::before{height:14px;background:var(--primary-line)}
 .fcsec .card:not(.caution):not(.alert):not(.soft) > .card-foot{margin:var(--s5) 0 0;padding:var(--s4) 0 0;border-radius:0}
 .fcsec .kpis{margin:0}
+.card > .kpis:last-child{margin-bottom:0}   /* カードの最後の数字の並びの下に、余白を重ねない（ホームの数字のカードの下が空いていた） */
 .fcsec .kpi{box-shadow:none}
 .tbl.fc-notes,.tbl.fc-props{width:max(100%,880px)}
 /* 振り返りの表: 見るだけのときも、書くとき（.edit）と同じ左右 8px の余白（列の幅を同じ決まりで切る） */
@@ -1361,6 +1363,15 @@ function chTone(t){ return t === 'warm' || t === 'neutral' || t === 'cool' || t 
 function chFmt(v){ return !isNum(v) ? '-' : Math.abs(v) >= 1e4 ? yenShort(v) : Math.abs(v) >= 100 ? Math.round(v).toLocaleString('ja-JP') : String(Math.round(v * 100) / 100); }
 function chPct(v){ return isNum(v) ? Math.round(v * 100) + '%' : '-'; }
 /** 12px の文字の幅の目安（全角 12・% 10.5・ほかの半角 7.2。符号や % を少なく見積もって名前が重ならないよう、やや広めに） */
+/**
+ * 横の棒・点のグラフの、左の名前の幅: いちばん長い名前が切れない幅（168〜グラフの幅の 3 割）。スマホの幅（480 未満）は 88。
+ * 2026-10-14: 168 で決めていたので「アストラル・ヘルスケア FY2026」などが「…」で切れていた（切れる名前はカーソルで出る）
+ */
+function chLabelW(list, w){
+  if (w < 480) return 88;
+  var m = (list || []).reduce(function(a, r){ return Math.max(a, chTextW(r && r.label) * 13 / 12); }, 0);
+  return Math.max(168, Math.min(Math.round(w * 0.3), Math.ceil(m) + 16));
+}
 function chTextW(s){ s = String(s == null ? '' : s); var w = 0; for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); w += c > 255 ? 12 : c === 37 ? 10.5 : 7.2; } return w; }
 /**
  * 横の目盛り（縦の格子線つき）。x: 目盛りの値 → 位置。bounds: [左, 右]（名前を描いてよい範囲。既定は目盛りの両端）。
@@ -1422,7 +1433,7 @@ function chartBullet(rows, opts){
     var fmt = opts.fmt || yenShort, list = (rows || []).filter(function(r){ return r && [r.low, r.mid, r.high, r.target].some(isNum); });
     if (!list.length) return chEmpty(opts.empty);
     var nm = opts.names || {}, nBand = nm.band || qName('p10') + '〜' + qName('p90'), nMid = nm.mid || qName('p50'), nTgt = nm.target || '予算';
-    var w = opts.w || chW(), lw = opts.labelW || (w < 480 ? 88 : 168), rh = 36, R = 20;
+    var w = opts.w || chW(), lw = opts.labelW || chLabelW(list, w), rh = 36, R = 20;
     var lg = opts.legend === false ? null : chLegend([{ label: nBand, kind: 'rect', cls: 'f-neutral soft' }, { label: nMid, kind: 'tones' }, { label: nTgt, kind: 'dash', cls: 's-navy' }], w < 480 ? 0 : lw, 14, w);
     var top = lg ? lg.h + 16 : 10;
     var vals = [0]; list.forEach(function(r){ [r.low, r.mid, r.high, r.target].forEach(function(v){ if (isNum(v)) vals.push(v); }); });
@@ -1475,7 +1486,7 @@ function chartScatter(points, opts){
     });
     if (lab) pts.forEach(function(p, i){
       if (!p.label) return;
-      var d = dots[i], pl = chClip(p.label, 96), tw = chTextW(pl) * 13 / 12, g = d.r + 4;
+      var d = dots[i], pl = chClip(p.label, 144), tw = chTextW(pl) * 13 / 12, g = d.r + 4;
       var tries = [[d.cx + g, d.cy + 4, 'start'], [d.cx - g, d.cy + 4, 'end'], [d.cx, d.cy - g - 2, 'middle'], [d.cx, d.cy + g + 12, 'middle']];
       var put = null;
       tries.some(function(t){
@@ -1501,7 +1512,7 @@ function chartBars(rows, opts){
     opts = opts || {};
     var fmt = opts.fmt || chFmt, vfmt = opts.vFmt || fmt, list = (rows || []).filter(function(r){ return r && r.label !== undefined; });
     if (!list.some(function(r){ return isNum(r.value); })) return chEmpty(opts.empty);
-    var w = opts.w || chW(), narrow = w < 480, lw = opts.labelW || (narrow ? 88 : 168), rh = 32;
+    var w = opts.w || chW(), narrow = w < 480, lw = opts.labelW || chLabelW(list, w), rh = 32;
     var vtext = function(r){ return r.text !== undefined && r.text !== null ? String(r.text) : vfmt(r.value); };
     // 棒の横の文字の場所: 右の余白は一番長い正の値の文字、0 の左（負の値があるとき）は一番長い負の値の文字の分だけ取る
     var negW = 0, posW = 0;
@@ -1548,7 +1559,7 @@ function chartIntervals(rows, opts){
     opts = opts || {};
     var list = (rows || []).filter(function(r){ return r && [r.lo, r.mid, r.hi].some(isNum); });
     if (!list.length) return chEmpty(opts.empty);
-    var w = opts.w || chW(), lw = opts.labelW || (w < 480 ? 88 : 168), rh = 32, T = 8 + (isNum(opts.ref) && opts.refLabel ? 16 : 0), R = 24;
+    var w = opts.w || chW(), lw = opts.labelW || chLabelW(list, w), rh = 32, T = 8 + (isNum(opts.ref) && opts.refLabel ? 16 : 0), R = 24;
     var lo = isNum(opts.min) ? opts.min : 0, hi = isNum(opts.max) && opts.max > lo ? opts.max : lo + 1;
     var n = { lo: lo, hi: hi, ticks: chNice(lo, hi, Math.max(2, Math.floor((w - lw - R) / 72))).ticks.filter(function(t){ return t >= lo - 1e-9 && t <= hi + 1e-9; }) };
     var cl = function(v){ return Math.max(lo, Math.min(hi, v)); };
@@ -1722,7 +1733,7 @@ function chartArrows(rows, opts){
     var fmt = opts.fmt || pct1, list = (rows || []).filter(function(r){ return r && (isNum(r.raw) || isNum(r.shrunk)); });
     if (!list.length) return chEmpty(opts.empty);
     var nRaw = opts.rawLabel || '元の偏り', nShr = opts.shrunkLabel || '寄せた偏り', nBand = opts.bandLabel || '全体の平均 ± ばらつき';
-    var w = opts.w || chW(), lw = opts.labelW || (w < 480 ? 88 : 168), rh = 32, R = 24;
+    var w = opts.w || chW(), lw = opts.labelW || chLabelW(list, w), rh = 32, R = 24;
     var hasBand = isNum(opts.mu) && isNum(opts.tau) && opts.tau >= 0;
     var lg = chLegend([{ label: nRaw, kind: 'dot', cls: 'hollow' }, { label: nShr, kind: 'dot', cls: 'f-main' }].concat(hasBand ? [{ label: nBand, kind: 'band' }] : []), w < 480 ? 0 : lw, 14, w), T = lg.h + 14;
     var vals = [0, opts.mu].concat(hasBand ? [opts.mu - opts.tau, opts.mu + opts.tau] : []);
@@ -1768,7 +1779,7 @@ function chartWaterfall(rows, opts){
     opts = opts || {};
     var fmt = opts.fmt || yenShort, list = (rows || []).filter(function(r){ return r && isNum(r.value); });
     if (!list.length) return chEmpty(opts.empty);
-    var w = opts.w || chW(), narrow = w < 480, lw = opts.labelW || (narrow ? 88 : 168), rh = 32, T = 8;
+    var w = opts.w || chW(), narrow = w < 480, lw = opts.labelW || chLabelW(list, w), rh = 32, T = 8;
     var cum = 0, segs = list.map(function(r){ var a = r.total ? null : cum, b = r.total ? r.value : cum + r.value; cum = b; return { r: r, a: a, b: b }; });
     var ends = []; segs.forEach(function(s){ ends.push(s.b); if (s.a !== null) ends.push(s.a); });
     var lo = Math.min.apply(null, ends), hi = Math.max.apply(null, ends), span = hi - lo || Math.abs(hi) * 0.1 || 1;
@@ -2012,7 +2023,7 @@ function homeSkyCard(plans){
   var by = {}; plans.forEach(function(p){ var k = skyKey(p); (by[k] = by[k] || []).push(p.clientName); });
   var tiles = SKY8.map(function(s){
     var names = by[s.key] || [];
-    return '<div class="sky' + (names.length ? '' : ' none') + '" tabindex="0" role="group" aria-label="' + esc(s.name + ' ' + names.length + ' メーカー') + '" data-tip="' + esc(s.name + '：' + s.rule) + '">'
+    return '<div class="sky' + (names.length ? '' : ' none') + '" tabindex="0" role="group" aria-label="' + esc(s.name + ' ' + names.length + ' メーカー') + '" data-tip="' + esc(s.name + '：' + s.rule + (names.length ? '\n' + names.join('、') : '')) + '">'
       + '<span class="ch">' + (CHAR_SVG[s.key] || '') + '</span><span class="ct">' + names.length + '</span>'
       + '<span class="mk">' + names.map(function(n){ return '<span>' + esc(n) + '</span>'; }).join('') + '</span></div>';
   }).join('');
@@ -2024,6 +2035,8 @@ function homeSkyCard(plans){
 var HOME_ROUGH = { factor_clamp: '補正が上限か下限に張りついたメーカー', coverage_low: '見通しの幅の外れが多いメーカー' };
 var HOME_ROUGH_SHORT = { factor_clamp: '補正が限度', coverage_low: '幅が狭すぎる' };   // 学びの気になる点の札（LR_HEALTH）と同じ名前
 function homeToLearn(){ go('learning'); setTimeout(function(){ var el = $('lr-tune'); if (el && el.scrollIntoView) el.scrollIntoView(); }, 0); }   // 学びの「補正と重みの調整」へ
+/** 承認待ちの見直し案の印（書類と確かめの印。精度の天気の絵と同じ 64 の枠に置き、2 つの箱の文字の頭をそろえる） */
+var HM_PEND_ICON = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><rect x="15" y="10" width="30" height="40" rx="5" fill="#E5F6FD"/><path d="M22 21h16M22 29h16M22 37h9"/><circle cx="45" cy="45" r="10" fill="#fff"/><path d="M45 40v5.5l3.5 2"/></svg>';
 function homeLearnCard(h, plans){
   var head = '<div class="card-head"><h2>学びの進み' + tip('予測の当たり方（精度の天気）と、承認を待っている AI の見直し案です。見直し案は、承認して反映するまで予測に効きません') + '</h2></div>';
   var d = S.lr.ai, x = S.ld.lrAi;
@@ -2055,7 +2068,7 @@ function homeLearnCard(h, plans){
   var pTip = 'AI が作った見直し案のうち、承認を待っているものです。承認者が承認して反映するまで、予測には効きません' + (pend.length ? '\n' + pend.length + ' メーカーの分' : '');
   return '<div class="card">' + head + '<div class="hm-lr">'
     + '<div class="hm-lrbox" data-tip="' + esc(wTip) + '">' + skyChar(key, 64) + '<span class="hm-lrt"><span class="k">精度の天気</span><span class="t1">' + esc(skyName(key)) + '</span><span class="t2">' + esc(sub) + '</span></span></div>'
-    + '<div class="hm-lrbox"><span class="hm-lrt" data-tip="' + esc(pTip) + '"><span class="k">承認待ちの見直し案</span><span class="t1 num">' + nProp + '<span class="u"> 件</span></span><span class="t2">' + (pend.length ? pend.length + ' メーカー' : 'いまはありません') + '</span></span>'
+    + '<div class="hm-lrbox"><span class="hm-lric" aria-hidden="true">' + HM_PEND_ICON + '</span><span class="hm-lrt" data-tip="' + esc(pTip) + '"><span class="k">承認待ちの見直し案</span><span class="t1 num">' + nProp + '<span class="u"> 件</span></span><span class="t2">' + (pend.length ? pend.length + ' メーカー' : 'いまはありません') + '</span></span>'
     + '</div>'
     + '</div></div>';
 }
@@ -3322,8 +3335,11 @@ function fcInputCard(v, kind){
     if (c[2] === 'month') return '<select class="inp cell" ' + on + '>' + opts(boot.months, val) + '</select>';
     if (c[2] === 'step') return '<select class="inp cell" ' + on + '>' + opts(withCur(boot.stepOptions, val), val) + '</select>';
     if (c[2] === 'selfconf') return '<select class="inp cell" ' + on + '>' + opts(FC_CONF_LEVELS, val) + '</select>';
-    var num = c[2] === 'conf' || c[2] === 'money';
-    return '<input class="inp cell' + (num ? ' num' : '') + '" type="' + (num ? 'number' : 'text') + '"' + (c[2] === 'conf' ? ' min="0" max="1" step="0.1"' : c[2] === 'money' ? ' step="10000"' : '') + ' value="' + esc(val) + '" ' + typed + '>';
+    // 金額は予算の表と同じく 3 けたごとの区切りで見せる（打つ間は区切りを外す。控えるのは区切りの無い数）。2026-10-14: 「3000000」のまま見えていた
+    if (c[2] === 'money') return '<input class="inp cell num" type="text" inputmode="numeric" value="' + esc(fcYenIn(val)) + '" onfocus="fcNumFocus(this)" onblur="fcNumBlur(this)" '
+      + 'oninput="fcInputType(' + i + ',\'' + c[0] + '\',this.value.replace(/[,\s]/g,\'\'),' + q + ')" aria-label="' + esc(c[1]) + '">';
+    var num = c[2] === 'conf';
+    return '<input class="inp cell' + (num ? ' num' : '') + '" type="' + (num ? 'number' : 'text') + '"' + (num ? ' min="0" max="1" step="0.1"' : '') + ' value="' + esc(val) + '" ' + typed + '>';
   };
   var html = '<div class="card fc-inkind" id="fc-in-' + kind + '"><h2>' + esc((INPUT_KINDS.filter(function(k){ return k[0] === kind; })[0] || ['', ''])[1]) + 'の入力' + (canPlan ? '' : tip('入力は予算策定担当ができます。')) + '</h2><div class="tblwrap"><table class="tbl scroll fc-in' + (canPlan ? ' edit' : '') + '" style="--inw:' + inw + 'px"><colgroup>' + cols.map(function(c){ return '<col' + (c[3] ? ' style="width:' + c[3] + 'px"' : '') + '>'; }).join('') + (canPlan ? '<col style="width:152px">' : '') + '</colgroup>'
     + '<thead><tr>' + cols.map(function(c){ return '<th' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + (c[2] === 'selfconf' ? ' data-tip="' + esc(FC_CONF_TIP) + '"' : '') + '>' + c[1] + '</th>'; }).join('') + (canPlan ? '<th></th>' : '') + '</tr></thead><tbody>'
@@ -4554,6 +4570,8 @@ function lrMore(text){ return '<span class="lr-more" tabindex="0" data-tip="' + 
  * 列のクラスに lr-hm を入れた列はスマホで隠す（.lr-fit の表は横に送らず幅に収める）
  */
 var LR_C1 = 160, LR_C2 = 332;
+/** メーカーの列（名前は 1 行に。年度・日付・札は名前の下の行。2026-10-14: 1 マスだと「アストラル・ヘルス／ケア」のように名前の途中で折れていた） */
+var LR_CM = 240;
 function lrTable(cols, rows, cls){
   var cell = function(v, c){ var o = v && typeof v === 'object' ? v : { h: v }; var k = [c[1], o.cls].filter(Boolean).join(' ');
     return '<td' + (k ? ' class="' + k + '"' : '') + (o.tip ? ' data-tip="' + esc(o.tip) + '"' : '') + '>' + (o.h === undefined || o.h === null || o.h === '' ? '-' : o.h) + '</td>'; };
@@ -4847,7 +4865,7 @@ function lrDecisionCard(d, full){
   var who = full && ds.some(function(x){ return x.decidedBy !== undefined; }), max = 10, shown = S.lr.more.decisions ? ds : ds.slice(0, max), saved = lrSavedDecisions();
   // 列は格子に（2026-10-13 村井さん「対象の列が広すぎる」）: メーカー（作った日はその下）1 マス・対象 2 マス（折り返す）・案 1 マス・判断 1 マス（判断した人はその下）。
   // スマホは メーカー（対象と作った日はその下）・判断 だけ（案は判断の札のカーソルに）。対象・値の言い方は振り返りと同じ
-  var cols = [['メーカー', 'lr-wr', LR_C1, '作った日は、メーカーの下に出ます（判断した日は、判断の札にカーソルを合わせると出ます）'], ['対象', 'lr-wr lr-kw lr-hm', LR_C2], ['案', 'num lr-wr lr-kw lr-hm', LR_C1, '今 → 案'],
+  var cols = [['メーカー', 'lr-wr', LR_CM, '作った日は、メーカーの下に出ます（判断した日は、判断の札にカーソルを合わせると出ます）'], ['対象', 'lr-wr lr-kw lr-hm', LR_C2], ['案', 'num lr-wr lr-kw lr-hm', LR_C1, '今 → 案'],
     ['判断', 'ctr', LR_C1, '承認・却下・保留。反映済みは、承認して設定に反映した案です' + (who ? '。判断した人は札の下に出ます' : ''), 136]];
   var rows = shown.map(function(x){
     var nm = full && lrNamed(d, x.planId);   // この計画の人や話題の名前・信頼度の値を見せるか（担当のメーカーでない計画は閲覧の人と同じ）
@@ -4857,7 +4875,7 @@ function lrDecisionCard(d, full){
     var nb = function(v){ return String(v).replace(/ /g, '\u00a0'); };
     var change = hidVal ? '-' : nb(qrValue(x.target, x.current)) + ' → ' + nb(qrValue(x.target, x.proposed)), conf = x.confidence ? '確度 ' + qrConf(x.confidence) : '';
     var tgt = x.target ? qrTarget(x.target, !nm) : lrWords(x.targetLabel || ''), tgtTip = (x.quarter ? qrQuarter(x.quarter) : '') + (why ? '\n理由: ' + why : '');
-    return [esc(x.clientName) + ' <span class="meta">FY' + esc(x.fy) + '</span><span class="lr-so"' + (tgtTip ? ' data-tip="' + esc(tgtTip) + '"' : '') + '>' + esc(tgt) + '</span><span class="lr-sub meta">' + esc(lrDate(x.at)) + '</span>',
+    return [esc(x.clientName) + '<span class="lr-so"' + (tgtTip ? ' data-tip="' + esc(tgtTip) + '"' : '') + '>' + esc(tgt) + '</span><span class="lr-sub meta">FY' + esc(x.fy) + '・' + esc(lrDate(x.at)) + '</span>',
       { h: esc(tgt), tip: tgtTip },
       { h: esc(change), tip: '今 ' + qrValue(x.target, x.current) + ' → 案 ' + qrValue(x.target, x.proposed) + (conf ? '（' + conf + '）' : '') },
       { h: '<span class="chip st ' + dec[1] + '">' + dec[0] + '</span>' + (by ? '<span class="lr-sub meta">' + esc(by) + '</span>' : ''), tip: dec[2] + '\n案 ' + change + (conf ? '（' + conf + '）' : '') + (by ? '\n判断した人 ' + by : '') }];
@@ -4877,13 +4895,13 @@ function lrUpliftCard(d){
     var kind = c ? '<span class="chip st ok">確定</span>' : '<span class="chip st warn">見込み</span>';
     // 上乗せが予算に比べてとても小さいと割合が大きく振れる（1234% など）。表には端で止めた値、正確な値はカーソルに
     var capPct = function(v){ return !isNum(v) ? '-' : v > 5 ? '500% 超' : v < -1 ? '-100% 未満' : lrPct(v); };
-    return [{ h: esc(u.clientName) + ' <span class="meta">FY' + esc(u.fy) + '</span><span class="lr-sub" data-tip="' + esc(c ? '12 か月の実績がそろいました' : '年度の途中です。締まった ' + (u.months || 0) + ' か月の実績と、残りの月の予測から推定した着地で見ています') + '">' + kind + '</span>', tip: money },
+    return [{ h: esc(u.clientName) + '<span class="lr-sub meta">FY' + esc(u.fy) + '</span><span class="lr-sub" data-tip="' + esc(c ? '12 か月の実績がそろいました' : '年度の途中です。締まった ' + (u.months || 0) + ' か月の実績と、残りの月の予測から推定した着地で見ています') + '">' + kind + '</span>', tip: money },
       lrYenCell(u.budgetUplift), lrYenCell(c ? u.actual : u.landing),
       { h: lrPct(ratio), cls: 'num', tip: c ? '実績 ÷ 最終予算' : '着地の推定 ÷ 最終予算（見込み）' },
       { h: has ? capPct(real) : '-', cls: 'num', tip: has ? '（' + (c ? '実績' : '着地の推定') + ' − 採用した予算）÷ 上乗せ' + (c ? '' : '（見込み）') + (isNum(real) ? ' = ' + lrPct(real) : '') : '上乗せはありません' }];
   });
   // 列は格子に（1 マスずつ）。区分の札（確定・見込み）はメーカーの下、最終予算はメーカーのカーソルに。スマホは メーカー・予算比・上乗せの実現 だけ（金額はメーカーのカーソルに）
-  var cols = [['メーカー', 'lr-wr', LR_C1, '確定 = 年度の 12 か月の実績で見た値・見込み = 年度の途中で、着地の推定で見た値（札はメーカーの下）。最終予算はカーソルで'],
+  var cols = [['メーカー', 'lr-wr', LR_CM, '確定 = 年度の 12 か月の実績で見た値・見込み = 年度の途中で、着地の推定で見た値（札はメーカーの下）。最終予算はカーソルで'],
     ['上乗せ', 'num lr-hm', LR_C1, '承認された予算のうち、採用した予算に上乗せした金額'], ['実績・着地', 'num lr-hm', LR_C1, '確定は年度の実績、見込みは着地の推定'],
     ['予算比', 'num', LR_C1, '確定は 実績 ÷ 最終予算、見込みは 着地の推定 ÷ 最終予算', 96], ['上乗せの実現', 'num', LR_C1, '上乗せした分のうち、届いた割合。100% で上乗せどおり、0% 以下は採用した予算にも届かない', 120]];
   return lrCard('予算の上乗せの当たり', '承認された予算の上乗せが、実際に届いたかを見ます。年度の 12 か月がそろうまでは「見込み」として、着地の推定で見ています',
@@ -5061,11 +5079,11 @@ function lrPendingCard(pend){
     var ps = p.proposals || [], dec = ps.filter(function(q){ return q.decision; }).length;
     var list = ps.map(function(q){ var hv = hide && /^reliability:/.test(String(q.target || ''));   // 閲覧の人には信頼度の値を出さない
       return (q.target ? qrTarget(q.target, hide) : lrWords(q.targetLabel || '')) + (hv ? '' : ' ' + qrValue(q.target, q.current) + ' → ' + qrValue(q.target, q.proposed)) + (q.confidence ? '（確度 ' + qrConf(q.confidence) + '）' : '') + (q.decision ? '・' + q.decision : ''); }).join('\n');
-    return [{ h: esc(p.clientName) + ' <span class="meta">FY' + esc(p.fy) + '</span><span class="lr-so meta">案 ' + ps.length + ' 件</span>', tip: list },
+    return [{ h: esc(p.clientName) + '<span class="lr-sub meta">FY' + esc(p.fy) + '</span><span class="lr-so meta">案 ' + ps.length + ' 件</span>', tip: list },
       esc(qrQuarter(p.quarter) || '-') + '<span class="lr-sub meta">' + esc(lrDate(p.at)) + '</span>', { h: ps.length + ' 件', tip: list, cls: 'num' }, { h: dec + ' / ' + ps.length, cls: 'num' }];
   });
   // スマホは メーカー（案の数はその下）だけ
-  var cols = [['メーカー', 'lr-wr', LR_C1], ['四半期', 'lr-hm', LR_C1, '見直し案の対象の四半期（作った日はその下）'], ['案', 'num lr-hm', LR_C1, 'カーソルを合わせると、案の中身（今 → 案）が出ます'], ['判断済み', 'num lr-hm', LR_C1, '保存した判断（承認・却下・保留）の数']];
+  var cols = [['メーカー', 'lr-wr', LR_CM], ['四半期', 'lr-hm', LR_C1, '見直し案の対象の四半期（作った日はその下）'], ['案', 'num lr-hm', LR_C1, 'カーソルを合わせると、案の中身（今 → 案）が出ます'], ['判断済み', 'num lr-hm', LR_C1, '保存した判断（承認・却下・保留）の数']];
   return lrCard('承認待ちの見直し案', 'AI が四半期ごとに作った見直し案です。承認するまで予測には効きません。承認は、予測の画面の「振り返り」でします', '<div class="tblwrap">' + lrTable(cols, rows, 'lr-fit') + '</div>');
 }
 /** 小さなグラフの幅（2 つ並べる。スマホは 1 つ） */

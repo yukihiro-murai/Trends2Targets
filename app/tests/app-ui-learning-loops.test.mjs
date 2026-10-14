@@ -163,9 +163,9 @@ const item = (p, a, k) => run('lrReviewItems(__p, __a).filter(function(x){ retur
   run('S.lr.ai = { pending: [] }; S.lr.more = {}');
   const dec = run('lrDecisionCard(__d, true)', { __d: { detail: 'full', decisions: ds } });
   const cols = [...dec.match(/<colgroup>([\s\S]*?)<\/colgroup>/)[1].matchAll(/<col([^>]*)>/g)].map((m) => m[1]);
-  assert.deepEqual(cols.map((c) => (/--w:(\d+)px/.exec(c) || [])[1] || (/lr-fill/.test(c) ? 'fill' : 'none')), ['160', '332', '160', '160', 'fill'], 'メーカー・対象（2 マス）・案・判断。幅の無い列は無い');
+  assert.deepEqual(cols.map((c) => (/--w:(\d+)px/.exec(c) || [])[1] || (/lr-fill/.test(c) ? 'fill' : 'none')), ['240', '332', '160', '160', 'fill'], 'メーカー（名前が 1 行に入る 240）・対象（2 マス）・案・判断。幅の無い列は無い');
   assert.match(dec, /<th class="lr-wr lr-kw lr-hm">対象<\/th>/, '対象は折り返す');
-  assert.match(dec, /<span class="lr-sub meta">2026\/10\/03<\/span>/, '作った日はメーカーの下');
+  assert.match(dec, /<span class="lr-sub meta">FY2026・2026\/10\/03<\/span>/, '年度と作った日はメーカーの下');
   assert.match(dec, /<span class="lr-sub meta">鷹野<\/span>/, '判断した人は判断の札の下');
   assert.equal((dec.match(/<span class="lr-sub meta">鷹野<\/span>/g) || []).length, 1, '判断した人がいない行には出さない');
   assert.match(dec, /3\.0%\u00a0下げ → 8\.0%\u00a0下げ/, '値の途中では折り返さない（→ の後だけ）');
