@@ -456,9 +456,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .tbl.anw{width:max(100%,560px)}
 .tbl.anbt td.num > .note{display:block}   /* 物差し: 95% の幅は値の下の行に（152px の列に入る） */
 .tbl.fc-layers th.num{padding-left:var(--s1)}   /* 根拠の層の表: 「前回から（月の合計）」を 1 マス（160px）の列に 1 行で（右寄せなので左の余白を詰める） */
-.tbl .anlink[data-tip]{color:var(--navy);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--primary-line);cursor:pointer}
 .anwx{display:inline-flex;align-items:center;gap:var(--s2)}
-.tbl .anlink[data-tip]:hover{text-decoration-color:var(--primary)}
 @media (max-width:760px){
   /* 分析の表: 列は中身の幅（列の少ない表は横に送らずに収まる。多い表だけ送る。見直しの流れは 名前・流れ・前回から まで見える） */
   .tbl.anw{width:100%}.tbl.anw col{width:auto!important}.tbl.anw td.wrap{min-width:var(--w-btn-sm)}
@@ -3802,7 +3800,7 @@ function fcVersionTab(d, v){
   html += '<div class="card"><h2>版の一覧</h2>' + (r.versions.length ? '<div class="tblwrap"><table class="tbl fc-vers"><colgroup><col style="width:56px"><col style="width:136px"><col style="width:128px"><col style="width:128px"><col style="width:112px"><col style="width:112px"><col><col style="width:152px"></colgroup>'
     + '<thead><tr><th>版</th><th>状態</th><th class="num" data-tip="最終予算の年度合計。金額にカーソルを合わせると、出したときにこの最終予算に届く見込み（前の版には無い）">最終予算</th>' + qTh('p50') + '<th>出した人</th><th>判断した人</th><th class="colmin" style="--colmin:64px">メモ</th><th></th></tr></thead><tbody>'
     + r.versions.map(function(x){ return '<tr><td>v' + x.no + '</td><td>' + verChip(x.state, true) + '</td><td class="num"' + verReachAttr(x) + '>' + yen(x.budget.final) + '</td><td class="num"' + (verMidTip(x) ? ' data-tip="' + esc(verMidTip(x)) + '"' : '') + '>' + yen(verMid(x)) + '</td><td>' + verWho(x.submittedBy, x.submittedAt) + '</td><td>' + verWho(x.decidedBy, x.decidedAt) + '</td>'
-      + '<td data-tip="' + esc((x.note || '') + (x.decisionNote ? ' / ' + x.decisionNote : '')) + '">' + esc(x.note || '') + (x.decisionNote ? '<div class="note">' + esc(x.decisionNote) + '</div>' : '') + '</td>'
+      + '<td class="clamp" data-tip="' + esc([x.note, x.decisionNote].filter(Boolean).join(' / ')) + '"><span>' + esc([x.note, x.decisionNote].filter(Boolean).join(' / ')) + '</span></td>'
       + '<td><button class="btn btn-ghost btn-sm" data-tip="この版と今の数字を、月ごとに比べます" onclick="S.fc.verCmp=\'' + esc(x.versionId) + '\';render()">今と比べる</button></td></tr>'; }).join('')
     + '</tbody></table></div>' : '<p class="note">まだ版がありません。</p>') + '</div>';
   // 比べる（月ごと）
@@ -3858,8 +3856,8 @@ function fcStepsTab(d, v){
     ['SALES.AGGREGATE', '取り込んだ売上を、月ごとに集計し直します。'],
     ['AI.RESEARCH', 'AI で市場・競合・販路・DX を調べ、予測に使う点数を作り直します。週に 1 回は自動で調べます。', 'plan', '5〜15 分ほどかかります（時間の区切りごとに分けて動かします）。']]);
   // 準備のボタンが無い人（見るだけ）には、中身の無いカードを出さない（市場を調べた日は手順の進みの右に）
-  var html = '<div class="card"><div class="card-head"><h2>手順の進み' + tip('上から実行する順です。エラーの札にカーソルを置くと理由が出ます') + '</h2></div><div class="tblwrap"><table class="tbl fc-steps"><colgroup><col><col style="width:152px"><col style="width:104px"><col style="width:136px"></colgroup><thead><tr><th class="colmin" style="--colmin:136px">手順</th><th>状態</th><th>日付</th><th>した人</th></tr></thead><tbody>'
-    + st.map(function(x){ return '<tr><td class="wrap">' + esc(STEP_NAMES[x.key] || plainMsg(x.label)) + '</td><td>' + chip(x) + '</td><td>' + esc(x.date || '-') + '</td><td>' + esc(fcWho(x.by) || '-') + '</td></tr>'; }).join('')
+  var html = '<div class="card"><div class="card-head"><h2>手順の進み' + tip('上から実行する順です。エラーの札にカーソルを置くと理由が出ます') + '</h2></div><div class="tblwrap"><table class="tbl fc-steps"><colgroup><col><col style="width:152px"><col style="width:136px"><col style="width:136px"></colgroup><thead><tr><th class="colmin" style="--colmin:136px">手順</th><th>状態</th><th>日付</th><th>した人</th></tr></thead><tbody>'
+    + st.map(function(x){ return '<tr><td class="wrap">' + esc(STEP_NAMES[x.key] || plainMsg(x.label)) + '</td><td>' + chip(x) + '</td><td>' + esc(fcMd(x.date) || x.date || '-') + '</td><td>' + esc(fcWho(x.by) || '-') + '</td></tr>'; }).join('')
     + '</tbody></table></div></div>';
   if (acts) html += '<div class="card"><div class="card-head"><h2>予測の準備' + tip('予測の前に、左から順に実行します') + '</h2></div>' + acts + '</div>';
   // 担当者は見るだけ（変えるのは所有者がエディタから。2026-10-06 村井さん）
@@ -4444,8 +4442,7 @@ function anMarket(d){
   has.forEach(function(p){ p.topics.forEach(function(t){ if (t.asOf && String(t.asOf) > last) last = String(t.asOf); }); });
   var sum = {};   // 話題ごとのまとめ（マスと同じ決まりで数える）
   var rows = has.map(function(p){
-    return '<tr><td><a class="anlink" role="button" tabindex="0" data-tip="押すと、このメーカーの予測の根拠を開きます" onclick="openPlan(\'' + esc(p.planId) + '\',\'basis\')"'
-      + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' + esc(p.clientName) + '</a></td>'
+    return '<tr><td>' + esc(p.clientName) + '</td>'
       + keys.map(function(k){
         var rs = p.topics.filter(function(t){ return t.topic === k; });
         if (!rs.length) return '<td class="ctr">-</td>';
