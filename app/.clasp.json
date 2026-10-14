@@ -1,6 +1,6 @@
 {
   "scriptId": "18IUrJ76gyUWxjkaO8aEajzSfWlZvkE8JfjCwQW1eJVsCHJKKTBRD9H4y",
-  "rootDir": "../../../../../../private/tmp/claude-503/-Users-y-murai-Documents-GAS-Trends2Targets/2a3b04a6-a601-4e5c-abd3-1ca26433c9ca/scratchpad/gas-v74",
+  "rootDir": "src",
   "scriptExtensions": [
     ".js",
     ".gs"
