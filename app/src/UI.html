@@ -985,10 +985,13 @@ function refreshJobBox(){ if ($('jobBox')) $('jobBox').innerHTML = jobBanner(); 
 /** 画面を移る（使えない画面はホームへ）。画面ごとの読み込みは各 REGION の *Enter() */
 function go(v){
   if (!navItems().some(function(n){ return n[0] === v; })) v = 'home';
+  var moved = S.view !== v;
   S.view = v;
   var enter = { home: homeEnter, makers: mkEnter, forecast: fcEnter, analysis: anEnter, learning: lrEnter }[v];
   if (enter) enter();
   render();
+  // 別の画面へ移ったら先頭から見せる（前の画面の縦の位置を持ち越さない。2026-10-14 村井さん）
+  if (moved && window.scrollTo) { try { window.scrollTo(0, 0); } catch (e) { /* 送れなくても移る */ } }
 }
 /**
  * 計画を開く。ホーム・メーカー・分析・学びから使う。tab: 予測の画面の中の区切り（basis・review など。タブは無くしたので、その区切りへ画面の中で送る）。
