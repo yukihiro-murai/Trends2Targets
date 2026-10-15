@@ -14,7 +14,7 @@
  * 版 11（2026-10-09 村井さん承認「推奨する対応を継続」。SCHEMA_PLAN_v10-12_JA.md の 4 章）で、予算の下書き（BUDGET_DRAFTS。追記だけ）を足し、
  * 公式版（PLAN_VERSIONS）の後ろに、出したときの届く見込みと前提の列を足した（APP_ADDED_COLUMNS。出した後は変えない）。中身は BudgetDrafts.js・V11.js・Versions.js
  */
-const APP_SCHEMA_VERSION = 14;
+const APP_SCHEMA_VERSION = 15;
 
 /**
  * 版を上げて、今ある表の後ろに足した列（古い順）。データ本体の 1 行目が足す前の列なら、版を上げた後の最初の操作で後ろに列の名前を書き足す
@@ -221,6 +221,14 @@ const APP_TABLES = {
       'posterior_json', 'evidence_points', 'evidence_makers', 'own_points', 'sigma', 'evidence_hash', 'calc_version', 'recorded_at'],
     types: { beta_human: 'num', beta_ai: 'num', var_human: 'num', var_ai: 'num', cov_human_ai: 'num', alpha: 'num', alpha_sd: 'num', capped: 'bool',
       evidence_points: 'num', evidence_makers: 'num', own_points: 'num', sigma: 'num' }
+  },
+  // ---- 版 15 の表（追記だけ。2026-10-16 点検の直し。村井さん「直したら公開まで進めて」）----
+  PUSH_RAW: {
+    // 効き係数を掛ける前の押し（Effects.js）: 予測 1 回 × 月。x_human = ln（製品 × 全体 × 見解の倍率）、x_ai = ln（AI の倍率。時期の重みは掛けた後）。
+    // 効き係数の学びの証拠に使う（効き係数が 0 に近い回でも、押した量が分かる）
+    key: ['push_id'], appendOnly: true,
+    columns: ['plan_id', 'push_id', 'run_id', 'ym', 'x_human', 'x_ai', 'recorded_at'],
+    types: { x_human: 'num', x_ai: 'num' }
   }
 };
 

@@ -97,6 +97,8 @@ function appEffEvidence_(asOfMs) {
     if (!lp.pts.length) return;
     const used = {};
     try { appReadPlanTable_('EFFECT_COEFS', p.plan_id).forEach(r => { used[r.run_id] = r; }); } catch (e) { /* 表の版がそろう前 */ }
+    const pushes = {};   // 効き係数を掛ける前の押し（記録があれば、割り戻さずにこれを使う）
+    try { appReadPlanTable_('PUSH_RAW', p.plan_id).forEach(r => { pushes[r.run_id + '\u0001' + r.ym] = r; }); } catch (e) { /* 表の版がそろう前 */ }
     lp.pts.forEach(x => {
       if (!appActualClosed_(x.ym, day)) return;
       const n = k => appMethodsNum_(x.row[k]);
@@ -106,7 +108,11 @@ function appEffEvidence_(asOfMs) {
       const bh = u ? Number(u.beta_human) : 1, ba = u ? Number(u.beta_ai) : 1;
       // 効き係数が 0.05 より小さい回は、記録の押しから生の押しを戻せない（押しが 0 に見えても数えない）
       const raw = (eff, b) => (b < 0.05 ? null : eff / b);
-      const xh = raw(Math.log(ph / ps), bh), xa = raw(Math.log(pa / ph), ba);
+      const pr = pushes[x.row.run_id + '\u0001' + x.ym];
+      const n2 = v => (typeof v === 'number' && isFinite(v) ? v : null);
+      // 記録があれば押しはそれを使う（効き係数が 0 に近い回でも数える）。無い前の回は、記録の段の値を効き係数で割り戻す
+      const xh = pr && n2(pr.x_human) !== null ? n2(pr.x_human) : raw(Math.log(ph / ps), bh);
+      const xa = pr && n2(pr.x_ai) !== null ? n2(pr.x_ai) : raw(Math.log(pa / ph), ba);
       if (xh === null || xa === null) return;
       const c = fin / pa;
       out.push({ maker: String(p.client_id), plan: p.plan_id, ym: x.ym, y: Math.log(a / (ps * c)), xh: xh, xa: xa, w: 1, actual: a, runId: x.row.run_id });
@@ -153,6 +159,39 @@ function appLearnEffects_(ctx, plan, asOfMs) {
   } catch (e) {
     appLogError_('LOG.EFFECT_COEFS', e, ctx);
     return priorOut();
+  }
+}
+
+/**
+ * 予測の保存の段で足す PUSH_RAW の 12 行（効き係数を掛ける前の押し。OUTPUT の「入力パラメータの影響」の表の kHuman(raw)・kAI(raw)）。
+ * 学びの式と同じ物差しにするため、確定スポットを含めた全体に対する押しに直す（層ごとの効きと同じ分け方）:
+ *   x_human = ln（1 + 土台 ×（人の倍率 − 1）÷（統計の土台 + 確定スポット））、
+ *   x_ai = ln（1 + 土台 × 人の倍率 ×（AI の倍率 − 1）÷（統計の土台 + 確定スポット + 土台 ×（人の倍率 − 1）））。
+ * 列が無い（旧来の計算 2.7.1 より前）・読めない月・予測の月でない月は足さない。layerOps = 同じ回の層ごとの効き（統計の土台とスポット）
+ */
+function appPushOps_(ctx, plan, p, scratch, layerOps) {
+  try {
+    const rec = appLayerRecords_(scratch, p.layerTail);
+    const layer = {};
+    (layerOps || []).forEach(op => { if (op.table === 'LAYER_EFFECTS') (op.rows || []).forEach(r => { layer[r.ym] = r; }); });
+    const now = appNowIso_();
+    const num = v => (typeof v === 'number' && isFinite(v) ? v : null);
+    const rows = Object.keys(rec.influence || {}).sort().map(ym => {
+      const x = rec.influence[ym], L = layer[ym];
+      const kh = num(x.kHumanRaw), ka = num(x.kAiRaw), ops = num(x.opsBase);
+      if (kh === null || ka === null || ops === null || !L || L.source === 'actual_closed') return null;
+      const base = num(L.stat_p50) + (num(L.spot_yen) || 0);
+      if (!(base > 0)) return null;
+      const h = ops * (kh - 1), a = ops * kh * (ka - 1);
+      if (!(base + h > 0) || !(base + h + a > 0)) return null;
+      const xh = Math.log((base + h) / base), xa = Math.log((base + h + a) / (base + h));
+      return { plan_id: plan.plan_id, push_id: appStableLogId_(APP_LOG_PREFIX.PUSH_RAW, [p.runId, ym]), run_id: p.runId, ym: ym,
+        x_human: Math.round(xh * 1e9) / 1e9, x_ai: Math.round(xa * 1e9) / 1e9, recorded_at: now };
+    }).filter(Boolean);
+    return appLogOps_('PUSH_RAW', rows);
+  } catch (e) {
+    appLogError_('LOG.PUSH_RAW', e, ctx);
+    return [];
   }
 }
 

@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.0-dev、SHA-256 c66c3bfff180f9d72817d2d51f00ddb9cfcb8624118d5cb5ad0c1533b7039970）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.1-dev、SHA-256 ff4cd909b35a9a202afdebf1dc822277f57b65374f134c56dfd9894f31a8ac75）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,7 +31,7 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.0-dev';
+const VERSION = '2.7.1-dev';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -1287,7 +1287,10 @@ function writeOutputFY_(result) {
   const kAI = d.kAIByMonth || new Array(12).fill(1);
   const opsBase = d.opsBaseByMonth || new Array(12).fill(0);
 
-  const infHdr = ['Month', 'Ops基礎', 'kProd', 'kClient', 'kOpinion(P50)', 'kAI', 'Known Spot Expected', 'Known Spot P50', '背景SPOT(P50)', '混合P50(cal)', '混合P50(raw)', '定量P50'];
+  // 段 3 の点検の直し（2026-10-16）: 効き係数を掛ける前の人の倍率（製品 × 全体 × 見解の P50）と AI の倍率（時期の重みは掛けた後）を後ろの 2 列に。
+  // 新アプリが学びの証拠に使う（効き係数が 0 に近い回でも、押した量が分かる）
+  const kProdRaw = d.kProdRawByMonth || kProd, kClientRaw = d.kClientRawByMonth || kClient, kOpinionRaw = d.kOpinionRawP50ByMonth || kOpinion, kAIRaw = d.kAIRawByMonth || kAI;
+  const infHdr = ['Month', 'Ops基礎', 'kProd', 'kClient', 'kOpinion(P50)', 'kAI', 'Known Spot Expected', 'Known Spot P50', '背景SPOT(P50)', '混合P50(cal)', '混合P50(raw)', '定量P50', 'kHuman(raw)', 'kAI(raw)'];
   sh.getRange(row, 1, 1, infHdr.length).setValues([infHdr]).setBackground(COLOR_HEADER).setFontWeight('bold');
   row++;
   const infRows = result.months.map((m, i) => [
@@ -1302,9 +1305,12 @@ function writeOutputFY_(result) {
     (d.bgSpotP50ByMonth || [])[i] || 0,
     result.mixed.p50[i] || 0,
     mixedRawP50[i] || 0,
-    (result.quantOnly || result.objOnly).p50[i] || 0
+    (result.quantOnly || result.objOnly).p50[i] || 0,
+    Number(kProdRaw[i] || 1) * Number(kClientRaw[i] || 1) * Number(kOpinionRaw[i] || 1),
+    Number(kAIRaw[i] || 1)
   ]);
   sh.getRange(row, 1, infRows.length, infHdr.length).setValues(infRows);
+  sh.getRange(row, 13, infRows.length, 2).setNumberFormat('0.000');
   sh.getRange(row, 2, infRows.length, 1).setNumberFormat('¥#,##0');
   sh.getRange(row, 3, infRows.length, 4).setNumberFormat('0.000');
   sh.getRange(row, 7, infRows.length, 6).setNumberFormat('¥#,##0');
@@ -11093,7 +11099,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: 'c66c3bfff180f9d72817d2d51f00ddb9cfcb8624118d5cb5ad0c1533b7039970',
+    SOURCE_SHA256: 'ff4cd909b35a9a202afdebf1dc822277f57b65374f134c56dfd9894f31a8ac75',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

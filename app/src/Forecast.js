@@ -156,7 +156,7 @@ function appForecastRunSave_(ctx, p) {
       { table: 'FORECAST_MONTHLY', mode: 'ensure', rows: (h.monthly || []).map(m => ({
         run_id: p.runId, plan_id: plan.plan_id, ym: m.month, p10: num(m.p10), p50: num(m.p50), p90: num(m.p90),
         obj_p10: obj[m.month] ? num(obj[m.month].p10) : null, obj_p50: obj[m.month] ? num(obj[m.month].p50) : null, obj_p90: obj[m.month] ? num(obj[m.month].p90) : null })) }
-    ], layerOps, appMethodsOps_(ctx, plan, p, h, layerOps), appTriWeightsOps_(ctx, plan, p), appEffOps_(ctx, plan, p), budget.ops);   // 層ごとの効き 12 行（LAYER_EFFECTS。3-3）・手法ごとの予測 12 行（FORECAST_METHODS。版 12）・写す前の予算の BASELINE（版 11）を同じ控えで足す
+    ], layerOps, appMethodsOps_(ctx, plan, p, h, layerOps), appTriWeightsOps_(ctx, plan, p), appEffOps_(ctx, plan, p), appPushOps_(ctx, plan, p, scratch, layerOps), budget.ops);   // 層ごとの効き 12 行（LAYER_EFFECTS。3-3）・手法ごとの予測 12 行（FORECAST_METHODS。版 12）・写す前の予算の BASELINE（版 11）を同じ控えで足す
     const written = appJournalRun_(ctx, '予測の保存（' + p.runId + '）', plan.plan_id, ops);
     appScratchMarkSynced_(plan.plan_id, p.build.token, null, p.build.problems);   // 次の予測は組み立て直さずに使える
     return { runId: p.runId, planId: plan.plan_id, changed: names, written: written, headline: h, unknown: cap.unknown,

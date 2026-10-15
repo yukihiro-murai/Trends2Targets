@@ -102,7 +102,8 @@ function appLayerRecords_(scratch, tail) {
         if (!/^\d{4}\/\d{2}$/.test(ym)) break;
         const known = get(v[i], 'Known Spot P50');
         out.influence[ym] = { opsBase: get(v[i], 'Ops基礎'), kProd: get(v[i], 'kProd'), kClient: get(v[i], 'kClient'), kOpinion: get(v[i], 'kOpinion(P50)'),
-          kAi: get(v[i], 'kAI'), spot: known !== null ? known : get(v[i], 'Known Spot Expected') };
+          kAi: get(v[i], 'kAI'), spot: known !== null ? known : get(v[i], 'Known Spot Expected'),
+          kHumanRaw: get(v[i], 'kHuman(raw)'), kAiRaw: get(v[i], 'kAI(raw)') };   // 効き係数を掛ける前の倍率（旧来の計算 2.7.1 から。前の回は null）
       }
     }
   }

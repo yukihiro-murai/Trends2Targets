@@ -147,6 +147,20 @@ let runA;
   assert.equal(e.length, 1);
   assert.deepEqual([e[0].basis, Number(e[0].beta_human), Number(e[0].beta_ai), Number(e[0].var_human), e[0].calc_version], ['PRIOR', 1, 1, 0.25, 'E-1']);
   assert.match(e[0].coef_id, /^EFC-[0-9A-F]{24}$/);
+  // 効き係数を掛ける前の押し（PUSH_RAW）: 入力どおりの押し（見解 10% × 確からしさ 0.8 = 1.08 倍）を、全体に対する押しにしたもの。
+  // 段の値（層ごとの効き）は効き係数のずれを混ぜた後の倍率の真ん中から出すので少し小さい。向きは同じ・大きさは近い
+  const pushes = env.table('PUSH_RAW').filter((r) => r.run_id === runA.run_id);
+  assert.ok(pushes.length >= 1 && pushes.length <= 12, '予測の月だけ: ' + pushes.length);
+  const stages = Object.fromEntries(env.table('FORECAST_METHODS').filter((r) => r.run_id === runA.run_id).map((r) => [r.ym, r]));
+  pushes.forEach((r) => {
+    const g = stages[r.ym];
+    const xh = Math.log(Number(g.plus_human) / Number(g.plus_spot)), xa = Math.log(Number(g.plus_ai) / Number(g.plus_human));
+    const near25 = (a, b) => Math.abs(a - b) <= 0.25 * Math.max(Math.abs(a), Math.abs(b)) + 1e-6;
+    assert.ok(Math.sign(Math.round(Number(r.x_human) * 1e6)) === Math.sign(Math.round(xh * 1e6)) && near25(Number(r.x_human), xh), r.ym + ' 人の押し ' + r.x_human + ' ≒ ' + xh);
+    assert.ok(near25(Number(r.x_ai), xa), r.ym + ' AI の押し ' + r.x_ai + ' ≒ ' + xa);
+    assert.match(r.push_id, /^PSH-[0-9A-F]{24}$/);
+  });
+  assert.ok(pushes.some((r) => Number(r.x_human) > 0.05), '見解の押しの月は、入力どおりの押し（1.08 倍に近い）');
   // 効き係数を渡さないとき（今までの動き）と比べる: 真ん中はほぼ同じ・人の押しのある月は幅が広い（シミュレーション 1 回ごとに効き係数を引き直す）・年度合計の幅も広い
   env.run('__realEff = appEffForEngine_; appEffForEngine_ = function () { return null; };');
   assert.equal(forecast().status, 'DONE');
