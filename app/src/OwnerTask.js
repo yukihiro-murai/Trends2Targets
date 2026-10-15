@@ -195,6 +195,8 @@ function appOwnerHint_(out, taskState) {
     replaced: 'OWNER_TASK を {"action":"jobStatus","jobId":"…"} に置き換えたので、プロパティは触らずに apiOwnerTask をもう一度実行すると結果を確かめられます。',
     changed: 'OWNER_TASK は実行中に書き換えられていたので、そのままにしました。'
   }[taskState] || '';
+  // まとめて動かす操作（runForecastAll・runBacktestAll。Bulk.js）は、書いた後に裏の処理を始めている
+  if (out.kind !== 'job' && out.name === 'BULK.START') return '裏の処理を始めました（計画を 1 つずつ順に動かします）。様子は {"action":"bulkStatus"} で分かります。' + task;
   if (out.kind !== 'job') return 'すぐに終わりました（' + (out.kind === 'read' ? '読むだけ' : '書きました') + '。裏の処理はありません）。' + task;
   const r = out.result || {};
   const st = String(r.status || '');

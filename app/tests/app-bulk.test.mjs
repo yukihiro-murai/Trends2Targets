@@ -57,6 +57,8 @@ const status = () => owner({ action: 'bulkStatus' }).result;
   const r = owner({ action: 'runForecastAll', backtest: true });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual([r.result.mode, r.result.plans, r.result.then], ['FORECAST', 3, 'BACKTEST']);
+  assert.match(r.hint, /裏の処理を始めました/);
+  assert.doesNotMatch(r.hint, /裏の処理はありません/);
   assert.throws(() => owner({ action: 'runForecastAll' }), /まとめて動かしている途中です/);
   for (let i = 0; i < 60 && status().active; i++) env.fireTriggers('triggerRunJob');
   const s = status();
