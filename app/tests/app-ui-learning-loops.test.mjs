@@ -58,9 +58,11 @@ const item = (p, a, k) => run('lrReviewItems(__p, __a).filter(function(x){ retur
     causes: [{ direction: 'over', range: false, actionLabel: '前提を更新', n: 4 }] };
   run('S.lr.people = __p; S.ld.lrAi = { loading: true, start: 1 }', { __p: people });
   const half = run('viewLearning()');
-  assert.match(half, /<h2>次の予測で見直すこと/);
-  assert.ok(half.indexOf('次の予測で見直すこと') < half.indexOf('外れの向きと対応'), '見直すことは区切りの先頭');
-  assert.match(half, /hm-wait lr-qwait[\s\S]*観測中…[\s\S]*AI の学びの数字を読み込んでいます/);
+  // 2026-10-16: 「次の予測で見直すこと」の文の並びを、4 枚のタイルの「持ち帰ること」に（村井さん「文字で殴らず図で」）
+  assert.match(half, /<h2>持ち帰ること/);
+  assert.ok(half.indexOf('持ち帰ること') < half.indexOf('外れの向きと対応'), '持ち帰ることは区切りの先頭');
+  assert.deepEqual([...half.matchAll(/<span class="lr-tile-t">([^<]*)/g)].map((m) => m[1]), ['足りない考え方', '顧客に聞くこと', '予算の考え方', '業界の動向'], '4 枚のタイル');
+  assert.match(half, /<span class="lr-tile-t">業界の動向<\/span><span class="chip st off">判断前<\/span>/, 'AI の学びを読み込んでいる間、業界の動向は判断前');
   assert.match(half, /id="lr-tune"[\s\S]*AI の学びを読み込んでいます/);
 
   // 両方届いた: カードの置き場所（人に返す学び → AI が直す学び）
@@ -71,7 +73,7 @@ const item = (p, a, k) => run('lrReviewItems(__p, __a).filter(function(x){ retur
   const page = run('viewLearning()');
   assert.doesNotMatch(page, /undefined|NaN|lr-qwait/);
   const at = (s) => page.indexOf(s);
-  assert.ok(at('次の予測で見直すこと') < at('外れの向きと対応') && at('外れの向きと対応') < at('id="lr-tune"'), '人の学びのカードは前の区切り');
+  assert.ok(at('持ち帰ること') < at('外れの向きと対応') && at('外れの向きと対応') < at('id="lr-tune"'), '人の学びのカードは前の区切り');
   assert.ok(at('id="lr-tune"') < at('承認待ちの見直し案') && at('承認待ちの見直し案') < at('外れ幅と幅の当たり'), 'AI の学びのカードは後の区切り');
   // ホームの学びの進みは、同じ読み込みを使う（形を変えていない）
   assert.equal(run('LR_KEY.ai'), 'lrAi');

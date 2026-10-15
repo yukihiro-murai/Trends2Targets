@@ -209,11 +209,11 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
   assert.equal(pose(hero({})), 'explain', 'まとめが無いときも、まだ比べていない');
   // 比べた月があって、外れが無いときだけ「外れた月はありません」
   const calm = hero({ summary: { months: 4, misses: 0, withNotes: 0 }, openActions: [], repeats: [], noPreMonth: 0 });
-  assert.match(calm, /大きく外れた月はありません。予報どおりの空模様が続いています。/);
+  assert.match(calm, /大きく外れた月はありません。/);
   assert.equal(pose(calm), 'done');
   assert.doesNotMatch(calm, /締まった月のうち/);
   const miss = hero({ summary: { months: 4, misses: 2, withNotes: 1 }, openActions: [{}], repeats: [] });
-  assert.match(miss, /大きく外れた月を 2 件観測しました。人の振り返りは 1 件、残っている対応は 1 件です。/);
+  assert.match(miss, /大きく外れた月 2 件・残っている対応 1 件です。/);
   assert.equal(pose(miss), 'discover');
 }
 
@@ -308,10 +308,10 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
   // 振り返りの記録があれば、scoredMonths が同じ数でも無くても今までどおり（外れなし・外れあり。多いときは 16 で確かめる）
   for (const scoredMonths of [4, undefined]) {
     const calm = h({ months: 4, misses: 0, withNotes: 0, scoredMonths });
-    assert.equal(heroSay(calm), '大きく外れた月はありません。予報どおりの空模様が続いています。');
+    assert.equal(heroSay(calm), '大きく外れた月はありません。');
     assert.equal(pose(calm), 'done');
     const miss = h({ months: 4, misses: 2, withNotes: 1, scoredMonths }, { openActions: [{}] });
-    assert.equal(heroSay(miss), '大きく外れた月を 2 件観測しました。人の振り返りは 1 件、残っている対応は 1 件です。');
+    assert.equal(heroSay(miss), '大きく外れた月 2 件・残っている対応 1 件です。');
     assert.equal(pose(miss), 'discover');
   }
   // scoredMonths を返さない（前の）サーバー: 振り返りの記録が無ければ、今までどおり当たり具合を計算から
@@ -560,9 +560,9 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   // (b) 人の学びのまとめ: 振り返りの記録より比べた月が多い → 残りの月の数と出し方を添える
   const h = (summary, more) => hero(Object.assign({ openActions: [], repeats: [], noPreMonth: 0, summary }, more || {}));
   const REST = 'ほかに のべ 3 か月は、各計画の振り返りで「外れの原因を整理」を動かすと出ます。';
-  assert.equal(heroSay(h({ months: 4, misses: 2, withNotes: 1, scoredMonths: 7 }, { openActions: [{}] })), '大きく外れた月を 2 件観測しました。人の振り返りは 1 件、残っている対応は 1 件です。' + REST);
-  assert.equal(heroSay(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7 })), '大きく外れた月はありません。予報どおりの空模様が続いています。' + REST);
-  asRoles(VIEWER_ROLES, () => assert.equal(heroSay(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7 })), '大きく外れた月はありません。予報どおりの空模様が続いています。ほかに のべ 3 か月は、外れの原因が整理されると出ます。'));
+  assert.equal(heroSay(h({ months: 4, misses: 2, withNotes: 1, scoredMonths: 7 }, { openActions: [{}] })), '大きく外れた月 2 件・残っている対応 1 件です。'); assert.ok(String((/<span data-tip="([^"]*)">/.exec(h({ months: 4, misses: 2, withNotes: 1, scoredMonths: 7 }, { openActions: [{}] })) || [])[1]).replace(/&quot;/g, '"').includes(String(REST).replace(/。$/, '')), '残りの月はカーソルで');
+  assert.equal(heroSay(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7 })), '大きく外れた月はありません。'); assert.ok(String((/<span data-tip="([^"]*)">/.exec(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7 })) || [])[1]).replace(/&quot;/g, '"').includes(String(REST).replace(/。$/, '')), '残りの月はカーソルで');
+  asRoles(VIEWER_ROLES, () => { const x = h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7 }); assert.equal(heroSay(x), '大きく外れた月はありません。'); assert.match(x, /data-tip="ほかに のべ 3 か月は、外れの原因が整理されると出ます/, '残りの月はカーソルで（動かせない人の言い方）'); });
   for (const scoredMonths of [4, 2, undefined]) assert.doesNotMatch(heroSay(h({ months: 4, misses: 0, withNotes: 0, scoredMonths })), /ほかに/, '多くなければ添えない: ' + scoredMonths);
   assert.doesNotMatch(heroSay(h({ months: 0, misses: 0, withNotes: 0, scoredMonths: 5 })), /ほかに/, '振り返りの記録が無いときは 8 の文だけ');
 }
@@ -684,14 +684,14 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
 {
   const h = (summary, more) => hero(Object.assign({ openActions: [], repeats: [], noPreMonth: 0, summary }, more || {}));
   const heroTip = (x) => (/<span data-tip="([^"]*)">/.exec(x) || [])[1];
-  const CALM = '大きく外れた月はありません。予報どおりの空模様が続いています。';
+  const CALM = '大きく外れた月はありません。';
   // 振り返りの記録はある・残りの月はどれも締め済みの年度: 動かし方は言わない（説明に 1 行）
   const done = h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7, waitingMonths: 0 });
   assert.equal(heroSay(done), CALM);
   assert.match(heroTip(done), /\n締め済みの年度の月は、外れの原因を整理しません/);
   // 一部だけ整理で出る: その数だけ言う（動かせない人には「整理されると」）
-  assert.equal(heroSay(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7, waitingMonths: 1 })), CALM + 'ほかに のべ 1 か月は、各計画の振り返りで「外れの原因を整理」を動かすと出ます。');
-  asRoles(VIEWER_ROLES, () => assert.equal(heroSay(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7, waitingMonths: 2 })), CALM + 'ほかに のべ 2 か月は、外れの原因が整理されると出ます。'));
+  assert.equal(heroSay(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7, waitingMonths: 1 })), CALM); assert.ok(String((/<span data-tip="([^"]*)">/.exec(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7, waitingMonths: 1 })) || [])[1]).replace(/&quot;/g, '"').includes(String('ほかに のべ 1 か月は、各計画の振り返りで「外れの原因を整理」を動かすと出ます。').replace(/。$/, '')), '残りの月はカーソルで');
+  asRoles(VIEWER_ROLES, () => { assert.equal(heroSay(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7, waitingMonths: 2 })), CALM); assert.ok(String((/<span data-tip="([^"]*)">/.exec(h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7, waitingMonths: 2 })) || [])[1]).replace(/&quot;/g, '"').includes(String('ほかに のべ 2 か月は、外れの原因が整理されると出ます。').replace(/。$/, '')), '残りの月はカーソルで'); });
   // 比べた月はある・振り返りの記録は無い・整理できる月も無い（締め済みの年度だけ）: 動かし方は言わない
   const fz = h({ months: 0, misses: 0, withNotes: 0, scoredMonths: 5, waitingMonths: 0 });
   assert.equal(heroSay(fz), '実績と比べた月が のべ 5 か月あります（締め済みの年度は、外れの原因を整理しません）。');
@@ -702,7 +702,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   assert.equal(heroSay(h({ months: 0, misses: 0, withNotes: 0, scoredMonths: 5, waitingMonths: 2 })), '実績と比べた月が のべ 5 か月あります。各計画の振り返りで「外れの原因を整理」を動かすと、大きく外れた月がここに出ます。');
   // waitingMonths を返さないサーバー: 今までどおり（16 の残りの月の数）。締め済みの 1 行も出さない
   const prev = h({ months: 4, misses: 0, withNotes: 0, scoredMonths: 7 });
-  assert.equal(heroSay(prev), CALM + 'ほかに のべ 3 か月は、各計画の振り返りで「外れの原因を整理」を動かすと出ます。');
+  assert.equal(heroSay(prev), CALM); assert.ok(String((/<span data-tip="([^"]*)">/.exec(prev) || [])[1]).replace(/&quot;/g, '"').includes(String('ほかに のべ 3 か月は、各計画の振り返りで「外れの原因を整理」を動かすと出ます。').replace(/。$/, '')), '残りの月はカーソルで');
   assert.doesNotMatch(heroTip(prev), /締め済み/);
   // まだ比べた月が無ければ、waitingMonths に関わらず当たり具合を計算から
   assert.equal(heroSay(h({ months: 0, misses: 0, withNotes: 0, scoredMonths: 0, waitingMonths: 0 })), NONE_SAY);

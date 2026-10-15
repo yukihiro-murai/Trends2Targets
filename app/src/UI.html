@@ -496,6 +496,32 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .lr-sec{display:flex;align-items:baseline;flex-wrap:wrap;gap:var(--s1) var(--s3);margin:var(--s8) 0 var(--s4);padding-left:var(--s3);border-left:4px solid var(--primary)}
 h1 + .lr-sec{margin-top:0}
 .lr-sec h2{display:flex;align-items:center;gap:10px;font-size:var(--fs-h2);line-height:1.4;color:var(--navy)}
+/* 持ち帰ること（4 枚のタイル。大きさ固定・2 列の格子。2026-10-16） */
+.lr-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
+.lr-tile{height:168px;padding:var(--s3) var(--s4);border:1px solid var(--line);border-radius:var(--radius-s);background:var(--card);display:flex;flex-direction:column;gap:var(--s2);overflow:hidden}
+.lr-tile.warn{border-color:#EED7B0;background:var(--warn-bg)}
+.lr-tile-h{display:flex;align-items:center;gap:var(--s2)}
+.lr-tile-ic svg{width:20px;height:20px;color:var(--primary-dark)}
+.lr-tile-t{flex:1;color:var(--navy)}
+.lr-tile-b{display:flex;align-items:center;gap:var(--s4);flex:1;min-height:0}
+.lr-tile-v{flex:0 0 160px}
+.lr-tile-x{flex:1;min-width:0}
+.lr-tile-head{color:var(--navy);font-size:var(--fs-b)}
+.lr-tile-line{color:var(--muted);font-size:var(--fs-s);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lr-ring{width:64px;height:64px;display:block}
+.lr-ring-bg{fill:none;stroke:var(--gray);stroke-width:7}
+.lr-ring-fg{fill:none;stroke:#E0A100;stroke-width:7;stroke-linecap:round}
+.lr-tile.ok .lr-ring-fg{stroke:var(--primary)}
+.lr-ring-t{font-size:13px;fill:var(--navy)}
+.lr-meter{display:flex;align-items:center;gap:var(--s2)}
+.lr-meter-bar{position:relative;flex:1;height:10px;border-radius:5px;background:var(--gray)}
+.lr-meter-bar span{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:#E0A100}
+.lr-meter.ok .lr-meter-bar span{background:var(--primary)}
+.lr-meter-bar i{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--navy)}
+.lr-meter b{font-weight:400;color:var(--navy);min-width:44px;text-align:right}
+.lr-asks{display:flex;flex-wrap:wrap;gap:var(--s1)}
+.lr-asks .chip{margin:0}
+@media (max-width:760px){.lr-board{grid-template-columns:1fr}.lr-tile{height:auto;min-height:168px}.lr-tile-v{flex-basis:120px}}
 /* 次の予測で見直すこと（問いかけの並び） */
 .lr-qs{list-style:none;margin:0;padding:0;display:grid;gap:var(--s3)}
 .lr-q{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s3) var(--s4);border:1px solid var(--line);border-radius:var(--radius-s);background:#fff}
@@ -4682,7 +4708,7 @@ var LR_SEC_TUNE = 'シングルループ学習: 前提はそのままで、外�
 function viewLearning(){
   var p = S.lr.people, a = S.lr.ai;
   var html = '<h1>学び</h1>' + lrSec('lr-human', '前提と情報の見直し', LR_SEC_HUMAN, '人に返す学び');
-  html += p ? lrPeopleView(p, lrReviewCard(p, a)) : skelPage('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')", [['', 244], ['', 620]], 'wait-lr');
+  html += p ? lrPeopleView(p, lrBoard(p, a)) : skelPage('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')", [['', 244], ['', 620]], 'wait-lr');
   html += lrSec('lr-tune', '補正と重みの調整', LR_SEC_TUNE, 'AI が直す学び');
   html += a ? lrAiView(a) : skelPage('lrAi', 'AI の学びを読み込んでいます', "lrLoad('ai')", [['', 244], ['', 400]], 'wait-lr');
   return html;
@@ -4866,6 +4892,89 @@ function lrReviewItems(p, a){
     tip: rp.slice(0, 8).map(function(r){ return r.clientName + '　' + Number(r.month) + '月（FY' + (r.fys || []).join('・FY') + '）'; }).join('\n') });
   return out.sort(function(x, y){ return y.score - x.score; });
 }
+/**
+ * 持ち帰ること（2026-10-16 村井さん: 学びは人が持ち帰るべきことを端的に。文字で殴らず図で）。4 枚のタイル（大きさ固定・2 列の格子）:
+ *   think 足りない考え方 … 外れの向きの偏り・読みのクセ・幅の外・続きやすさ・同じ月のくり返し（lrReviewItems）のうち、いちばん気になるもの。割合の輪
+ *   ask   顧客に聞くこと … 外れ方から、次の打ち合わせで聞く問いを札で（強気の外れ → 在庫と出荷の予定・競合の動き、弱気の外れ → 新しい採用・処方の伸び、
+ *                         幅の外 → 一度きりの行事や大口の予定、くり返し → 毎年のこの時期の動き、人の入力の当たりが低い → 入力の根拠）
+ *   budget 予算の考え方 … 承認された上乗せのうち届いた割合（確定と見込みの平均）。100% の線つきの棒
+ *   trend 業界の動向 … AI の調べの当たり（いつも同じ向きと言った場合の線つきの棒）と、出典の無い調べの割合
+ * 状態: warn（見直し）・ok（問題なし）・wait（まだ判断できない）。根拠の数字はカーソルに
+ */
+var LR_BOARD_ICON = {
+  think: '<svg viewBox="0 0 20 20" class="i" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.6 13.2c-1.5-1-2.6-2.7-2.6-4.7a5 5 0 0 1 10 0c0 2-1.1 3.7-2.6 4.7v1.3H7.6z"/><path d="M8 17h4"/></svg>',
+  ask: '<svg viewBox="0 0 20 20" class="i" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5.5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9l-3.5 3v-3h0a2 2 0 0 1-2-2z"/><path d="M8.5 7.2a1.6 1.6 0 1 1 2.2 1.5c-.5.2-.7.6-.7 1v.3"/><path d="M10 11.6v.1"/></svg>',
+  budget: '<svg viewBox="0 0 20 20" class="i" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="3.5"/><circle cx="10" cy="10" r="0.6"/></svg>',
+  trend: '<svg viewBox="0 0 20 20" class="i" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 16.5h13"/><path d="M4.5 13 8 9.5l3 2.5 4.5-5.5"/><path d="M12.4 6.5h3.1v3.1"/></svg>' };
+var LR_BOARD_STATE = { warn: ['見直し', 'warn'], ok: ['問題なし', 'ok'], wait: ['判断前', 'off'] };
+/** 割合の輪（0〜1。ratio が無ければ空の輪） */
+function lrRing(ratio, label){
+  var r = 26, c = 2 * Math.PI * r, v = isNum(ratio) ? Math.max(0, Math.min(1, ratio)) : 0;
+  return '<svg class="lr-ring" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="' + r + '" class="lr-ring-bg"/>'
+    + (isNum(ratio) ? '<circle cx="32" cy="32" r="' + r + '" class="lr-ring-fg" stroke-dasharray="' + (c * v).toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(-90 32 32)"/>' : '')
+    + '<text x="32" y="36" text-anchor="middle" class="lr-ring-t">' + esc(label || (isNum(ratio) ? Math.round(v * 100) + '%' : '-')) + '</text></svg>';
+}
+/** 線つきの棒（0〜max。line = 目安の線の位置。値の数字は右に） */
+function lrMeter(v, max, line, text, good){
+  var w = isNum(v) ? Math.max(0, Math.min(1, v / max)) * 100 : 0;
+  return '<div class="lr-meter' + (good ? ' ok' : '') + '"><div class="lr-meter-bar"><span style="width:' + w.toFixed(1) + '%"></span>' + (isNum(line) ? '<i style="left:' + (Math.min(1, line / max) * 100).toFixed(1) + '%"></i>' : '') + '</div><b>' + esc(text) + '</b></div>';
+}
+function lrBoardTiles(p, a){
+  p = p || {};
+  var xs = lrReviewItems(p, a), by = {};
+  xs.forEach(function(x){ by[x.key] = x; });
+  var sm = p.summary || {}, any = sm.scoredMonths > 0 || sm.months > 0 || (p.scoreboard || []).length;
+  // 足りない考え方
+  var think = ['dir', 'bias', 'range', 'stick', 'rep'].map(function(k){ return by[k]; }).filter(Boolean).sort(function(x, y){ return y.score - x.score; })[0];
+  var tot = 0, cz = { over: 0, under: 0 }, rng = 0;
+  (p.causes || []).forEach(function(c){ var n = c.n || 0; tot += n; if (cz[c.direction] !== undefined) cz[c.direction] += n; if (c.range) rng += n; });
+  var ratioOf = function(x){ if (!x) return null; if (x.key === 'dir') return tot ? Math.max(cz.over, cz.under) / tot : null; if (x.key === 'range') return tot ? rng / tot : null;
+    if (x.key === 'bias') { var sp = a && a.shrinkage ? (a.shrinkage.plans || []).filter(function(y){ return isNum(y.shrunk); }) : []; var hi = sp.filter(function(y){ return y.shrunk >= 0.05; }).length, lo = sp.filter(function(y){ return y.shrunk <= -0.05; }).length; return sp.length ? Math.max(hi, lo) / sp.length : null; }
+    return null; };
+  var tiles = [];
+  tiles.push(think ? { key: 'think', title: '足りない考え方', state: 'warn', head: think.title, visual: lrRing(ratioOf(think), isNum(ratioOf(think)) ? null : '!'), line: think.act, tip: think.say + '\n' + think.tip }
+    : { key: 'think', title: '足りない考え方', state: any ? 'ok' : 'wait', head: any ? '偏りは見えていません' : 'まだ実績がありません', visual: lrRing(null, any ? '✓' : '-'), line: any ? '今の前提の置き方で続けましょう' : '実績が締まると出ます', tip: '外れの向き・読みのクセ・見通しの幅の外・続きやすさ・同じ月のくり返しを見ています' });
+  // 顧客に聞くこと
+  var qs = [];
+  if (by.dir) qs = qs.concat(cz.over >= cz.under ? ['在庫と出荷の予定', '競合の動き'] : ['新しい採用の予定', '処方の伸び']);
+  if (by.range) qs.push('一度きりの行事・大口の予定');
+  if (by.rep) qs.push('毎年のこの時期の動き');
+  if (xs.some(function(x){ return /^src-(factor_product|factor_client|opinion)$/.test(x.key); })) qs.push('入力の根拠（数字・出来事）');
+  qs = qs.filter(function(q, i){ return qs.indexOf(q) === i; }).slice(0, 4);
+  tiles.push(qs.length ? { key: 'ask', title: '顧客に聞くこと', state: 'warn', head: '次の打ち合わせで', visual: '<div class="lr-asks">' + qs.map(function(q){ return '<span class="chip">' + esc(q) + '</span>'; }).join('') + '</div>', line: '', tip: '外れ方（向き・幅の外・くり返し）と、入力の当たりから選んだ問いです' }
+    : { key: 'ask', title: '顧客に聞くこと', state: any ? 'ok' : 'wait', head: any ? '特にありません' : 'まだ実績がありません', visual: '<div class="lr-asks"><span class="chip off">-</span></div>', line: '', tip: '外れ方と入力の当たりから、聞くべきことが見えたら出ます' });
+  // 予算の考え方
+  var us = (p.uplift || []).map(function(u){ return u.complete ? u.upliftRealized : u.projectedUpliftRealized; }).filter(isNum);
+  var real = us.length ? us.reduce(function(s, v){ return s + Math.max(-1, Math.min(3, v)); }, 0) / us.length : null;
+  var bState = !isNum(real) ? 'wait' : real < 0.5 || real > 1.5 ? 'warn' : 'ok';
+  tiles.push({ key: 'budget', title: '予算の考え方', state: bState,
+    head: !isNum(real) ? 'まだ上乗せの結果がありません' : real < 0.5 ? '上乗せが届いていません' : real > 1.5 ? '上乗せが控えめです' : '上乗せはおおむね届いています',
+    visual: lrMeter(real, 2, 1, isNum(real) ? Math.round(real * 100) + '%' : '-', bState === 'ok'),
+    line: !isNum(real) ? '承認された上乗せの年度が進むと出ます' : real < 0.5 ? '上乗せ（挑戦）は、根拠のある分だけにしましょう' : real > 1.5 ? '実績が上回っています。挑戦の幅を広げられます' : '今の上乗せの置き方で続けましょう',
+    tip: '承認された予算の上乗せのうち、届いた割合の平均（' + us.length + ' 件。年度の途中は着地の推定で見た見込み）。縦の線が 100%' });
+  // 業界の動向
+  var ai = (p.scoreboard || []).filter(function(r){ return r && (r.type === 'ai_topic' || r.type === 'vertex_forecast') && r.n; });
+  var an = ai.reduce(function(s, r){ return s + r.n; }, 0), ah = ai.reduce(function(s, r){ return s + (r.hit || 0); }, 0), ae = ai.reduce(function(s, r){ return s + (isNum(r.expected) ? r.expected : lrBase(r) * r.n); }, 0);
+  var aiBad = xs.filter(function(x){ return /^src-(ai_topic|vertex_forecast)$/.test(x.key) || x.key === 'cite'; })[0];
+  var u = a && a.unsourced, cite = u && u.events ? u.unsourced / u.events : null;
+  tiles.push({ key: 'trend', title: '業界の動向', state: aiBad ? 'warn' : an ? 'ok' : 'wait',
+    head: aiBad ? aiBad.title : an ? 'AI の調べは当たっています' : 'まだ調べの当たりがありません',
+    visual: lrMeter(an ? ah / an : null, 1, an ? ae / an : null, an ? Math.round(ah / an * 100) + '%' : '-', !aiBad && !!an)
+      + (isNum(cite) ? '<div class="lr-sub meta" data-tip="いちばん新しい調査で、出典が見つからなかった話題の割合（予測には効かせていません）">出典なし ' + Math.round(cite * 100) + '%</div>' : ''),
+    line: aiBad ? aiBad.act : an ? '' : 'AI の調べの向きと実績がそろうと出ます',
+    tip: 'AI の調べが押した向きの当たり ' + ah + ' / ' + an + ' 回（縦の線 = いつも同じ向きと言った場合 ' + (an ? Math.round(ae / an * 100) + '%' : '-') + '）' + (aiBad ? '\n' + aiBad.say : '') });
+  return tiles;
+}
+function lrBoard(p, a){
+  var wait = !a && ldBusy('lrAi');
+  var tiles = lrBoardTiles(p, a);
+  return '<div class="card lr-board-card"><div class="card-head"><h2>持ち帰ること' + tip('実績と予測の当たり方から、人が次に持ち帰ることを 4 つに分けて出しています。数字は傾向で、原因を決めつけるものではありません。根拠はタイルにカーソルを合わせると出ます') + '</h2></div>'
+    + '<div class="lr-board">' + tiles.map(function(t){
+      var st = LR_BOARD_STATE[wait && (t.key === 'trend') ? 'wait' : t.state];
+      return '<div class="lr-tile ' + st[1] + '" tabindex="0" data-tip="' + esc(t.tip) + '"><div class="lr-tile-h"><span class="lr-tile-ic">' + LR_BOARD_ICON[t.key] + '</span><span class="lr-tile-t">' + esc(t.title) + '</span><span class="chip st ' + st[1] + '">' + st[0] + '</span></div>'
+        + '<div class="lr-tile-b"><div class="lr-tile-v">' + t.visual + '</div><div class="lr-tile-x"><div class="lr-tile-head">' + esc(t.head) + '</div>' + (t.line ? '<div class="lr-tile-line">' + esc(t.line) + '</div>' : '') + '</div></div></div>';
+    }).join('') + '</div></div>';
+}
 /** 次の予測で見直すこと（カード）。人の学びがあれば出す。AI の学びを読み込み中なら、その分はよみの「観測中…」 */
 function lrReviewCard(p, a){
   var xs = lrReviewItems(p, a), wait = !a && ldBusy('lrAi'), sm = p.summary || {};
@@ -4905,13 +5014,16 @@ function lrPeopleHero(d){
   // 比べた月があっても、整理できる月が無い（締め済みの年度の計画だけ）ときは、動かし方を言わない
   var t = none ? 'まだ実績と比べた月がありません。' + runWhen(['EVAL.REPORT', 'EVAL.INSIGHTS']) + '、大きく外れた月がここに出ます。'
     : notYet ? '実績と比べた月が のべ ' + scored + ' か月あります' + (waiting > 0 ? '。' + runWhen(['EVAL.INSIGHTS']) + '、大きく外れた月がここに出ます。' : '（締め済みの年度は、外れの原因を整理しません）。')
-    : misses ? '大きく外れた月を ' + misses + ' 件観測しました。人の振り返りは ' + (s.withNotes || 0) + ' 件、残っている対応は ' + open + ' 件です。'
-    : '大きく外れた月はありません。予報どおりの空模様が続いています。';
-  // 振り返りの記録がある月のほかに、整理で出る月がある（当たり具合を計算した後、外れの原因を整理がまだの計画がある）: 残りの月の数と出し方を添える
-  if (months && waiting > 0) t += 'ほかに のべ ' + waiting + ' か月は、' + runWhen(['EVAL.INSIGHTS']) + '出ます。';
-  if (rep) t += '同じメーカーの同じ月に、年度をまたいでまた外れたのが ' + rep + ' 件あります。';
+    // 見える文は数だけの 1 文（2026-10-16 村井さん「文字で殴らない」。人の振り返りの数・残りの月・くり返しはカーソルで）
+    : misses ? '大きく外れた月 ' + misses + ' 件・残っている対応 ' + open + ' 件です。'
+    : '大きく外れた月はありません。';
+  var more = [];
+  if (misses) more.push('人の振り返り ' + (s.withNotes || 0) + ' 件');
+  // 振り返りの記録がある月のほかに、整理で出る月がある（当たり具合を計算した後、外れの原因を整理がまだの計画がある）: 残りの月の数と出し方
+  if (months && waiting > 0) more.push('ほかに のべ ' + waiting + ' か月は、' + runWhen(['EVAL.INSIGHTS']) + '出ます');
+  if (rep) more.push('同じメーカーの同じ月に、年度をまたいでまた外れたのが ' + rep + ' 件');
   var pose = none || notYet ? 'explain' : !misses ? 'done' : open || rep ? 'discover' : 'explain';
-  var tipText = '大きく外れた月: 締まった月で、予測が実績から 10% 以上外れたか、見通しの幅（下振れ〜上振れ）の外に出た月です。メーカーごとの月で数えます'
+  var tipText = (more.length ? more.join('\n') + '\n\n' : '') + '大きく外れた月: 締まった月で、予測が実績から 10% 以上外れたか、見通しの幅（下振れ〜上振れ）の外に出た月です。メーカーごとの月で数えます'
     + (s.months ? '（振り返りの記録がある月は ' + s.months + ' 件）' : '')
     + (none || notYet ? '\n締まった月（月末から 5 日たってから実績を取り込んだ月）を、その月が始まる前の最後の予測と比べます' : '')
     // 振り返りの記録があって、比べた月の残りが整理で出る月より多い = 締め済みの年度の月が残っている（数は言わない）
