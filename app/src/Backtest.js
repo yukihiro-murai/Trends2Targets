@@ -357,6 +357,8 @@ function appBacktestBuild_(ctx, p, job) {
     const step = appScratchBuildStep_(appWorkScratch_(plan), plan.plan_id, APP_BACKTEST_SHEETS, p.build || null, appBuildDeadline_(jobStart));
     const payload = { planId: plan.plan_id, fy: fy, btId: p.btId || appNewLogId_('BT'), inputHash: inputHash, build: step.state,
       steps: Number(p.steps || 0) + 1, buildMs: Number(p.buildMs || 0) + (new Date().getTime() - jobStart) };
+    // 全部の計画の物差し（runBacktestAll）の残りと済んだ計画。最初の計画の最初の段で、同じ年度の残りの計画を並べる
+    if (p.queue || p.all) { payload.queue = p.queue || appBacktestQueue_(plan.fy).filter(id => id !== plan.plan_id); payload.done = p.done || []; }
     return { __next: { kind: step.complete ? 'MEASURE.BACKTEST_CALC' : 'MEASURE.BACKTEST', payload: payload },
       audit: { entityId: plan.plan_id, clientId: plan.client_id } };
   });
@@ -385,12 +387,27 @@ function appBacktestCalc_(ctx, p) {
     const written = ops.length ? appJournalRun_(ctx, '物差し（FY' + fy + '）', plan.plan_id, ops) : null;
     const pts = rows.filter(r => r.method === 'STAT_ONLY');
     // onCard: 分析の物差しに入る回か（区切りが計画の年度の初めの回だけ。前の年度を区切りにした回は数えられる点が無い）
-    return { planId: plan.plan_id, btId: p.btId, cutoffYm: cutoffYm, onCard: fy === Number(plan.fy), rows: rows.length, written: written ? (written.BACKTEST || {}).appended || 0 : 0,
+    // 全部の計画の物差し（runBacktestAll）: 残りがあれば、次の計画を続きとして始める（裏の処理は同時に 1 つ）
+    const doneAll = p.queue ? (p.done || []).concat([{ planId: plan.plan_id, counted: rows.filter(r => r.method === 'STAT_ONLY' && r.counted).length, rows: rows.length }]) : null;
+    const next = p.queue && p.queue.length ? { __next: { kind: 'MEASURE.BACKTEST', payload: { planId: p.queue[0], queue: p.queue.slice(1), done: doneAll } } } : {};
+    return Object.assign(next, { planId: plan.plan_id, btId: p.btId, cutoffYm: cutoffYm, onCard: fy === Number(plan.fy), rows: rows.length, written: written ? (written.BACKTEST || {}).appended || 0 : 0, done: doneAll,
       skipped: !ops.length, realMonths: pts.length ? pts[0].real_months : 0, counted: pts.filter(r => r.counted).length, seed: stat.seed,
       methods: appBacktestSummary_(rows, {}).methods.map(m => ({ method: m.method, n: m.n, mape: m.mape, bias: m.bias, cover: m.cover })),
       timing: { buildMs: p.buildMs || 0, steps: p.steps || 1, calcMs: t1 - t0, saveMs: new Date().getTime() - t1 },
-      audit: { entityId: p.btId, clientId: plan.client_id } };
+      audit: { entityId: p.btId, clientId: plan.client_id } });
   });
+}
+
+/**
+ * 全部の計画の物差し（runBacktestAll）で動かす計画の ID の並び: 年度 fy（省くと今の年度）の、片付けていない・売上を取り込んだ・
+ * 年度を締めていない計画（メーカーの名前の順。測る専用の計画も入れる）
+ */
+function appBacktestQueue_(fy) {
+  const y = fy === undefined || fy === null || fy === '' ? appFy_(new Date()) : Number(fy);
+  return appReadTable_('PLANS').filter(p => String(p.fy) === String(y) && p.state !== 'ARCHIVED')
+    .filter(p => { try { appRequireOpenPlan_(p.plan_id); return !!appBacktestImportDays_(p.plan_id).sales; } catch (e) { return false; } })
+    .sort((a, b) => String(a.client_label || '').localeCompare(String(b.client_label || '')) || String(a.plan_id).localeCompare(String(b.plan_id)))
+    .map(p => p.plan_id);
 }
 
 // ---- 分析のまとめ ----
