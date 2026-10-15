@@ -14,7 +14,7 @@
  * 版 11（2026-10-09 村井さん承認「推奨する対応を継続」。SCHEMA_PLAN_v10-12_JA.md の 4 章）で、予算の下書き（BUDGET_DRAFTS。追記だけ）を足し、
  * 公式版（PLAN_VERSIONS）の後ろに、出したときの届く見込みと前提の列を足した（APP_ADDED_COLUMNS。出した後は変えない）。中身は BudgetDrafts.js・V11.js・Versions.js
  */
-const APP_SCHEMA_VERSION = 13;
+const APP_SCHEMA_VERSION = 14;
 
 /**
  * 版を上げて、今ある表の後ろに足した列（古い順）。データ本体の 1 行目が足す前の列なら、版を上げた後の最初の操作で後ろに列の名前を書き足す
@@ -211,6 +211,16 @@ const APP_TABLES = {
     columns: ['plan_id', 'weight_id', 'run_id', 'as_of', 'w_linear', 'w_recent', 'w_robust', 'w_sim', 'basis', 'posterior_json',
       'evidence_points', 'evidence_makers', 'own_points', 'sigma', 'evidence_hash', 'calc_version', 'recorded_at'],
     types: { w_linear: 'num', w_recent: 'num', w_robust: 'num', w_sim: 'num', evidence_points: 'num', evidence_makers: 'num', own_points: 'num', sigma: 'num' }
+  },
+  // ---- 版 14 の表（追記だけ。2026-10-15 段 3。app/DESIGN_triangulation_bayes_JA.md の 4 章）----
+  EFFECT_COEFS: {
+    // 人と AI の押しの効き係数（Effects.js の appLearnEffects_）: 予測 1 回で 1 行。その回の予測に使った βH・βAI、見通しの幅に足した事後の分散、
+    // 補正の後に残る偏り α（見せるだけ）。basis = PRIOR・POSTERIOR、capped = 上限か 1 回の幅（±0.2）で止めた
+    key: ['coef_id'], appendOnly: true,
+    columns: ['plan_id', 'coef_id', 'run_id', 'as_of', 'beta_human', 'beta_ai', 'var_human', 'var_ai', 'cov_human_ai', 'alpha', 'alpha_sd', 'basis', 'capped',
+      'posterior_json', 'evidence_points', 'evidence_makers', 'own_points', 'sigma', 'evidence_hash', 'calc_version', 'recorded_at'],
+    types: { beta_human: 'num', beta_ai: 'num', var_human: 'num', var_ai: 'num', cov_human_ai: 'num', alpha: 'num', alpha_sd: 'num', capped: 'bool',
+      evidence_points: 'num', evidence_makers: 'num', own_points: 'num', sigma: 'num' }
   }
 };
 

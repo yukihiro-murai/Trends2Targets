@@ -23,7 +23,8 @@ const outPath = path.join(appDir, 'src', 'LegacyEngine.js');
 
 /** 呼ぶ側が差し替えるもの（包んだ関数の引数から、同じ名前の定数として渡す） */
 // AppTriangulation: 三角測量の重み（新アプリがベイズで出したもの。{ weights(clientName) } か null。2026-10-15 段 2。旧来の計算は無ければ初めの重み）
-export const ENGINE_SERVICES = ['SpreadsheetApp', 'Date', 'Utilities', 'PropertiesService', 'UrlFetchApp', 'HtmlService', 'Session', 'AppTriangulation'];
+// AppLearning: 人と AI の効き係数（{ effects(clientName) } か null。段 3。無ければ押したとおり）
+export const ENGINE_SERVICES = ['SpreadsheetApp', 'Date', 'Utilities', 'PropertiesService', 'UrlFetchApp', 'HtmlService', 'Session', 'AppTriangulation', 'AppLearning'];
 /** 新アプリから使う旧来の関数と定数 */
 export const ENGINE_EXPORTS = [
   'VERSION', 'BUILD_STAGE', 'SHEETS', 'WEB_UI_CONFIRMS_',
@@ -49,7 +50,9 @@ export const ENGINE_EXPORTS = [
   // 本番の A-9 の中身そのもの（物差しの「統計だけ」が、人の入力の無い本番と差 0 になることをテストで確かめる。app/tests/app-v10-backtest.test.mjs）
   'runForecastFYCore_',
   // 三角測量（段 2。物差しの統計だけ・手法の記録が、本番の A-9 と同じ土台を作る）
-  'TRI_METHODS', 'TRI_PRIOR_WEIGHTS', 'readTriangulationEnabled_', 'readTriangulationWeights_', 'computeTriangulationParts_', 'buildTriangulationBase_'
+  'TRI_METHODS', 'TRI_PRIOR_WEIGHTS', 'readTriangulationEnabled_', 'readTriangulationWeights_', 'computeTriangulationParts_', 'buildTriangulationBase_',
+  // AI の時期と効き係数（段 3）
+  'AI_MAX_ABS_EFFECT', 'aiMonthWeights_', 'readLearnedEffects_'
 ];
 
 /** 旧来の Web アプリの、新アプリが受け持つ関数（元の宣言は変えず、包んだ中で後から差し替える） */

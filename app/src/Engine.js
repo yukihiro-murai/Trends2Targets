@@ -293,7 +293,9 @@ function appLegacyServices_(book, opts) {
     // 裏の処理（トリガー）では操作した人のメールが取れないので、頼んだ人を「操作した人」として見せる（PROCESS_STATUS の実行者など）
     Session: pass(Session, { getActiveUser: () => ({ getEmail: () => String(opts.actor || '') }) }),
     // 三角測量の重み（予測の計算の段で Methods.js の appTriWeights_ が出したもの）。無ければ旧来の計算は初めの重みを使う
-    AppTriangulation: opts.triWeights ? { weights: () => Object.assign({}, opts.triWeights) } : null
+    AppTriangulation: opts.triWeights ? { weights: () => Object.assign({}, opts.triWeights) } : null,
+    // 人と AI の効き係数（段 3。Learning の appLearnEffects_ が出したもの）。無ければ旧来の計算は押したとおり
+    AppLearning: opts.effects ? { effects: () => Object.assign({}, opts.effects) } : null
   };
 }
 

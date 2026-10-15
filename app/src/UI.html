@@ -5048,12 +5048,12 @@ function lrAiView(d){
   var curves = (d.curves || []).filter(function(c){ return c && c.prior && (c.quarters || []).length; });
   var sh = d.shrinkage || {}, tl = d.timeline || [], cal = d.calibration || [], pend = d.pending || [];
   // AI の学びは当たり具合の計算から（外れの原因の整理は使わない）。今の年度の比べた月がどれも売上 0 円なら、「まだ」の代わりにそう言う（よみのまとめと同じ）
-  if (!curves.length && !(sh.plans || []).length && !tl.length && !cal.length && !pend.length && !lrResearchAny(d.research)) {
+  if (!curves.length && !(sh.plans || []).length && !tl.length && !cal.length && !pend.length && !lrResearchAny(d.research) && !((d.effects || {}).plans || []).length) {
     var z = lrZero();
     return z.zero ? guide('explain', esc(zeroSay(z, '、AI が何を学んだか（重み・偏り・外れ幅・補正）がここに出ます。')))
       : guide('guide', '実績が締まって、' + runWhen() + '、AI が何を学んだか（重み・偏り・外れ幅・補正）がここに出ます。');
   }
-  return lrAiHero(d) + lrPendingCard(pend) + lrCurveCard(curves) + lrResearchCard(d.research) + lrShrinkCard(sh) + lrTimeCard(tl, d.persistence) + lrCalCard(cal, d.health || []) + lrLandingCard(d.landing);
+  return lrAiHero(d) + lrPendingCard(pend) + lrEffectsCard(d.effects) + lrCurveCard(curves) + lrResearchCard(d.research) + lrShrinkCard(sh) + lrTimeCard(tl, d.persistence) + lrCalCard(cal, d.health || []) + lrLandingCard(d.landing);
 }
 /** 今の年度（ホームと同じ: サーバーが決めた B.home.fy。無ければ今日の日付から。4 月始まり） */
 function lrFy(){
@@ -5197,6 +5197,34 @@ function lrCurveCard(curves){
     lrMore('破線 = 事前分布（中心は基準に、全計画から作った見立ての上乗せを足した所。無ければ基準）。実線 = 四半期ごとに当たり・外れを足した事後分布 Beta(α + 当たり, β + 外れ)。'
       + '基準 = 押した月ごとに、その向きへ実績が外れた月の割合（同じ計画から。月が少なければ全計画の割合に寄せる）の平均。80% の幅は 10%〜90% 点です'));
 }
+/**
+ * 効き係数（段 3。サーバーの effects。Effects.js）: 人の押し・AI の押しが、締まった月の実績でどれだけ当たったか（βH・βAI。1 = 押したとおり・0 = 効いていない）。
+ * 次の予測は、この値で押しを強め・弱める。上限・1 回の幅（±0.2）で止めた計画は「止めた」の札（所有者が確かめる）
+ */
+function lrEffectsCard(e){
+  var ps = (e && e.plans) || [];
+  if (!ps.length) return '';
+  var multi = lrMultiFy(ps);
+  var f2 = function(v){ return isNum(v) ? v.toFixed(2) : '-'; };
+  var band = function(m, sd){ return isNum(m) && isNum(sd) ? f2(Math.max(0, m - 1.2816 * sd)) + '〜' + f2(m + 1.2816 * sd) : ''; };
+  var say = function(b){ return !isNum(b) ? '' : b >= 0.9 && b <= 1.1 ? 'ほぼ押したとおり' : b > 1.1 ? '押したより強く効いた' : b < 0.1 ? 'ほとんど効いていない' : '押した分の ' + Math.round(b * 100) + '% が当たった'; };
+  var st = function(p){ return p.capped ? ['止めた', 'warn', '1 回に動ける幅（±0.2）か範囲（0〜2）で止めました。所有者が確かめてください'] : p.basis === 'POSTERIOR' ? ['学び中', 'ok', '締まった月の実績から学んでいます'] : ['初めの値', 'off', 'まだ締まった月の記録が少ないので、押したとおり（1）です'] };
+  var cell = function(p, b, sd, who){ return { h: f2(b), tip: who + 'の効き ' + f2(b) + '（' + say(b) + '）' + (band(b, sd) ? '\n80% の幅 ' + band(b, sd) : '') }; };
+  var table = lrTable([['メーカー', 'lr-wr', LR_C1, '締まった月の点の数は、メーカーの下に出ます'],
+    ['人の効き', 'num', LR_C1, '製品・メーカー全体・見解の入力で押した分が、実績でどれだけ当たったか（1 = 押したとおり・0 = 効いていない）'],
+    ['AI の効き', 'num', LR_C1, 'AI の市場調査で押した分が、実績でどれだけ当たったか（1 = 押したとおり・0 = 効いていない）'],
+    ['残る偏り', 'num', LR_C1, '補正を掛けた後に残る偏り（プラスは予測が低め）。見せるだけで、予測には掛けません（全体の偏りは「補正を学び直す」が直します）'],
+    ['状態', 'ctr', LR_C1, '学び中・初めの値・止めた（幅で止めたので所有者が確かめる）']],
+    ps.map(function(p){ var s0 = st(p);
+      return [{ h: esc(lrName(p, multi)) + '<span class="lr-sub meta">' + (p.own || 0) + ' か月</span>', tip: lrName(p, multi) + '\nこのメーカーの点 ' + (p.own || 0) + ' か月・全体 ' + (p.points || 0) + ' か月（' + (p.makers || 0) + ' 社）' },
+        cell(p, p.betaHuman, p.sdHuman, '人'), cell(p, p.betaAi, p.sdAi, 'AI'), { h: pct1(p.alpha), tip: '補正の後に残る偏り ' + pct1(p.alpha) + (isNum(p.alphaSd) ? '（±' + pct1(p.alphaSd).replace('+', '') + '）' : '') },
+        { h: '<span class="chip st ' + s0[1] + '">' + s0[0] + '</span>', tip: s0[2] }]; }));
+  return lrCard('効き係数', '人と AI が押した分が、実績でどれだけ当たったかです。締まった月ごとに学び直し、次の予測はこの値で押しを強め・弱めます（1 = 押したとおり・0 = 効いていない）。データの少ないメーカーは全体の値に寄せます。分からないうちは見通しの幅を広げます',
+    '<div class="tblwrap">' + table + '</div>',
+    lrMore('ln（実績 ÷（統計の土台 + 確定スポット）× 補正）= α + βH × 人の押し + βAI × AI の押し を、正規分布の共役（事前 α 0 ± 0.05・β 1 ± 0.5）で当てはめます。'
+      + 'ほかのメーカーの事後にメーカーどうしの違い（β ± 0.2）を足したものを、そのメーカーの事前にします。古い月ほど軽く（半減期 12 か月）、1 回に動けるのは ±0.2 まで'));
+}
+
 /**
  * 偏りの縮め: 計画ごとの読みのクセを、全計画の平均の方へ寄せた値（予測には効かせず、見比べるだけ）。
  * 偏り（bias）は今の補正を外した予測で測る（サーバーが掛けていた補正で割り戻す。2026-10-13）。倍率（factorShadow）は今の補正の代わりに掛ける値なので、

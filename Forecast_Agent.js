@@ -14,7 +14,7 @@
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.5.0-dev';
+const VERSION = '2.6.0-dev';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -226,7 +226,9 @@ const KNOWN_SPOT_BG_SUPPRESS_RATE = 0.50; // 既知スポット命中時の背�
 const QUAL_SUBJECTIVE_MONTHLY_CAP = 0.40;  // 月次cap（quantOpsAfterResidual比）
 const QUAL_CALIBRATION_ENABLED = 1;        // 1: 有効 / 0: 無効
 const AI_WEIGHT_DEFAULT = 0.0008; // AI重み（既定）
-const AI_MAX_ABS_EFFECT = 0.05;   // AI係数の絶対上限（±5%）
+const AI_MAX_ABS_EFFECT = 0.15;   // AI係数の絶対上限（±15%。2026-10-15 段 3 で ±5% から。当たらなければ効き係数 βAI が小さくする）
+const AI_MAX_ABS_EFFECT_LEGACY_DEFAULT = 0.05; // 段 3 より前の既定（CONFIG にこの値のままなら新しい既定として読む）
+const AI_MAX_ABS_EFFECT_CEIL = 0.30;            // CONFIG で入れられる上限
 const AI_TOPIC_SCORE_ABS_CAP = 50; // 各topic final scoreの絶対上限（±50 / 4軸合計±200 / OUTPUT 17-18行の表示レンジと一致）
 const AI_MISSING_CONFIDENCE_DEFAULT = 0.5; // confidence/relative_confidence欠落時の補完既定値（0で不採用＝従来挙動）
 const AI_TOPICS = ['Market', 'Competitor', 'Channel', 'DX'];
@@ -625,6 +627,8 @@ function runForecastFYCore_(fy, clientName) {
   const knownSpotExpectedByMonth = computeKnownSpotExpectedByMonth_(devProjectsByMonth);
   const devFixedByMonth = knownSpotExpectedByMonth.slice();
 
+  // 効き係数（段 3）: 新アプリが締まった月からベイズで学んだ、人の押し・AI の押しの効き（無ければ押したとおり）
+  const learnedEffects = readLearnedEffects_(clientName);
   // 三角測量（2026-10-15 段 2。app/DESIGN_triangulation_bayes_JA.md の 1 章）: BASE の土台を、線形回帰・直近重視の回帰・季節の中央値・
   // シミュレーションの中心（線形回帰 ×（1 + 残差の中央値））の重み付き平均にする。残差の分布はこの土台を中心に置き直す（土台 ÷（1 + 残差の中央値）を
   // 線形回帰の代わりに使う。opsBaseAt_）。重みは新アプリがベイズで出したもの（無ければ初めの重み）。DLM が primary のときと CONFIG の
@@ -718,7 +722,8 @@ function runForecastFYCore_(fy, clientName) {
     dlmBaseLogByMonth: dlmPrimaryActive ? dlmForecast.logByMonth : null,
     reliabilityApply,
     reliabilityMap,
-    lmdiEnabled
+    lmdiEnabled,
+    effects: learnedEffects
   });
 
   const opinionsSummaryTop = summarizeOpinionsTop_(opinions);
@@ -772,8 +777,26 @@ function runForecastFYCore_(fy, clientName) {
     }
   }
 
+  // 効き係数の不確かさ（段 3）: 予測の月の P10・P90 を、人と AI の押し（生の値の対数）× 効き係数の事後の幅だけ外へ広げる（真ん中は変えない）
+  const effectBandByMonth = new Array(12).fill(0);
+  if (learnedEffects && mixed.diagnostics) {
+    const dg = mixed.diagnostics;
+    for (let i = 0; i < months.length; i++) {
+      if (sourceByMonth[i] !== 'forecast_open') continue;
+      const xh = Math.log(Math.max(1e-9, Number((dg.kProdRawByMonth || [])[i] || 1) * Number((dg.kClientRawByMonth || [])[i] || 1) * Number((dg.kOpinionRawP50ByMonth || [])[i] || 1)));
+      const xa = Math.log(Math.max(1e-9, Number((dg.kAIRawByMonth || [])[i] || 1)));
+      const v = xh * xh * Math.max(0, Number(learnedEffects.varHuman) || 0) + xa * xa * Math.max(0, Number(learnedEffects.varAi) || 0)
+        + 2 * xh * xa * (Number(learnedEffects.covHumanAi) || 0);
+      const sd = Math.sqrt(Math.max(0, v));
+      effectBandByMonth[i] = sd;
+      if (!(sd > 0)) continue;
+      mixed.p10[i] = Number(mixed.p10[i] || 0) * Math.exp(-EFFECT_BAND_Z * sd);
+      mixed.p90[i] = Number(mixed.p90[i] || 0) * Math.exp(EFFECT_BAND_Z * sd);
+    }
+  }
+
   let productWeightWarning = '';
-  if (factorsProduct.length > 0 && mixed.diagnostics && mixed.diagnostics.kProdByMonth && mixed.diagnostics.kProdByMonth.every(k => Math.abs(Number(k || 1) - 1) < 1e-9)) {
+  if (factorsProduct.length > 0 && mixed.diagnostics && mixed.diagnostics.kProdRawByMonth && mixed.diagnostics.kProdRawByMonth.every(k => Math.abs(Number(k || 1) - 1) < 1e-9)) {
     const zeroWeightProducts = Array.from(new Set(
       factorsProduct
         .map(f => String((f && f.product) || '').trim())
@@ -809,6 +832,8 @@ function runForecastFYCore_(fy, clientName) {
     closedMonthMode,
     modelInfo: { residP10, residP50, residP90, slope: model.slope, intercept: model.intercept },
     triangulation,
+    learnedEffects,
+    effectBandByMonth,
     baseSeries48: salesData.baseSeries48 || [],
     adjustedBaseSeries48: aggY_adj,
     seriesStart,
@@ -997,7 +1022,7 @@ function writeOutputFY_(result) {
   sh.setRowHeight(9, 40);
   sh.getRange(summaryHeaderRow, 1).setNote('【定量寄与率（予測対象月のみ）】\nforecast_open月だけで算出した、定量土台（quantOnly）の構成比です。\n式: |quantTotal| / (|quantTotal| + |netDelta|)');
   sh.getRange(summaryHeaderRow, 2).setNote('【主観オーバーレイ率（AI除く / capped）】\nPRODUCT/CLIENT/OPINIONS 由来の連続主観差分のみを対象にした参考比率です（AI調査は含みません）。\nKnown Spotも含みません。この率は予測制御には使いません。');
-  sh.getRange(summaryHeaderRow, 3).setNote('【AI寄与率（calibrated）】\nAI調査（kAI）由来の寄与のみを、主観オーバーレイと分離して計測した参考比率です。\nAIは自前の上限（AI_MAX_ABS_EFFECT=±5%）で制御され、主観capとは別系統です。');
+  sh.getRange(summaryHeaderRow, 3).setNote('【AI寄与率（calibrated）】\nAI調査（kAI）由来の寄与のみを、主観オーバーレイと分離して計測した参考比率です。\nAIは自前の上限（AI_MAX_ABS_EFFECT=±15%）で制御され、主観capとは別系統です。');
   sh.getRange(summaryHeaderRow, 4).setNote('【Known Spot寄与率（予測対象月のみ）】\nDEV_SPOT由来の既知案件寄与の比率です。\ncalibration対象外で、主観オーバーレイとは別系統で表示しています。');
   sh.getRange(summaryHeaderRow, 5).setNote('【非定量ネット差分率（参考）】\nmixedとquantOnlyの差分をネットで見た参考値です。\noverlayとknownが相殺/増幅し得るため、他列と単純加算はできません。');
   sh.getRange(summaryHeaderRow, 6).setNote('【警告/参考】\nAI行不足、レンジ過大など運用注意と、主観オーバーレイ率(AI除く)・AI寄与率の参考値を表示します。');
@@ -2971,7 +2996,9 @@ function readModelTuningFromConfig_() {
   out.spotBgFloorRate = Math.max(0, Math.min(1, getCfg('SPOT_BG_FLOOR_RATE', out.spotBgFloorRate)));
   out.spotBgCapRate = Math.max(0, Math.min(1, getCfg('SPOT_BG_CAP_RATE', out.spotBgCapRate)));
   out.aiWeight = Math.max(0, Math.min(0.01, getCfg('AI_WEIGHT', out.aiWeight)));
-  out.aiMaxAbsEffect = Math.max(0, Math.min(0.05, getCfg('AI_MAX_ABS_EFFECT', out.aiMaxAbsEffect)));
+  // 段 3（2026-10-15）: CONFIG が段 3 より前の既定（0.05）のままなら新しい既定（AI_MAX_ABS_EFFECT）として読む（計画を作ったときに既定が書かれているため）
+  const aiMaxCfg = getCfg('AI_MAX_ABS_EFFECT', out.aiMaxAbsEffect);
+  out.aiMaxAbsEffect = Math.max(0, Math.min(AI_MAX_ABS_EFFECT_CEIL, Math.abs(aiMaxCfg - AI_MAX_ABS_EFFECT_LEGACY_DEFAULT) < 1e-12 ? AI_MAX_ABS_EFFECT : aiMaxCfg));
   out.aiMissingConfidenceDefault = Math.max(0, Math.min(1, getCfg('AI_MISSING_CONFIDENCE_DEFAULT', out.aiMissingConfidenceDefault)));
   out.aiMomentumLookbackQuarters = Math.round(Math.max(1, Math.min(8, getCfg('AI_MOMENTUM_LOOKBACK_QUARTERS', out.aiMomentumLookbackQuarters))));
   out.aiMomentumMinHistory = Math.round(Math.max(1, Math.min(12, getCfg('AI_MOMENTUM_MIN_HISTORY', out.aiMomentumMinHistory))));
@@ -3961,6 +3988,8 @@ function readAIResearchScores_(calibration, opt) {
   const peerUIdx = idx.peer_universe;
   const peerBIdx = idx.peer_basis;
   const asOfIdx = idx.as_of_date;
+  const horizonIdx = idx.time_horizon;
+  const horizonList = [];   // 段 3: 話題の「いつ効くか」（'3M'・'6か月' などの数。result.meta.horizonMonths = 中央値）
 
   const disabledTopics = new Set();
   try {
@@ -3984,6 +4013,10 @@ function readAIResearchScores_(calibration, opt) {
   for (let i = 1; i < vals.length; i++) {
     const topic = normalizeAiTopic_(vals[i][topicIdx]);
     if (eventArr[topic] === undefined) continue;
+    if (horizonIdx !== undefined) {
+      const hm = /(\d+(?:\.\d+)?)/.exec(String(vals[i][horizonIdx] || ''));
+      if (hm && Number(hm[1]) > 0) horizonList.push(Math.min(24, Number(hm[1])));
+    }
     const rowTypeRaw = rowTypeIdx === undefined ? 'event' : normalizeAiCellValue_(vals[i][rowTypeIdx]);
     const rowType = (rowTypeRaw === 'benchmark') ? 'benchmark' : 'event';
     const asOf = toDate_(asOfIdx === undefined ? '' : normalizeAiCellValue_(vals[i][asOfIdx]));
@@ -4114,6 +4147,7 @@ function readAIResearchScores_(calibration, opt) {
     };
   });
   result.meta.topicsMissingBenchmark = topicsMissingBenchmark;
+  result.meta.horizonMonths = horizonList.length ? triMedian_(horizonList) : null;
 
   const basis = opt && opt.basis === 'momentum' ? 'momentum' : 'level';
   if (basis !== 'momentum') return result;
@@ -4551,6 +4585,36 @@ function buildTriangulationBase_(y, model, q50, weights) {
   return { weights: used, center, base: center.map(c => (k > 0 ? c / k : c)), parts };
 }
 
+/** ====== AI の時期と効き係数（2026-10-15 段 3。app/DESIGN_triangulation_bayes_JA.md の 3・4 章） ====== */
+const AI_HORIZON_DEFAULT_MONTHS = 6;   // 話題の時期が無いときの、全部効く月の数
+const AI_FAR_MONTH_WEIGHT = 0.5;       // 12 か月先の強さ（全部効く月の後、ここまで下げる）
+const EFFECT_BAND_Z = 1.2816;          // 見通しの幅（P10・P90）に足す効き係数の不確かさの z
+
+/**
+ * AI の押しの月ごとの強さ（0.5〜1）: 「今」の月から何か月先か d が、話題の時期 H（か月。無ければ 6）以内なら 1、その先は 12 か月先で 0.5 まで下げる
+ */
+function aiMonthWeights_(months, horizonMonths) {
+  const now = new Date();
+  const base = now.getFullYear() * 12 + now.getMonth();
+  const H = isFinite(horizonMonths) && Number(horizonMonths) > 0 ? Math.min(12, Number(horizonMonths)) : AI_HORIZON_DEFAULT_MONTHS;
+  return (months || []).map(m => {
+    const d = (m && typeof m.getFullYear === 'function' ? m.getFullYear() * 12 + m.getMonth() : base) - base;   // 日付の作り手（差し替えた Date）によらず読む
+    if (d <= H) return 1;
+    return Math.max(AI_FAR_MONTH_WEIGHT, 1 - (1 - AI_FAR_MONTH_WEIGHT) * (d - H) / Math.max(1, 12 - H));
+  });
+}
+
+/** 効き係数（新アプリが渡す AppLearning.effects。{ betaHuman, betaAi, varHuman, varAi, covHumanAi }。無ければ null = 押したとおり・幅は足さない） */
+function readLearnedEffects_(clientName) {
+  try {
+    if (typeof AppLearning !== 'undefined' && AppLearning && typeof AppLearning.effects === 'function') {
+      const e = AppLearning.effects(clientName);
+      if (e) return e;
+    }
+  } catch (err) { /* 押したとおりで続ける */ }
+  return null;
+}
+
 /** 予測の月 i（0〜11）の BASE の土台（三角測量の土台があればそれ、無ければ線形回帰の延長） */
 function opsBaseAt_(model, i) {
   if (model && model.triBase && isFinite(model.triBase[i])) return Math.max(0, Number(model.triBase[i]));
@@ -4713,8 +4777,16 @@ function forecastMonteCarloMixed_(model, opt) {
   const mk12 = () => Array.from({ length: 12 }, () => []);
 
   const reliabilityMap = opt.reliabilityApply ? (opt.reliabilityMap || new Map()) : new Map();
-  const kProdByMonth = months.map(m => productFactorsMultiplier_(factorsProduct, m, productWeights, reliabilityMap));
-  const kClientByMonth = months.map(m => clientFactorsMultiplier_(factorsClient, m, reliabilityMap));
+  // 効き係数（段 3。2026-10-15）: 人の押し（製品・全体・見解の倍率の積）と AI の押しを、学んだ βH・βAI 乗して掛ける（1 = 押したとおり・0 = 効かない）。
+  // 渡されなければ 1（今までどおり）。記録（kProdByMonth など）は掛けた後の値、学びに使う生の値は *RawByMonth
+  const effects = opt.effects || null;
+  const betaH = effects && isFinite(effects.betaHuman) ? clamp_(Number(effects.betaHuman), 0, 2) : 1;
+  const betaA = effects && isFinite(effects.betaAi) ? clamp_(Number(effects.betaAi), 0, 2) : 1;
+  const powEff_ = (k, b) => (b === 1 ? k : Math.pow(Math.max(1e-9, Number(k)), b));
+  const kProdRawByMonth = months.map(m => productFactorsMultiplier_(factorsProduct, m, productWeights, reliabilityMap));
+  const kClientRawByMonth = months.map(m => clientFactorsMultiplier_(factorsClient, m, reliabilityMap));
+  const kProdByMonth = kProdRawByMonth.map(k => powEff_(k, betaH));
+  const kClientByMonth = kClientRawByMonth.map(k => powEff_(k, betaH));
 
   const aiScores = opt.aiScores || { Market: 0, Competitor: 0, Channel: 0, DX: 0 };
   let aiTotalScore = 0;
@@ -4729,6 +4801,10 @@ function forecastMonteCarloMixed_(model, opt) {
   const aiNeutralizedTotal = Math.abs(aiTotalScore) < aiTotalNeutralThreshold;
   if (aiScores && aiScores.meta) aiScores.meta.neutralizedTotal = aiNeutralizedTotal;
   const kAI = aiNeutralizedTotal ? 1.0 : (1 + aiClampedEffect);
+  // AI の時期（段 3）: 話題の「いつ効くか」（time_horizon の中央値。aiScores.meta.horizonMonths）までの月は全部、その先は 12 か月先で半分まで
+  const aiMonthW = aiMonthWeights_(months, aiScores && aiScores.meta ? aiScores.meta.horizonMonths : null);
+  const kAIRawByMonth = months.map((_, i) => (aiNeutralizedTotal ? 1.0 : 1 + aiClampedEffect * aiMonthW[i]));
+  const kAIEffByMonth = kAIRawByMonth.map(k => powEff_(k, betaA));
 
   const startT = 48;
   const totalRawSimByMonth = Array.from({ length: 12 }, () => []);
@@ -4743,6 +4819,7 @@ function forecastMonteCarloMixed_(model, opt) {
   const knownSpotSimByMonth = Array.from({ length: 12 }, () => []);
   const bgSpotSimByMonth = Array.from({ length: 12 }, () => []);
   const opinionKByMonth = Array.from({ length: 12 }, () => []);
+  const opinionKRawByMonth = Array.from({ length: 12 }, () => []);
   const lmdiContribSimByMonth = lmdiEnabled ? { kProd: mk12(), kClient: mk12(), kOpinion: mk12(), kAI: mk12() } : null;
   const lmdiRelContribSimByMonth = lmdiEnabled ? { kProd: mk12(), kClient: mk12(), kOpinion: mk12(), kAI: mk12() } : null;
   const lmdiCapAdjSimByMonth = lmdiEnabled ? mk12() : null;
@@ -4774,7 +4851,9 @@ function forecastMonteCarloMixed_(model, opt) {
       let ops = quantOpsAfterResidual;
       ops *= kProdByMonth[i];
       ops *= kClientByMonth[i];
-      const kOpinion = sampleOpinionMultiplier_(opinions, months[i], reliabilityMap);
+      const kOpinionRaw = sampleOpinionMultiplier_(opinions, months[i], reliabilityMap);
+      const kOpinion = powEff_(kOpinionRaw, betaH);
+      const kAI = kAIEffByMonth[i];
       ops *= kOpinion;
       ops *= kAI;
       const subjectiveContinuousDelta = quantOpsAfterResidual * ((kProdByMonth[i] * kClientByMonth[i] * kOpinion * kAI) - 1);
@@ -4783,6 +4862,7 @@ function forecastMonteCarloMixed_(model, opt) {
       const subjectiveExclAIDelta = quantOpsAfterResidual * (subjectiveExclAIMul - 1);
       const aiDelta = quantOpsAfterResidual * subjectiveExclAIMul * (kAI - 1);
       opinionKByMonth[i].push(kOpinion);
+      opinionKRawByMonth[i].push(kOpinionRaw);
 
       const knownSpot = simulateKnownSpotByMonth_(knownSpotProjectsByMonth[i]);
       const bgSuppress = knownSpot > 0 ? knownSpotBgSuppressRate : 1;
@@ -4868,7 +4948,8 @@ function forecastMonteCarloMixed_(model, opt) {
   const scaledAIQ = quantilesFromSimByMonth_(scaledAIDeltaSimByMonth);
 
   const kOpinionP50ByMonth = opinionKByMonth.map(arr => percentile_(arr, 0.50));
-  const kAIByMonth = new Array(12).fill(kAI);
+  const kAIByMonth = kAIEffByMonth.slice();
+  const kOpinionRawP50ByMonth = opinionKRawByMonth.map(arr => percentile_(arr, 0.50));
   const quantP50ForKpi = quantOpsSimByMonth.map((arr, i) => percentile_(arr.map((v, s) => Number(v || 0) + Number((bgSpotSimByMonth[i] || [])[s] || 0)), 0.50));
   const qualDiag = buildQualShareDiagnostics_({
     quantP50ByMonth: quantP50ForKpi,
@@ -4923,6 +5004,8 @@ function forecastMonteCarloMixed_(model, opt) {
       kClientByMonth,
       kOpinionP50ByMonth,
       kAIByMonth,
+      // 学びに使う生の押し（効き係数を掛ける前。段 3）と、使った効き係数
+      kProdRawByMonth, kClientRawByMonth, kOpinionRawP50ByMonth, kAIRawByMonth, betaHuman: betaH, betaAi: betaA,
       quantOpsSimByMonth,
       subjectiveContinuousDeltaSimByMonth,
       knownSpotSimByMonth,

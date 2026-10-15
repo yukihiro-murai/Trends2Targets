@@ -94,7 +94,7 @@ const webSrc = await readFile(path.join(repoRoot, 'Forecast_WebApp.js'), 'utf8')
   assert.equal(eng.SOURCE_SHA256, sha(legacySrc));
   assert.equal(eng.VERSION, /const VERSION = '([^']+)'/.exec(legacySrc)[1]);
   assert.deepEqual(Object.keys(J(eng.SHEETS)).length >= 30, true);
-  assert.deepEqual(ENGINE_SERVICES, ['SpreadsheetApp', 'Date', 'Utilities', 'PropertiesService', 'UrlFetchApp', 'HtmlService', 'Session', 'AppTriangulation']);
+  assert.deepEqual(ENGINE_SERVICES, ['SpreadsheetApp', 'Date', 'Utilities', 'PropertiesService', 'UrlFetchApp', 'HtmlService', 'Session', 'AppTriangulation', 'AppLearning']);
   assert.equal(eng.WEB_SOURCE_SHA256, sha(webSrc));
   // 旧来の年度の数え方（FY N = N 年 4 月〜）を、差し替えた Date のもとでも同じに使う
   assert.equal(J(eng.getForecastFYStart_(2026)), new Date(2026, 3, 1).toISOString());

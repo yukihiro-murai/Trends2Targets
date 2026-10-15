@@ -115,7 +115,10 @@ function cores(planId, seed, asOfMs, closed) {
     let st = null;
     do { st = appScratchBuildStep_(s, plan.plan_id, null, st && st.state, Date.now() + 60000); } while (!st.complete);
     const stat = appBacktestStatRun_(s, { fy: ${FY}, asOfMs: __t, seed: __s, closed: __k || undefined });
-    const eng = appLegacyEngine_(appLegacyServices_(s, { asOfMs: __t, seed: 'x', actor: '' }));
+    // 本番の予測と同じく、三角測量の重みと効き係数を渡す（段 2・3）
+    const ctx0 = { actor: '', requestId: 'TEST', roles: [] };
+    const eng = appLegacyEngine_(appLegacyServices_(s, { asOfMs: __t, seed: 'x', actor: '', triWeights: appTriWeights_(ctx0, plan, __t).weights,
+      effects: appEffForEngine_(appLearnEffects_(ctx0, plan, __t)) }));
     const client = eng.normalizeClientName_(String(s.getSheetByName('CONFIG').getRange('B2').getValue()).trim());
     const live = appWithSeededRandom_(__s, () => {
       eng.syncSalesFromSalesInput_(${FY}, client);

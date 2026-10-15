@@ -1257,7 +1257,8 @@ function appAiLearning_(ctx) {
     calibration: appInsightPerPlan_(plans, view.named, (ps, hide) => appInsightCalibration_(ps, tab('CALIBRATION_HISTORY'), factorNow, hide)),
     pending: appInsightPerPlan_(plans, view.named, (ps, hide) => appInsightPending_(ps, tab('QUARTERLY_REVIEW_LOG'), hide)),
     health: appInsightHealth_(plans, accs, shadow, factorNow),
-    unsourced: appInsightUnsourced_(plans, tab)
+    unsourced: appInsightUnsourced_(plans, tab),
+    effects: appEffectsCard_(plans)   // 人と AI の押しの効き係数（段 3。Effects.js。記録が無ければ null）
   };
 }
 
