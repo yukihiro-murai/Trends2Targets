@@ -150,6 +150,7 @@ function appForecastBasis_(ctx, planId) {
   appBasisAnnualLive_(out, plan);   // 年度の見込みの本番（判断 10・24）: 年度の値を月の合計にそろえる（旧来の年度合計は annual.legacy。見せる中心は控えの後で appBasisShown_）
   Object.assign(out, appBasisChangeCause_(latest, prev, cur, before, between));   // 前回の予測からの変化のわけ（changeCause・changeCauses・changeVersion）
   out.layers = appBasisLayers_(plan.plan_id, latest, prev);   // 層ごとの効きの月の合計（最新と前の回。人の名前は入らない。LayerEffects.js）
+  out.triangulation = appBasisTriangulation_(plan.plan_id, latest && latest.run_id);   // 予測の土台（三角測量の重みと手法ごとの 12 か月の合計。段 2。Methods.js）
   try { appJobPutResult_(key, out); } catch (e) { /* 控えられなくても返す */ }
   return appBasisFor_(ctx, appBasisShown_(out, plan), plan);
 }

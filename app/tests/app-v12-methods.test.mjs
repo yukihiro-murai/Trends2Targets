@@ -21,39 +21,86 @@ const near = (a, b, tol = 1e-9) => Math.abs(Number(a) - Number(b)) <= tol * Math
 const env = setUpEnv();
 const compute = (o) => env.call('appMethodsCompute_(__o)', { __o: o });
 
-// ==== 1. 手法の計算 ====
+// ==== 1. 手法の計算（式は旧来の計算の computeTriangulationParts_・buildTriangulationBase_ の 1 か所だけ） ====
+const ENG = '(globalThis.__eng = globalThis.__eng || appLegacyEngine_({ SpreadsheetApp, Date, Utilities, PropertiesService, UrlFetchApp: null, HtmlService: null, Session, AppTriangulation: null }))';
+const parts = (y, model, q50) => JSON.parse(JSON.stringify(env.run(`${ENG}.computeTriangulationParts_(__y, __m, __q)`, { __y: y, __m: model, __q: q50 })));
 {
   const flat = new Array(12).fill(1);
-  // まっすぐな線（季節なし）: 線形回帰・直近重視は同じ線を延ばす
+  assert.deepEqual(JSON.parse(JSON.stringify(env.run(`${ENG}.TRI_PRIOR_WEIGHTS`))), JSON.parse(JSON.stringify(env.call('APP_TRI_PRIOR'))), '初めの重みは旧来の計算と新アプリで同じ');
+  // まっすぐな線（季節なし）: 線形回帰・直近重視は同じ線を延ばす。シミュレーションの中心 = 線形回帰 ×（1 + 残差の中央値）
   const y = Array.from({ length: 48 }, (_, i) => 1000 + 10 * (i + 1));
-  const m = compute({ y, model: { intercept: 1000, slope: 10, seasonalIndex: flat }, spotBg: new Array(12).fill(5), sim: new Array(12).fill(2000), lastYear: y.slice(36) });
-  assert.deepEqual(m.LINEAR.slice(0, 3), [1000 + 10 * 49 + 5, 1000 + 10 * 50 + 5, 1000 + 10 * 51 + 5], '線形回帰 = 土台の式を 49 か月目から延ばす + 背景のスポット');
-  m.RECENT.forEach((v, i) => assert.ok(near(v, m.LINEAR[i], 1e-9), '直線なら直近重視も同じ線'));
+  const P = parts(y, { intercept: 1000, slope: 10, seasonalIndex: flat }, 0.02);
+  assert.deepEqual(P.LINEAR.slice(0, 3), [1000 + 10 * 49, 1000 + 10 * 50, 1000 + 10 * 51], '線形回帰 = 土台の式を 49 か月目から延ばす');
+  P.RECENT.forEach((v, i) => assert.ok(near(v, P.LINEAR[i], 1e-9), '直線なら直近重視も同じ線'));
+  P.SIM.forEach((v, i) => assert.ok(near(v, P.LINEAR[i] * 1.02), 'シミュレーションの中心'));
+  const m = compute({ parts: P, spotBg: new Array(12).fill(5), lastYear: y.slice(36) });
+  assert.equal(m.LINEAR[0], P.LINEAR[0] + 5, '記録は背景のスポットを足す');
   assert.deepEqual(m.LAST_YEAR, y.slice(36));
-  assert.deepEqual(m.SIM, new Array(12).fill(2000));
-  const w = env.call('APP_METHODS_TRI_PRIOR');
-  m.TRI.forEach((v, i) => assert.ok(near(v, w.LINEAR * m.LINEAR[i] + w.ROBUST * m.ROBUST[i] + w.RECENT * m.RECENT[i] + w.SIM * m.SIM[i]), '三角測量 = 重み付きの平均'));
+  const w = env.call('APP_TRI_PRIOR');
+  m.TRI.forEach((v, i) => assert.ok(near(v, w.LINEAR * P.LINEAR[i] + w.ROBUST * P.ROBUST[i] + w.RECENT * P.RECENT[i] + w.SIM * P.SIM[i] + 5), '三角測量 = 重み付きの平均 + スポット'));
   assert.ok(near(w.LINEAR + w.ROBUST + w.RECENT + w.SIM, 1), '重みを足すと 1');
+  // 旧来の土台（buildTriangulationBase_）: 中心 = 記録の三角測量 − スポット、残差を掛ける前の土台 = 中心 ÷（1 + 残差の中央値）
+  const B = env.run(`${ENG}.buildTriangulationBase_(__y, __m, 0.02, __w)`, { __y: y, __m: { intercept: 1000, slope: 10, seasonalIndex: flat }, __w: w });
+  B.center.forEach((c, i) => { assert.ok(near(c, m.TRI[i] - 5)); assert.ok(near(B.base[i], c / 1.02)); });
+  // 重みを変えると記録も同じ重みで混ぜる
+  const w2 = { LINEAR: 0.7, RECENT: 0.1, ROBUST: 0.1, SIM: 0.1 };
+  const m2 = compute({ parts: P, spotBg: [], lastYear: [], weights: w2 });
+  const B2 = env.run(`${ENG}.buildTriangulationBase_(__y, __m, 0.02, __w)`, { __y: y, __m: { intercept: 1000, slope: 10, seasonalIndex: flat }, __w: w2 });
+  m2.TRI.forEach((v, i) => assert.ok(near(v, B2.center[i])));
+  assert.ok(near(B2.weights.LINEAR, 0.7));
 
   // 3 年は横ばい、最後の 1 年で伸びた: 直近重視の方が高く延ばす
   const bend = Array.from({ length: 48 }, (_, i) => (i < 36 ? 1000 : 1000 + 40 * (i - 35)));
-  const fit = env.call('appMethodsWls_(__y, __w)', { __y: bend, __w: new Array(48).fill(1) });
-  const b = compute({ y: bend, model: { intercept: fit.intercept, slope: fit.slope, seasonalIndex: flat }, spotBg: [], sim: [], lastYear: [] });
-  assert.ok(b.RECENT[0] > b.LINEAR[0], '直近の伸びに寄る: ' + b.RECENT[0] + ' > ' + b.LINEAR[0]);
-  assert.deepEqual(b.SIM, new Array(12).fill(null), 'シミュレーションが無ければ空');
-  b.TRI.forEach((v, i) => assert.ok(near(v, (w.LINEAR * b.LINEAR[i] + w.ROBUST * b.ROBUST[i] + w.RECENT * b.RECENT[i]) / (w.LINEAR + w.ROBUST + w.RECENT)), '出せない手法は除いて重みを割り直す'));
+  const model = env.run(`${ENG}.fitOpsModelTrendSeason_(__y)`, { __y: bend });
+  const Pb = parts(bend, Object.assign({}, model, { seasonalIndex: flat }), 0);
+  assert.ok(Pb.RECENT[0] > Pb.LINEAR[0], '直近の伸びに寄る: ' + Pb.RECENT[0] + ' > ' + Pb.LINEAR[0]);
 
-  // 季節の形（4 月が高く 8 月が低い）× 水準 1000: ロバスト季節は形を取り出す。1 か月だけの飛び値は中央値で効かない
+  // 季節の形（4 月が高く 8 月が低い）× 水準 1000: 季節の中央値は形を取り出す。1 か月だけの飛び値は中央値で効かない
   const shape = [1.3, 1, 1, 1, 0.7, 1, 1, 1, 1, 1, 1, 1];
   const sea = Array.from({ length: 48 }, (_, i) => 1000 * shape[i % 12]);
-  sea[16] = 50000;   // 2 年目の 8 月だけの飛び値
-  const R = env.call('appMethodsRobustSeason_(__y)', { __y: sea });
-  shape.forEach((s, k) => assert.ok(Math.abs(R[k] - s) < 0.02, k + ': ' + R[k] + ' ≒ ' + s));
-  const r = compute({ y: sea, model: { intercept: 1000, slope: 0, seasonalIndex: flat }, spotBg: [], sim: [], lastYear: [] });
-  assert.ok(r.ROBUST[0] > r.ROBUST[1] && r.ROBUST[4] < r.ROBUST[3], '4 月が高く 8 月が低い');
-  // 売上が無い（新しいメーカー）: 出せる手法だけ
-  const none = compute({ y: [], model: null, spotBg: [], sim: [], lastYear: [] });
+  sea[16] = 50000;
+  const Ps = parts(sea, { intercept: 1000, slope: 0, seasonalIndex: flat }, 0);
+  const avg = shape.reduce((a, b) => a + b, 0) / 12;
+  shape.forEach((sh, k) => assert.ok(Math.abs(Ps.ROBUST[k] / Ps.ROBUST[1] - sh) < 0.03, k + ': ' + Ps.ROBUST[k]));
+  assert.ok(avg > 0);
+  // 売上が無い（新しいメーカー）: 出せる手法だけ。三角測量は線形回帰も無ければ空
+  const none = compute({ parts: parts([], null, 0), spotBg: [], lastYear: [] });
   assert.deepEqual([none.LINEAR[0], none.RECENT[0], none.ROBUST[0], none.TRI[0]], [null, null, null, null]);
+}
+
+// ==== 1b. ベイズの重み（計算だけ） ====
+{
+  const post = (pts, own) => env.call('appTriPosterior_(__p, __o, "2026/10")', { __p: pts, __o: own });
+  const floorOf = (w) => env.call('appTriFloor_(__w)', { __w: w });
+  const step = (w, p) => env.call('appTriStep_(__w, __p)', { __w: w, __p: p });
+  const sum = (w) => Object.values(w).reduce((a, b) => a + b, 0);
+  // 3 社 × 12 か月: 季節の中央値がいつも当たり（外れ 2%）、線形回帰は 15% 外れる
+  const pts = [];
+  ['A', 'B', 'C'].forEach((mk) => { for (let k = 0; k < 12; k++) {
+    const a = 1000, s = k % 2 ? 1 : -1;
+    pts.push({ maker: mk, ym: '2026/' + String((k % 9) + 1).padStart(2, '0'), actual: a, v: { LINEAR: a * (1 + 0.15 * s), RECENT: a * (1 + 0.08 * s), ROBUST: a * (1 + 0.02 * s), SIM: a * (1 + 0.12 * s) } });
+  } });
+  const r = post(pts, 'A');
+  assert.equal(r.points, 36);
+  assert.equal(r.makers, 3);
+  assert.equal(r.own, 12);
+  const W = r.weights;
+  assert.ok(W.ROBUST > W.RECENT && W.RECENT > W.SIM && W.SIM > W.LINEAR, '外れの小さい順に重い: ' + JSON.stringify(W));
+  assert.ok(W.ROBUST > 0.6 && W.LINEAR < 0.05, '3 社 × 1 年分で、当たる手法に寄る（1 年分を 1 回の観測として数えるので極端にはならない）: ' + JSON.stringify(W));
+  assert.ok(near(sum(r.weights), 1));
+  const f = floorOf(r.weights);
+  assert.ok(Object.values(f).every((v) => v >= 0.05 - 1e-12) && near(sum(f), 1), '下限 0.05: ' + JSON.stringify(f));
+  const prior = env.call('APP_TRI_PRIOR');
+  const st = step(r.weights, prior);
+  assert.ok(Object.keys(prior).every((k) => Math.abs(st[k] - prior[k]) <= 0.1 + 1e-9) && near(sum(st), 1), '1 回で動けるのは ±0.10: ' + JSON.stringify(st));
+  assert.ok(st.ROBUST > prior.ROBUST && st.LINEAR < prior.LINEAR, '向きは事後のほう');
+  // 階層の縮め: ほかの社の点が無く、自分の点が 2 か月だけなら、初めの重みから少しだけ動く。自分の点が無ければ、ほかの社の事後のまま
+  const few = post(pts.filter((p) => p.maker === 'A').slice(0, 2), 'A');
+  assert.ok(Math.abs(few.weights.ROBUST - prior.ROBUST) < 0.3 && few.weights.ROBUST > prior.ROBUST, '2 か月だけ: ' + JSON.stringify(few.weights));
+  const other = post(pts.filter((p) => p.maker !== 'A'), 'A');
+  Object.keys(other.pool).forEach((k) => assert.ok(near(other.weights[k], other.pool[k], 1e-12), '自分の点が無ければ、ほかの社の事後 = 自分の重み'));
+  // 4 つそろわない点・実績 0 以下の点は数えない
+  assert.equal(post([{ maker: 'A', ym: '2026/04', actual: 100, v: { LINEAR: 90, RECENT: 95, ROBUST: 99 } }, { maker: 'A', ym: '2026/05', actual: 0, v: { LINEAR: 1, RECENT: 1, ROBUST: 1, SIM: 1 } }], 'A').points, 0);
 }
 
 // ==== 2. まとめ ====
@@ -165,10 +212,17 @@ let runA;
     const prevYm = (Number(r.ym.slice(0, 4)) - 1) + r.ym.slice(4);
     assert.equal(Number(r.last_year), sales[prevYm], r.ym + ': 前年同月 = 前の年度の同じ月の売上');
     assert.equal(r.source, 'forecast_open');
-    assert.equal(r.calc_version, 'M-1');
+    assert.equal(r.calc_version, 'M-2');
+    assert.ok(near(r.stat, r.tri, 1e-9), r.ym + ': 統計の土台 = 三角測量（予測の土台が 4 つの手法の重み付き平均になっている）: ' + r.stat + ' / ' + r.tri);
     assert.match(r.method_row_id, /^FMR-[0-9A-F]{24}$/);
   });
   assert.ok(rows.some((r) => Math.abs(r.plus_human - r.plus_spot) > 0), '人の入力が効いた月がある');
+  assert.ok(rows.some((r) => Math.abs(Number(r.tri) - Number(r.linear)) > 1), '三角測量は線形回帰と違う');
+  // 使った重み（METHOD_WEIGHTS）: 締まった月の点が無いので初めの重み
+  const mw = env.table('METHOD_WEIGHTS').filter((r) => r.run_id === runA.run_id);
+  assert.equal(mw.length, 1);
+  assert.deepEqual([mw[0].basis, Number(mw[0].w_linear), Number(mw[0].w_recent), Number(mw[0].w_robust), Number(mw[0].w_sim), mw[0].calc_version], ['PRIOR', 0.15, 0.25, 0.4, 0.2, 'W-1']);
+  assert.match(mw[0].weight_id, /^MWT-[0-9A-F]{24}$/);
 
   // 予測の数字は、手法の記録が無いときと同じ（同じ入力なら同じ種）
   env.run('appMethodsLive_ = function () { return null; };');
@@ -196,6 +250,59 @@ let runA;
   assert.equal(d.methods.live.ready, false);
   assert.ok(d.methods.records >= 36);
   assert.deepEqual(d.methods.live.rows.map((r) => r.key), ['LAST_YEAR', 'LINEAR', 'RECENT', 'ROBUST', 'SIM', 'TRI', 'STAT', 'PLUS_SPOT', 'PLUS_HUMAN', 'PLUS_AI', 'FINAL']);
+  // 根拠の「予測の土台」: 一番新しい回の重みと手法ごとの 12 か月の合計（三角測量の合計 = その回の記録の合計）
+  const b = env.call('apiForecastBasis(__in)', { __in: { planId } });
+  assert.ok(b.triangulation, '根拠に予測の土台');
+  assert.equal(b.triangulation.basis, 'PRIOR');
+  assert.deepEqual(['LINEAR', 'RECENT', 'ROBUST', 'SIM'].map((k) => b.triangulation.weights[k]), [0.15, 0.25, 0.4, 0.2]);
+  const last = env.table('FORECAST_RUNS').filter((r) => r.plan_id === planId).sort((x, y) => String(x.finished_at).localeCompare(String(y.finished_at))).pop();
+  const triSum = env.table('FORECAST_METHODS').filter((r) => r.run_id === last.run_id).reduce((a, r) => a + Number(r.tri), 0);
+  assert.ok(near(b.triangulation.sums.TRI, triSum, 1e-9));
+  assert.ok(['LINEAR', 'RECENT', 'ROBUST', 'SIM'].every((k) => b.triangulation.sums[k] > 0));
+}
+
+// ==== 5. 証拠を集めて重みを出す（物差しの点から）・同じ証拠なら同じ重み・証拠が増えたら前の重みから ±0.10 ====
+{
+  const CTX = `({ actor: '${OWNER}', requestId: 'TEST', roles: [] })`;
+  const plan = env.table('PLANS').find((p) => p.plan_id === planId);
+  const cut = FY + '/04';
+  const yms = Array.from({ length: 12 }, (_, i) => { const n = FY * 12 + 3 + i; return Math.floor(n / 12) + '/' + String(n % 12 + 1).padStart(2, '0'); });
+  const rows = [];
+  // 季節の中央値がよく当たり（2%）、線形回帰は 20% 外れる点を 8 か月分
+  yms.slice(0, 8).forEach((ym, i) => {
+    const a = 1000000, s = i % 2 ? 1 : -1;
+    [['LINEAR', 0.2], ['RECENT', 0.1], ['ROBUST', 0.02], ['SIM', 0.15]].forEach(([m, e]) => rows.push({ plan_id: planId, point_id: 'BTP-T-' + m + '-' + ym, bt_id: 'BT-T1', cutoff_ym: cut,
+      target_ym: ym, horizon: i + 1, method: m, p10: null, p50: a * (1 + s * e), p90: null, actual: a, real_months: 48, counted: true, engine_sha256: '', seed: '',
+      calc_version: 'BT-3', computed_at: '2026-10-15T10:00:00+0900', computed_by: OWNER }));
+  });
+  env.run(`appWithLock_(() => appInsertRows_('BACKTEST', __r))`, { __r: rows });
+  const asOf = new Date(FY + 1, 6, 1, 10).getTime();   // 翌年度の 7 月（年度の月は全部締まっている）
+  const w1 = env.call(`appTriWeights_(${CTX}, __p, __t)`, { __p: plan, __t: asOf });
+  assert.equal(w1.basis, 'POSTERIOR');
+  assert.equal(w1.points, 8);
+  const prior = env.call('APP_TRI_PRIOR');
+  assert.ok(w1.weights.ROBUST > prior.ROBUST && w1.weights.LINEAR < prior.LINEAR, '当たる手法に寄る: ' + JSON.stringify(w1.weights));
+  Object.keys(prior).forEach((k) => assert.ok(Math.abs(w1.weights[k] - prior[k]) <= 0.1 + 1e-9, '初めの重みから ±0.10: ' + k));
+  // 記録して、同じ証拠でもう一度: 同じ重み（何も変えずに予測し直しても数字が揺れない）
+  const rec = (w, runId) => env.run(`appWithLock_(() => appJournalApply_(appTriWeightsOps_(${CTX}, __p, { tri: __w, runId: __r, asOfMs: __t })))`, { __p: plan, __w: w, __r: runId, __t: asOf });
+  rec(w1, 'RUN-T1');
+  const w1b = env.call(`appTriWeights_(${CTX}, __p, __t)`, { __p: plan, __t: asOf });
+  Object.keys(prior).forEach((k) => assert.ok(near(w1b.weights[k], w1.weights[k], 1e-12), '同じ証拠なら同じ重み: ' + k));
+  rec(w1b, 'RUN-T2');
+  // 証拠が増えた（4 か月分）: 前の重み（w1）から ±0.10 だけ、さらに当たる手法へ
+  const more = [];
+  yms.slice(8).forEach((ym, i) => [['LINEAR', 0.2], ['RECENT', 0.1], ['ROBUST', 0.02], ['SIM', 0.15]].forEach(([m, e]) => more.push(Object.assign({}, rows[0],
+    { point_id: 'BTP-T-' + m + '-' + ym, target_ym: ym, horizon: 9 + i, method: m, p50: 1000000 * (1 + (i % 2 ? 1 : -1) * e) }))));
+  env.run(`appWithLock_(() => appInsertRows_('BACKTEST', __r))`, { __r: more });
+  const w2 = env.call(`appTriWeights_(${CTX}, __p, __t)`, { __p: plan, __t: asOf });
+  assert.equal(w2.points, 12);
+  assert.notEqual(w2.hash, w1.hash);
+  Object.keys(prior).forEach((k) => assert.ok(Math.abs(w2.weights[k] - w1.weights[k]) <= 0.1 + 1e-9, '前の重みから ±0.10: ' + k));
+  assert.ok(w2.weights.ROBUST > w1.weights.ROBUST, 'さらに当たる手法へ: ' + w1.weights.ROBUST + ' → ' + w2.weights.ROBUST);
+  assert.ok(Object.values(w2.weights).every((v) => v >= 0.05 - 1e-12));
+  // 予測の「今」より後に締まる月は数えない（年度の初め: 点 0 → 初めの重み）
+  const early = env.call(`appTriWeights_(${CTX}, __p, __t)`, { __p: plan, __t: new Date(FY, 3, 10).getTime() });
+  assert.deepEqual([early.basis, early.points], ['PRIOR', 0]);
 }
 
 console.log('app-v12-methods: ok');

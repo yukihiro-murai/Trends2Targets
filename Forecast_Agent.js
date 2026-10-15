@@ -14,7 +14,7 @@
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.4.0-dev';
+const VERSION = '2.5.0-dev';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -625,6 +625,15 @@ function runForecastFYCore_(fy, clientName) {
   const knownSpotExpectedByMonth = computeKnownSpotExpectedByMonth_(devProjectsByMonth);
   const devFixedByMonth = knownSpotExpectedByMonth.slice();
 
+  // 三角測量（2026-10-15 段 2。app/DESIGN_triangulation_bayes_JA.md の 1 章）: BASE の土台を、線形回帰・直近重視の回帰・季節の中央値・
+  // シミュレーションの中心（線形回帰 ×（1 + 残差の中央値））の重み付き平均にする。残差の分布はこの土台を中心に置き直す（土台 ÷（1 + 残差の中央値）を
+  // 線形回帰の代わりに使う。opsBaseAt_）。重みは新アプリがベイズで出したもの（無ければ初めの重み）。DLM が primary のときと CONFIG の
+  // TRIANGULATION_ENABLED = 0 のときは使わない（線形回帰のまま）。線形回帰（参考）の regTotal は変えない
+  const triangulation = (!dlmPrimaryActive && readTriangulationEnabled_())
+    ? buildTriangulationBase_(smoothY, model, residP50, readTriangulationWeights_(clientName))
+    : null;
+  if (triangulation) model.triBase = triangulation.base;
+
   // 背景SPOTの上限を作るため、BASE予測(P50)を先に計算
   const baseOnlyP50 = forecastByResidualQuantiles_(model, new Array(12).fill(0), { p10: residP10, p50: residP50, p90: residP90 }).p50;
   let baseForSpotCap = baseOnlyP50.slice();
@@ -799,6 +808,7 @@ function runForecastFYCore_(fy, clientName) {
     actualClosedByMonth,
     closedMonthMode,
     modelInfo: { residP10, residP50, residP90, slope: model.slope, intercept: model.intercept },
+    triangulation,
     baseSeries48: salesData.baseSeries48 || [],
     adjustedBaseSeries48: aggY_adj,
     seriesStart,
@@ -4425,6 +4435,129 @@ function median_(arr) {
   return (v[mid - 1] + v[mid]) / 2;
 }
 
+/** ====== 三角測量（2026-10-15 段 2。app/DESIGN_triangulation_bayes_JA.md の 1 章） ====== */
+const TRI_METHODS = ['LINEAR', 'RECENT', 'ROBUST', 'SIM'];
+const TRI_PRIOR_WEIGHTS = { LINEAR: 0.15, RECENT: 0.25, ROBUST: 0.40, SIM: 0.20 }; // 設計書 v7 の初めの重み
+const TRI_RECENT_HALFLIFE_MONTHS = 12; // 直近を重くした回帰の半減期
+const TRI_WINSOR = [0.05, 0.95];       // 季節の中央値の水準を出すときに切る上下の割合
+
+/** CONFIG の TRIANGULATION_ENABLED（既定 1。0 で線形回帰の土台のまま） */
+function readTriangulationEnabled_() {
+  const v = String(readConfigLabelMap_().TRIANGULATION_ENABLED || '').trim();
+  return v !== '0';
+}
+
+/** 重み（新アプリが渡す AppTriangulation.weights。無ければ初めの重み） */
+function readTriangulationWeights_(clientName) {
+  try {
+    if (typeof AppTriangulation !== 'undefined' && AppTriangulation && typeof AppTriangulation.weights === 'function') {
+      const w = AppTriangulation.weights(clientName);
+      if (w) return w;
+    }
+  } catch (e) { /* 初めの重みで続ける */ }
+  return Object.assign({}, TRI_PRIOR_WEIGHTS);
+}
+
+/** 重み付きの直線（x = 1..n）。{ slope, intercept }（重みの合計が 0 なら null） */
+function triWls_(y, w) {
+  let sw = 0, sx = 0, sy = 0;
+  y.forEach((v, i) => { sw += w[i]; sx += w[i] * (i + 1); sy += w[i] * v; });
+  if (!(sw > 0)) return null;
+  const mx = sx / sw, my = sy / sw;
+  let sxx = 0, sxy = 0;
+  y.forEach((v, i) => { const dx = i + 1 - mx; sxx += w[i] * dx * dx; sxy += w[i] * dx * (v - my); });
+  const slope = sxx > 0 ? sxy / sxx : 0;
+  return { slope, intercept: my - slope * mx };
+}
+
+function triMedian_(xs) {
+  const v = xs.slice().sort((a, b) => a - b);
+  if (!v.length) return null;
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+}
+
+function triQuantile_(xs, q) {
+  const v = xs.slice().sort((a, b) => a - b);
+  if (!v.length) return null;
+  const pos = (v.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return v[lo] + (v[hi] - v[lo]) * (pos - lo);
+}
+
+/** 季節の中央値の指数（12）: 年ごとの平均に対する比の、同じ月どうしの中央値（平均 1 にそろえる） */
+function triRobustSeason_(y) {
+  const years = Math.floor(y.length / 12);
+  const idx = [];
+  for (let m = 0; m < 12; m++) {
+    const rs = [];
+    for (let k = 0; k < years; k++) {
+      const seg = y.slice(k * 12, k * 12 + 12);
+      const mean = seg.reduce((a, b) => a + b, 0) / 12;
+      const v = y[k * 12 + m];
+      if (mean > 0 && isFinite(v) && v >= 0) rs.push(v / mean);
+    }
+    const md = triMedian_(rs);
+    idx.push(md === null ? 1 : md);
+  }
+  const avg = idx.reduce((a, b) => a + b, 0) / 12;
+  return avg > 0 ? idx.map(v => v / avg) : idx.map(() => 1);
+}
+
+/**
+ * 手法ごとの BASE の 12 か月（スポットは入れない）。y = 48 か月の BASE（未確定月を補ったもの）、model = 線形回帰の土台、q50 = 残差の中央値。
+ * LINEAR = 線形回帰の延長、RECENT = 新しい月ほど重く当てた直線 × 同じ季節、ROBUST = 季節の中央値 × 直近 12 か月の水準（上下 5% で切る）、
+ * SIM = シミュレーションの中心（線形回帰 ×（1 + q50））。出せない手法は null の並び
+ */
+function computeTriangulationParts_(y, model, q50) {
+  const ys = (y || []).map(v => Number(v) || 0);
+  const n = ys.length;
+  const S = (model && model.seasonalIndex) || new Array(12).fill(1);
+  const line = (a, b) => Array.from({ length: 12 }, (_, i) => Math.max(0, (a + b * (n + i + 1)) * S[i % 12]));
+  const out = {};
+  out.LINEAR = model && n ? line(Number(model.intercept) || 0, Number(model.slope) || 0) : new Array(12).fill(null);
+  const r = n ? triWls_(ys, ys.map((_, i) => Math.pow(0.5, (n - (i + 1)) / TRI_RECENT_HALFLIFE_MONTHS))) : null;
+  out.RECENT = r ? line(r.intercept, r.slope) : new Array(12).fill(null);
+  if (n >= 12) {
+    const R = triRobustSeason_(ys);
+    const lo = triQuantile_(ys, TRI_WINSOR[0]), hi = triQuantile_(ys, TRI_WINSOR[1]);
+    const level = ys.slice(n - 12).map(v => Math.min(hi, Math.max(lo, v))).reduce((a, b) => a + b, 0) / 12;
+    out.ROBUST = Array.from({ length: 12 }, (_, i) => Math.max(0, level * R[(n + i) % 12]));
+  } else {
+    out.ROBUST = new Array(12).fill(null);
+  }
+  const k = 1 + (isFinite(q50) ? Number(q50) : 0);
+  out.SIM = out.LINEAR.map(v => (v === null ? null : Math.max(0, v * k)));
+  return out;
+}
+
+/**
+ * 三角測量の土台。weights = { LINEAR, RECENT, ROBUST, SIM }（出せない手法は除いて割り直す）。
+ * 返り値 { weights（使った重み。合計 1）, center（12 か月の重み付き平均 = 予測の BASE の中心）, base（center ÷（1 + q50）= 残差を掛ける前の土台。opsBaseAt_）, parts }
+ */
+function buildTriangulationBase_(y, model, q50, weights) {
+  const parts = computeTriangulationParts_(y, model, q50);
+  const w = weights || TRI_PRIOR_WEIGHTS;
+  const k = 1 + (isFinite(q50) ? Number(q50) : 0);
+  const used = {};
+  TRI_METHODS.forEach(m => { used[m] = 0; });
+  const center = Array.from({ length: 12 }, (_, i) => {
+    let s = 0, ws = 0;
+    TRI_METHODS.forEach(m => { const v = parts[m][i]; const wi = Math.max(0, Number(w[m]) || 0); if (v !== null && isFinite(v) && wi > 0) { s += wi * v; ws += wi; } });
+    return ws > 0 ? s / ws : (parts.LINEAR[i] || 0);
+  });
+  let total = 0;
+  TRI_METHODS.forEach(m => { if (parts[m].some(v => v !== null)) { used[m] = Math.max(0, Number(w[m]) || 0); total += used[m]; } });
+  TRI_METHODS.forEach(m => { used[m] = total > 0 ? used[m] / total : 0; });
+  return { weights: used, center, base: center.map(c => (k > 0 ? c / k : c)), parts };
+}
+
+/** 予測の月 i（0〜11）の BASE の土台（三角測量の土台があればそれ、無ければ線形回帰の延長） */
+function opsBaseAt_(model, i) {
+  if (model && model.triBase && isFinite(model.triBase[i])) return Math.max(0, Number(model.triBase[i]));
+  const t = 48 + (i + 1);
+  return Math.max(0, (model.intercept + model.slope * t) * model.seasonalIndex[i % 12]);
+}
+
 /** ====== 予測計算（モデル） ====== */
 function fitOpsModelTrendSeason_(y) {
   const n = y.length;
@@ -4554,7 +4687,7 @@ function forecastByResidualQuantiles_(model, devFixedByMonth, q) {
   for (let i = 0; i < 12; i++) {
     const t = startT + (i + 1);
     const monthIdx = i % 12;
-    const base = Math.max(0, (model.intercept + model.slope * t) * model.seasonalIndex[monthIdx]);
+    const base = opsBaseAt_(model, i);
     p10.push(base * (1 + q.p10) + devFixedByMonth[i]);
     p50.push(base * (1 + q.p50) + devFixedByMonth[i]);
     p90.push(base * (1 + q.p90) + devFixedByMonth[i]);
@@ -4620,7 +4753,7 @@ function forecastMonteCarloMixed_(model, opt) {
     if (lp && isFinite(lp.muLog)) return Math.max(0, Math.exp(lp.muLog));
     const t = startT + (i + 1);
     const mIdx = i % 12;
-    return Math.max(0, (model.intercept + model.slope * t) * model.seasonalIndex[mIdx]);
+    return opsBaseAt_(model, i);
   });
 
   for (let s = 0; s < nSim; s++) {
@@ -4634,7 +4767,7 @@ function forecastMonteCarloMixed_(model, opt) {
         // NOTE(step-3b): primary時のBASEソース。3cでもBASE生成はDLM維持、上乗せの重み化のみ変更予定。
         quantOpsAfterResidual = Math.max(0, Math.exp(lp.muLog + lp.sd * dlmGaussianRandom_()));
       } else {
-        const base = Math.max(0, (model.intercept + model.slope * t) * model.seasonalIndex[mIdx]);
+        const base = opsBaseAt_(model, i);
         const e = residualPct[Math.floor(Math.random() * residualPct.length)] || 0;
         quantOpsAfterResidual = Math.max(0, base * (1 + e));
       }

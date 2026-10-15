@@ -3161,6 +3161,7 @@ function fcBasisTab(d, v){
     + fcKpi('最終の中心', a.p50, true, live ? fcLiveMidHead(a) + '（年度合計。予測と予算の画面と同じ）' : '入力・AI・スポット・補正を入れた最終の予測（中心・年度合計）', false, live ? { after: fcBasisMidTip(a, apart) } : null)
     + fcKpi('過去の売上からの差', diff, false, (apart ? '月ごとの中心の合計 − 過去の売上だけ（どちらも月ごとの中心の合計）' : '最終の中心 − 過去の売上だけ') + '。入力・AI・スポット案件・補正を合わせた差です（くわしくは下の「予測を押したもの」と「月ごとの内訳」）', true)
     + fcKpi('前回から', chg, false, isNum(chg) ? (apart ? '前回の予測からの変化（月ごとの中心の合計どうし）' : '前回の予測の中心からの変化') : '予測を 2 回以上実行すると出ます', true) + '</div>';
+  if (hasRun) html += fcTriCard(r.triangulation);
   // 予測を押したもの（押した月の平均）
   var agg = {}, order = [];
   ms.forEach(function(m){ (m.sources || []).forEach(function(s){ var k = s.type || s.label; if (!agg[k]) { agg[k] = { label: fcSrcLabel(s), sum: 0, n: 0 }; order.push(k); } if (isNum(s.step)) { agg[k].sum += s.step; agg[k].n++; } }); });
@@ -3249,6 +3250,22 @@ function fcBasisTab(d, v){
       + ((r.between || []).length ? '<div class="mt12">' + fcOpsTable(r.between) + '</div>' : '') + '</div>';
   }
   return html;
+}
+
+/** 予測の土台（三角測量。段 2。サーバーの triangulation）: 4 つの手法の重みと 12 か月の合計、混ぜた土台。記録が無ければ出さない */
+var FC_TRI = [['LINEAR', '線形回帰', '過去 48 か月に直線を当てて季節の波を掛けたもの'], ['RECENT', '直近重視の回帰', '同じ直線を、新しい月ほど重く当てたもの'],
+  ['ROBUST', '季節の中央値', '年ごとの同じ月の比の中央値で季節の形を出し、直近 12 か月の水準に掛けたもの'], ['SIM', 'シミュレーション', '線形回帰に、過去の外れ方の真ん中を掛けたもの']];
+function fcTriCard(t){
+  if (!t || !t.weights) return '';
+  var how = t.basis === 'POSTERIOR' ? '締まった ' + (t.points || 0) + ' か月分（' + (t.makers || 0) + ' 社。このメーカー ' + (t.own || 0) + ' か月）の当たり方から、ベイズで決めた重みです。当たった手法ほど重くなります（1 回で動くのは ±0.10 まで・どの手法も 0.05 以上）'
+    : 'まだ実績の締まった月が少ないので、初めの重み（線形回帰 0.15・直近重視 0.25・季節の中央値 0.40・シミュレーション 0.20）です。月が締まるたびに、当たった手法ほど重くなります';
+  var s = t.sums || {};
+  var rows = FC_TRI.map(function(x){ var w = t.weights[x[0]];
+    return '<tr><td data-tip="' + esc(x[2]) + '">' + esc(x[1]) + '</td><td class="num">' + (isNum(w) ? (w * 100).toFixed(0) + '%' : '-') + '</td><td class="num">' + yen(s[x[0]]) + '</td></tr>'; }).join('')
+    + '<tr class="total"><td data-tip="4 つの手法を重みで混ぜたもの（予測の土台。この上に確定スポット・人の入力・AI・補正が乗ります）">三角測量</td><td class="num">100%</td><td class="num">' + yen(s.TRI) + '</td></tr>';
+  return '<div class="card"><div class="card-head"><h2>予測の土台' + tip('過去の売上だけの予測は、4 つの手法を重みで混ぜたものです（三角測量）。' + how + '。金額は背景のスポットを含む 12 か月の合計です') + '</h2></div>'
+    + '<div class="tblwrap"><table class="tbl"><colgroup><col><col style="width:112px"><col style="width:160px"></colgroup><thead><tr><th>手法</th><th class="num" data-tip="' + esc(how) + '">重み</th><th class="num" data-tip="背景のスポットを含む 12 か月の合計">12 か月</th></tr></thead><tbody>'
+    + rows + '</tbody></table></div></div>';
 }
 
 /**

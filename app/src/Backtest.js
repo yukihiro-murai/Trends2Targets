@@ -1,7 +1,7 @@
 /**
  * Backtest.js — 物差し（表の版 10 の 3-7・決定 9 (b)。2026-10-08 村井さん承認「版10はおすすめで」）。
  * 過去の区切り（年度の初めの 4 月）に戻って予測し直し、単純な方法・本番の予測と並べて、締まった月の実績で採点する点を BACKTEST に足す。
- * 1 回 = 12 か月 × 10 方法 = 120 行（追記だけ。予測の数字・OUTPUT・ENG_*・FORECAST_*・PLAN_VERSIONS は変えない）。記録は計算に使わない。
+ * 1 回 = 12 か月 × 11 方法 = 132 行（追記だけ。予測の数字・OUTPUT・ENG_*・FORECAST_*・PLAN_VERSIONS は変えない）。記録は計算に使わない。
  * 比べる時点は 2 つ（2026-10-13 村井さん承認。時点の違う予測を比べると、情報の差だけで外れの差が出る）:
  *   区切りの「今」（4/1）に 1〜12 か月先を予測したもの（horizon = 1〜12）
  *     STAT_ONLY … 旧来の A-9（runForecastFYCore_）の統計の部分だけを、同じ順で呼ぶ（人の入力・AI・補正・既知のスポットを入れない）。
@@ -33,12 +33,13 @@
  * 物差しの版（数え方を変えたら上げて、新しい行を足す）。BT-2（2026-10-13）: 区切りの時点で締まった月だけを使う・本番と同じ時点の単純な方法
  * （LAST_YEAR_PACE）を足す・本番の horizon を本当の何か月先にする。前の版の回はまとめに入れない（行は消さない）
  */
-const APP_BACKTEST_CALC_VERSION = 'BT-2';
+const APP_BACKTEST_CALC_VERSION = 'BT-3';   // BT-3（2026-10-15 段 2）: 統計だけを三角測量の土台に（4/1 には証拠が無いので初めの重み）・SIM を足した
 /** 組み立てる計算用のシート（統計の部分が読むものだけ） */
 const APP_BACKTEST_SHEETS = ['CONFIG', 'SALES_INPUT', 'SALES_MONTHLY'];
 /** 方法（記録の順。画面は比べる組で並べ直す）。単純な方法は p50 だけ */
-const APP_BACKTEST_METHODS = ['STAT_ONLY', 'LIVE', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL', 'LAST_YEAR_PACE', 'LINEAR', 'RECENT', 'ROBUST', 'TRI'];
-// 後ろの 4 つは、素の回帰との比べ（Methods.js。2026-10-15 村井さん承認）の手法を、同じ 4/1 の統計の部分から出したもの（乱数は使わない。前からの 6 つの数字は変わらない）。
+const APP_BACKTEST_METHODS = ['STAT_ONLY', 'LIVE', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL', 'LAST_YEAR_PACE', 'LINEAR', 'RECENT', 'ROBUST', 'SIM', 'TRI'];
+// 後ろの 5 つは、素の回帰との比べ（Methods.js。2026-10-15 村井さん承認）の手法を、同じ 4/1 の統計の部分から出したもの（乱数は使わない）。
+// BT-3 から統計だけ（STAT_ONLY）は三角測量の土台（本番の A-9 と同じ）。SIM はシミュレーションの中心（線形回帰 ×（1 + 残差の中央値）+ 背景のスポット）。
 // 物差しのカードには出さず、分析の「素の回帰との比べ」に出す
 const APP_BACKTEST_SIMPLE = ['LAST_YEAR', 'TWO_YEAR', 'SEASONAL'];   // 区切りの「今」（4/1）の単純な方法（統計だけと比べる。外れ幅のいちばん小さいもの）
 const APP_BACKTEST_SIMPLE_LIVE = 'LAST_YEAR_PACE';                    // 本番と同じ時点の単純な方法（本番と比べる）
@@ -174,6 +175,9 @@ function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync) {
   const dlmPrimary = dlmModeRaw === 'primary' && !!(dlm && dlm.ready);
   const spotCapBasis = eng.readDlmPrimarySpotCapBasis_();
   const known = new Array(12).fill(0);   // 既知のスポット（人の入力）は入れない
+  // 三角測量（段 2。2026-10-15）: 本番の A-9 と同じ決まりで土台を作る（重みは計算に渡された AppTriangulation。物差しは渡さないので初めの重み）
+  const tri = (!dlmPrimary && eng.readTriangulationEnabled_()) ? eng.buildTriangulationBase_(smoothY, model, q.p50, eng.readTriangulationWeights_(client)) : null;
+  if (tri) model.triBase = tri.base;
   const baseOnlyP50 = eng.forecastByResidualQuantiles_(model, new Array(12).fill(0), q).p50;
   let baseForSpotCap = baseOnlyP50.slice();
   if (spotCapBasis === 'dlm' && dlmPrimary && dlm && dlm.ready) {
@@ -205,7 +209,8 @@ function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync) {
     spotBackgroundExpectedByMonth: spotBg, knownSpotExpectedByMonth: known, tuning: eng.readModelTuningFromConfig_() });
   // 手法の材料（Methods.js。乱数を使った後に読むだけ）: 土台の売上・土台の式・背景のスポット・予測の月の印
   return { p10: mixed.p10.slice(), p50: mixed.p50.slice(), p90: mixed.p90.slice(), seasonal: seasonal.totalByMonth.slice(), total48: rawTotal48,
-    y: aggYAdj.slice(), model: { slope: model.slope, intercept: model.intercept, seasonalIndex: model.seasonalIndex.slice() }, spotBg: spotBg.slice(), sourceByMonth: sourceByMonth.slice() };
+    y: aggYAdj.slice(), model: { slope: model.slope, intercept: model.intercept, seasonalIndex: model.seasonalIndex.slice() }, spotBg: spotBg.slice(), sourceByMonth: sourceByMonth.slice(),
+    parts: eng.computeTriangulationParts_(smoothY, model, q.p50), triWeights: tri ? tri.weights : null };
 }
 
 // ---- 実績・本番の予測・本物の月 ----
@@ -273,7 +278,7 @@ function appBacktestRealMonths_(total48, startYm, salesDay) {
 }
 
 /**
- * 物差し 1 回の行（12 か月 × 10 方法）。id と時刻はここで決める（控えの書き直しで同じ行になるように）。
+ * 物差し 1 回の行（12 か月 × 11 方法）。id と時刻はここで決める（控えの書き直しで同じ行になるように）。
  * horizon = 予測した時点から何か月先か: 区切りの「今」の方法は i + 1（4 月 = 1）、本番と同じ時点の単純な方法は、その月の本番の回の「今」の月から
  * （3/20 の回の 4 月 = 1）。本番の回が無い月は 0（予測が無い。数えない）
  */
@@ -307,10 +312,10 @@ function appBacktestRows_(ctx, plan, fy, btId, stat) {
     }
     return base * (b > 0 ? a / b : 1);
   };
-  const meth = appMethodsFromStat_(stat, Array.from({ length: 12 }, (_, i) => t(36 + i)));   // 線形回帰・直近重視・ロバスト季節・三角測量（試し）
+  const meth = appMethodsFromStat_(stat, Array.from({ length: 12 }, (_, i) => t(36 + i)), stat.triWeights);   // 線形回帰・直近重視・季節の中央値・シミュレーションの中心・三角測量
   const value = (m, i, ym) => {
     if (m === 'STAT_ONLY') return [stat.p10[i], stat.p50[i], stat.p90[i]];
-    if (meth[m] && m !== 'LAST_YEAR' && m !== 'SIM') return [null, meth[m][i], null];
+    if (meth[m] && m !== 'LAST_YEAR') return [null, meth[m][i], null];
     if (m === 'LIVE') return live[ym] ? [live[ym].p10, live[ym].p50, live[ym].p90] : [null, null, null];
     if (m === 'LAST_YEAR') return [null, t(36 + i), null];
     if (m === 'TWO_YEAR') return [null, t(24 + i) === null || t(36 + i) === null ? null : (t(24 + i) + t(36 + i)) / 2, null];
@@ -358,7 +363,7 @@ function appBacktestBuild_(ctx, p, job) {
 }
 
 /**
- * 計算と保存（MEASURE.BACKTEST_CALC）: 統計だけを動かし、10 の方法の 120 行を、控えの書き方 append で BACKTEST に足す。
+ * 計算と保存（MEASURE.BACKTEST_CALC）: 統計だけを動かし、11 の方法の 132 行を、控えの書き方 append で BACKTEST に足す。
  * 統計だけは区切りの「今」に締まっていた月の売上だけで動かす（appBacktestClosed_・appBacktestStatAsOf_）
  */
 function appBacktestCalc_(ctx, p) {

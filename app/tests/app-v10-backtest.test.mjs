@@ -12,7 +12,7 @@
  *   4. 締まっていない月は実績を空にし、数えない
  *   5. 48 か月がそろわない区切りは数えない（前の年度の区切り・取引が途中から始まった）。取引が始まる前の 0 円は本物の月と数えない
  *   6. 続きの処理に分けても結果が同じ。人の入力を変えても統計だけの種と数字は同じ
- *   7. 予測の数字・OUTPUT・計算用の表は変わらない（BACKTEST に 120 行を足すだけ）
+ *   7. 予測の数字・OUTPUT・計算用の表は変わらない（BACKTEST に 132 行を足すだけ）
  *   8. 所有者だけ（apiOwnerTask の runBacktest）。締めた年度の計画は断る。区切りの年度を確かめる
  *   9. 分析のまとめ: 方法ごとの外れ幅・偏り・帯に入った割合と 95% の幅（メーカーごとに平均してから、メーカーの数の t 分布で。1 社だけなら幅なし）。
  *      点が 30 より少ない・1 社だけなら比べない。統計だけは 4/1 の単純な方法と、本番は同じ時点の単純な方法と比べる
@@ -141,10 +141,10 @@ let first;
   first = backtest(planA);
   assert.equal(first.st.status, 'DONE', first.st.error);
   const r = first.st.result;
-  assert.deepEqual([r.rows, r.written, r.skipped, r.cutoffYm, r.realMonths], [120, 120, false, CUT, 48]);
-  assert.equal(first.rows.length, 120, '12 か月 × 10 方法（後ろの 4 つは素の回帰との比べの手法。Methods.js）');
-  assert.deepEqual([...new Set(first.rows.map((x) => x.method))].sort(), ['LAST_YEAR', 'LAST_YEAR_PACE', 'LINEAR', 'LIVE', 'RECENT', 'ROBUST', 'SEASONAL', 'STAT_ONLY', 'TRI', 'TWO_YEAR']);
-  assert.ok(first.rows.every((x) => x.plan_id === planA && x.cutoff_ym === CUT && x.calc_version === 'BT-2' && x.computed_by === OWNER && /^[a-f0-9]{64}$/.test(x.engine_sha256)));
+  assert.deepEqual([r.rows, r.written, r.skipped, r.cutoffYm, r.realMonths], [132, 132, false, CUT, 48]);
+  assert.equal(first.rows.length, 132, '12 か月 × 11 方法（後ろの 5 つは素の回帰との比べの手法。Methods.js）');
+  assert.deepEqual([...new Set(first.rows.map((x) => x.method))].sort(), ['LAST_YEAR', 'LAST_YEAR_PACE', 'LINEAR', 'LIVE', 'RECENT', 'ROBUST', 'SEASONAL', 'SIM', 'STAT_ONLY', 'TRI', 'TWO_YEAR']);
+  assert.ok(first.rows.every((x) => x.plan_id === planA && x.cutoff_ym === CUT && x.calc_version === 'BT-3' && x.computed_by === OWNER && /^[a-f0-9]{64}$/.test(x.engine_sha256)));
   assert.ok(first.rows.every((x) => /^BTP-[0-9A-F]{24}$/.test(x.point_id)), '点の印は回・方法・月から決まる');
   assert.deepEqual(of(first.rows, 'STAT_ONLY').map((x) => x.target_ym), fyYms(FY));
   assert.deepEqual(of(first.rows, 'STAT_ONLY').map((x) => x.horizon), Array.from({ length: 12 }, (_, i) => i + 1));
@@ -322,7 +322,7 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   assert.deepEqual(strip(third.rows), strip(mid.rows), '分けても分けなくても同じ点（同じ予測の回の後）');
   const after = keep();
   for (const name of Object.keys(before)) assert.equal(after[name], before[name], name + ' は変わらない（予測の数字・OUTPUT・計算用の表）');
-  assert.equal(bt().length, n0 + 120, 'BACKTEST に 120 行を足しただけ');
+  assert.equal(bt().length, n0 + 132, 'BACKTEST に 132 行を足しただけ');
   assert.equal(env.call('appLogTruncatedCells_("BACKTEST")'), 0, '切り詰めたセルは無い');
 }
 
@@ -337,7 +337,7 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   for (let i = 0; i < 10; i++) env.fireTriggers('triggerRunJob');
   env.props.OWNER_TASK = JSON.stringify({ action: 'jobStatus', jobId: full.result.jobId });
   const done = env.call('apiOwnerTask()').result;
-  assert.deepEqual([done.status, done.kind, done.result.rows, done.result.planId], ['DONE', 'MEASURE.BACKTEST_CALC', 120, planB], '組み立て → 計算と保存（続きをたどった結果）');
+  assert.deepEqual([done.status, done.kind, done.result.rows, done.result.planId], ['DONE', 'MEASURE.BACKTEST_CALC', 132, planB], '組み立て → 計算と保存（続きをたどった結果）');
   // 区切りの年度
   env.props.OWNER_TASK = JSON.stringify({ action: 'runBacktest', planId: planA, cutoffFy: '20x5' });
   assert.throws(() => env.call('apiOwnerTask()'), /cutoffFy（区切りの年度）は 4 桁の数/);

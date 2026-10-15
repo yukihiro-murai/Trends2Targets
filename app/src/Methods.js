@@ -1,28 +1,27 @@
 /**
- * Methods.js — 手法ごとの予測と、素の回帰との比べ（段 1。app/DESIGN_triangulation_bayes_JA.md の 1・2 章。2026-10-15 村井さん承認「全部おすすめどおり」）。
- * 予測を実行するたびに、同じ回・同じ時点の次の値を月ごとに FORECAST_METHODS に残す（追記だけ。記録は計算に使わない。予測の数字・種は変えない）:
- *   手法（統計だけ。人の入力・AI・補正・既知のスポットは入れない）
+ * Methods.js — 手法ごとの予測・三角測量の重み・素の回帰との比べ（app/DESIGN_triangulation_bayes_JA.md の 1・2 章。2026-10-15 村井さん承認「全部おすすめどおり」）。
+ * 段 1（v0.35.0）: 予測を実行するたびに、同じ回・同じ時点の次の値を月ごとに FORECAST_METHODS に残す（追記だけ。記録は計算に使わない）:
+ *   手法（統計だけ。人の入力・AI・補正・既知のスポットは入れない。背景のスポットは足す）
  *     LAST_YEAR … 前年同月の売上（ベース + スポット。その時点で締まっていた月だけ）。比べの物差し（混ぜない）
- *     LINEAR    … 線形回帰: 旧来の土台の式（直線の傾き × 季節の波。fitOpsModelTrendSeason_）を延ばしたもの + 背景のスポット（旧来の「線形回帰（参考）」と同じ）
- *     RECENT    … 直近を重くした回帰: 同じ直線を、新しい月ほど重く当てたもの（半減期 12 か月）× 同じ季節の波 + 背景のスポット
- *     ROBUST    … ロバスト季節: 年ごとの平均に対する比の中央値の季節指数 × 直近 12 か月の水準（上下 5% で切る）+ 背景のスポット
- *     SIM       … シミュレーション: 旧来の統計の部分だけの混合シミュレーションの真ん中（物差しの STAT_ONLY と同じ計算）
- *     TRI       … 三角測量（試し）: LINEAR・ROBUST・RECENT・SIM を設計書 v7 の初めの重み（0.15・0.40・0.25・0.20）で混ぜたもの。段 2 で予測の土台にする前の記録
+ *     LINEAR    … 線形回帰: 旧来の土台の式（直線の傾き × 季節の波）を延ばしたもの（旧来の「線形回帰（参考）」と同じ）
+ *     RECENT    … 直近を重くした回帰: 同じ直線を、新しい月ほど重く当てたもの（半減期 12 か月）× 同じ季節の波
+ *     ROBUST    … 季節の中央値: 年ごとの平均に対する比の中央値の季節指数 × 直近 12 か月の水準（上下 5% で切る）
+ *     SIM       … シミュレーションの中心: 線形回帰 ×（1 + 過去の外れ方の中央値）
+ *     TRI       … 三角測量: 上の 4 つを、その回に使った重みで混ぜたもの（段 2 から予測の土台）
+ *   手法の式は旧来の計算の computeTriangulationParts_（Forecast_Agent.js）の 1 か所だけにある（ここでは背景のスポットを足して重みで混ぜるだけ）。
  *   段（その回の本番の予測の層ごとの効き LAYER_EFFECTS から）
- *     STAT（統計の土台。旧来の「過去売上のみ」）→ PLUS_SPOT（+ 確定スポット）→ PLUS_HUMAN（+ 人）→ PLUS_AI（+ AI）→ FINAL（+ 補正。本番の真ん中）
+ *     STAT（統計の土台。段 2 から三角測量）→ PLUS_SPOT（+ 確定スポット）→ PLUS_HUMAN（+ 人）→ PLUS_AI（+ AI）→ FINAL（+ 補正。本番の真ん中）
+ * 段 2（v0.36.0）: 三角測量の重みをベイズで出し（appTriWeights_）、旧来の計算に渡して予測の土台にする。使った重みは METHOD_WEIGHTS に残す。
+ *   事前 = 設計書 v7 の初めの重み（0.15・0.25・0.40・0.20）、尤度 = 締まった月の外れ（実績 ÷ 予測 の対数）を正規分布とみなしたもの。
+ *   1 年分（12 か月。古い月ほど軽く、半減期 12 か月）の当たり方を 1 回の観測として数える（同じメーカーの月どうしはつながっているので、
+ *   月を独立に数えると重みが極端になる）。ほかのメーカーの事後を、そのメーカーの事前にする（階層の縮め。データの少ないメーカーは全体に寄る）。
+ *   1 つの手法の重みは 0.05 より下げず、証拠が増えた 1 回で動けるのは ±0.10 まで（v7）。締まった月が 3 つより少なければ初めの重みのまま。
  * 比べ（分析の「素の回帰との比べ」。appMethodsCard_）: 締まった月ごとに、その月が始まる前の最後の回の値と実績で、外れ幅・偏りを出し、
  * 線形回帰との差・1 つ前の段との差を、物差しと同じ数え方（メーカーごとに平均してから 95% の幅。appBacktestClusterRatio_）で比べる。
- * 過去の分は物差し（Backtest.js）に同じ手法を足して、年度の初め（4/1）に戻って予測し直したもので見る。
  */
 
-/** 記録の数え方の版（数え方を変えたら上げる。前の版の行はまとめに入れない） */
-const APP_METHODS_CALC_VERSION = 'M-1';
-/** 直近を重くした回帰の半減期（か月） */
-const APP_METHODS_RECENT_HALFLIFE = 12;
-/** 三角測量（試し）の重み（設計書 v7 の初めの重み。段 2 でベイズの重みに置き換える） */
-const APP_METHODS_TRI_PRIOR = { LINEAR: 0.15, ROBUST: 0.40, RECENT: 0.25, SIM: 0.20 };
-/** ロバスト季節の水準を出すときに切る上下の割合 */
-const APP_METHODS_WINSOR = [0.05, 0.95];
+/** 記録の数え方の版（数え方を変えたら上げる。前の版の行はまとめに入れない）。M-2（段 2）: SIM をシミュレーションの中心に、TRI をその回の重みに */
+const APP_METHODS_CALC_VERSION = 'M-2';
 /** 手法（記録の列の順） */
 const APP_METHODS_KEYS = ['LAST_YEAR', 'LINEAR', 'RECENT', 'ROBUST', 'SIM', 'TRI'];
 /** 段（記録の列の順） */
@@ -31,111 +30,245 @@ const APP_METHODS_STAGES = ['STAT', 'PLUS_SPOT', 'PLUS_HUMAN', 'PLUS_AI', 'FINAL
 const APP_METHODS_COLUMN = { LAST_YEAR: 'last_year', LINEAR: 'linear', RECENT: 'recent', ROBUST: 'robust', SIM: 'sim', TRI: 'tri',
   STAT: 'stat', PLUS_SPOT: 'plus_spot', PLUS_HUMAN: 'plus_human', PLUS_AI: 'plus_ai', FINAL: 'final' };
 
-// ---- 手法の計算（乱数は使わない）----
+/** 三角測量で混ぜる手法と初めの重み（旧来の計算の TRI_PRIOR_WEIGHTS と同じ。app/tests が照らす） */
+const APP_TRI_METHODS = ['LINEAR', 'RECENT', 'ROBUST', 'SIM'];
+const APP_TRI_PRIOR = { LINEAR: 0.15, RECENT: 0.25, ROBUST: 0.40, SIM: 0.20 };
+/** 重みの数え方の版 */
+const APP_TRI_CALC_VERSION = 'W-1';
+const APP_TRI_FLOOR = 0.05;          // 1 つの手法の重みの下限（v7）
+const APP_TRI_STEP = 0.10;           // 証拠が増えた 1 回で動ける幅（v7）
+const APP_TRI_MIN_POINTS = 3;        // これより締まった月の点が少なければ初めの重み（v7）
+const APP_TRI_HALFLIFE = 12;         // 古い月ほど軽く（か月）
+const APP_TRI_YEAR = 12;             // 1 年分の当たり方を 1 回の観測として数える
+const APP_TRI_SIGMA2_MIN = 0.0025;   // 外れ（対数）の分散の下限（5% の二乗）
+
+// ---- 手法の値（乱数は使わない）----
 
 /** 数（数でなければ null） */
 function appMethodsNum_(v) {
   return typeof v === 'number' && isFinite(v) ? v : null;
 }
 
-/** 重み付きの直線（x = 1..n）。返り値 { slope, intercept }。重みの合計が 0 なら null */
-function appMethodsWls_(y, w) {
-  let sw = 0, sx = 0, sy = 0;
-  y.forEach((v, i) => { sw += w[i]; sx += w[i] * (i + 1); sy += w[i] * v; });
-  if (!(sw > 0)) return null;
-  const mx = sx / sw, my = sy / sw;
-  let sxx = 0, sxy = 0;
-  y.forEach((v, i) => { const dx = i + 1 - mx; sxx += w[i] * dx * dx; sxy += w[i] * dx * (v - my); });
-  const slope = sxx > 0 ? sxy / sxx : 0;
-  return { slope: slope, intercept: my - slope * mx };
-}
-
-/** 中央値（空なら null） */
-function appMethodsMedian_(xs) {
-  const v = xs.slice().sort((a, b) => a - b);
-  if (!v.length) return null;
-  const mid = Math.floor(v.length / 2);
-  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
-}
-
-/** 分位点（線形補間。空なら null） */
-function appMethodsQuantile_(xs, q) {
-  const v = xs.slice().sort((a, b) => a - b);
-  if (!v.length) return null;
-  const pos = (v.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
-  return v[lo] + (v[hi] - v[lo]) * (pos - lo);
-}
-
 /**
- * ロバスト季節の指数（12）: 年（12 か月ずつ）ごとの平均に対する比の、同じ月どうしの中央値。平均が 1 になるようにそろえる。
- * 比が取れない月は 1
- */
-function appMethodsRobustSeason_(y) {
-  const years = Math.floor(y.length / 12);
-  const idx = [];
-  for (let m = 0; m < 12; m++) {
-    const rs = [];
-    for (let k = 0; k < years; k++) {
-      const seg = y.slice(k * 12, k * 12 + 12);
-      const mean = seg.reduce((a, b) => a + b, 0) / 12;
-      const v = y[k * 12 + m];
-      if (mean > 0 && isFinite(v) && v >= 0) rs.push(v / mean);
-    }
-    const md = appMethodsMedian_(rs);
-    idx.push(md === null ? 1 : md);
-  }
-  const avg = idx.reduce((a, b) => a + b, 0) / 12;
-  return avg > 0 ? idx.map(v => v / avg) : idx.map(() => 1);
-}
-
-/**
- * 手法ごとの 12 か月（年度の 4 月から）。o = { y（48 か月の土台の売上。旧来の締まっていない月を補った並び）, model（旧来の土台の式
- * { slope, intercept, seasonalIndex }）, spotBg（12 か月の背景のスポット）, sim（12 か月のシミュレーションの真ん中）, lastYear（12 か月の前年同月。分からない月は null）}。
- * 返り値 { LAST_YEAR, LINEAR, RECENT, ROBUST, SIM, TRI }（それぞれ 12 か月。出せない月は null）
+ * 手法ごとの 12 か月（年度の 4 月から）。o = { parts（旧来の computeTriangulationParts_ の BASE の 12 か月: LINEAR・RECENT・ROBUST・SIM）,
+ * spotBg（12 か月の背景のスポット）, lastYear（12 か月の前年同月。分からない月は null）, weights（三角測量の重み。省けば初めの重み）}。
+ * 返り値 { LAST_YEAR, LINEAR, RECENT, ROBUST, SIM, TRI }（それぞれ 12 か月。出せない月は null）。
+ * TRI の混ぜ方は旧来の buildTriangulationBase_ と同じ（出せない手法は除いて割り直す）+ 背景のスポット
  */
 function appMethodsCompute_(o) {
-  const y = (o.y || []).map(v => Number(v) || 0);
-  const n = y.length;
-  const S = (o.model && o.model.seasonalIndex) || new Array(12).fill(1);
+  const parts = o.parts || {};
   const spot = i => Number((o.spotBg || [])[i] || 0);
-  const out = {};
-  out.LAST_YEAR = Array.from({ length: 12 }, (_, i) => appMethodsNum_((o.lastYear || [])[i]));
-  out.SIM = Array.from({ length: 12 }, (_, i) => appMethodsNum_((o.sim || [])[i]));
-  const line = (a, b) => Array.from({ length: 12 }, (_, i) => Math.max(0, (a + b * (n + i + 1)) * S[i % 12]) + spot(i));
-  out.LINEAR = o.model && n ? line(Number(o.model.intercept) || 0, Number(o.model.slope) || 0) : new Array(12).fill(null);
-  const w = y.map((_, i) => Math.pow(0.5, (n - (i + 1)) / APP_METHODS_RECENT_HALFLIFE));
-  const r = n ? appMethodsWls_(y, w) : null;
-  out.RECENT = r ? line(r.intercept, r.slope) : new Array(12).fill(null);
-  if (n >= 12) {
-    const R = appMethodsRobustSeason_(y);
-    const lo = appMethodsQuantile_(y, APP_METHODS_WINSOR[0]), hi = appMethodsQuantile_(y, APP_METHODS_WINSOR[1]);
-    const last = y.slice(n - 12).map(v => Math.min(hi, Math.max(lo, v)));
-    const level = last.reduce((a, b) => a + b, 0) / 12;
-    out.ROBUST = Array.from({ length: 12 }, (_, i) => Math.max(0, level * R[(n + i) % 12]) + spot(i));
-  } else {
-    out.ROBUST = new Array(12).fill(null);
-  }
+  const w = o.weights || APP_TRI_PRIOR;
+  const out = { LAST_YEAR: Array.from({ length: 12 }, (_, i) => appMethodsNum_((o.lastYear || [])[i])) };
+  APP_TRI_METHODS.forEach(k => { out[k] = Array.from({ length: 12 }, (_, i) => { const v = appMethodsNum_((parts[k] || [])[i]); return v === null ? null : v + spot(i); }); });
   out.TRI = Array.from({ length: 12 }, (_, i) => {
     let s = 0, ws = 0;
-    Object.keys(APP_METHODS_TRI_PRIOR).forEach(k => { const v = out[k][i]; if (v !== null) { s += APP_METHODS_TRI_PRIOR[k] * v; ws += APP_METHODS_TRI_PRIOR[k]; } });
-    return ws > 0 ? s / ws : null;
+    APP_TRI_METHODS.forEach(k => { const v = appMethodsNum_((parts[k] || [])[i]); const wi = Math.max(0, Number(w[k]) || 0); if (v !== null && wi > 0) { s += wi * v; ws += wi; } });
+    return ws > 0 ? s / ws + spot(i) : null;
   });
   return out;
 }
 
-/** 物差しの統計だけの結果（appBacktestStatRun_）から手法を出す。lastYear = 12 か月の前年同月（分からない月は null） */
-function appMethodsFromStat_(stat, lastYear) {
-  return appMethodsCompute_({ y: stat.y, model: stat.model, spotBg: stat.spotBg, sim: stat.p50, lastYear: lastYear });
+/** 物差しの統計だけの結果（appBacktestStatRun_）から手法を出す。lastYear = 12 か月の前年同月（分からない月は null）、weights = 三角測量の重み */
+function appMethodsFromStat_(stat, lastYear, weights) {
+  return appMethodsCompute_({ parts: stat.parts, spotBg: stat.spotBg, lastYear: lastYear, weights: weights });
+}
+
+// ---- 三角測量の重み（ベイズ）----
+
+/**
+ * 重み t を、合計 1 で、手法ごとに lo〜hi の中に収める（t + λ を lo〜hi で切った合計が 1 になる λ を二分探索で探す。Σlo ≤ 1 ≤ Σhi のとき解がある）
+ */
+function appTriProject_(t, lo, hi) {
+  const f = lam => APP_TRI_METHODS.reduce((a, k) => a + Math.min(hi[k], Math.max(lo[k], t[k] + lam)), 0);
+  let a = -2, b = 2;
+  for (let it = 0; it < 80; it++) { const m = (a + b) / 2; if (f(m) < 1) a = m; else b = m; }
+  const lam = (a + b) / 2;
+  const out = {};
+  APP_TRI_METHODS.forEach(k => { out[k] = Math.min(hi[k], Math.max(lo[k], t[k] + lam)); });
+  return out;
+}
+
+/** 合計 1 にそろえた重み（負は 0。全部 0 なら等分） */
+function appTriNormalize_(w) {
+  const sum = APP_TRI_METHODS.reduce((a, k) => a + Math.max(0, Number(w[k]) || 0), 0);
+  const out = {};
+  APP_TRI_METHODS.forEach(k => { out[k] = sum > 0 ? Math.max(0, Number(w[k]) || 0) / sum : 1 / APP_TRI_METHODS.length; });
+  return out;
+}
+
+/** 重みを合計 1・どの手法も下限 APP_TRI_FLOOR 以上にする */
+function appTriFloor_(w) {
+  const lo = {}, hi = {};
+  APP_TRI_METHODS.forEach(k => { lo[k] = APP_TRI_FLOOR; hi[k] = 1; });
+  return appTriProject_(appTriNormalize_(w), lo, hi);
+}
+
+/** 前の重み prev から ±APP_TRI_STEP の中・下限 APP_TRI_FLOOR 以上・合計 1 に収める */
+function appTriStep_(w, prev) {
+  const p = appTriNormalize_(prev), lo = {}, hi = {};
+  APP_TRI_METHODS.forEach(k => { lo[k] = Math.max(APP_TRI_FLOOR, p[k] - APP_TRI_STEP); hi[k] = Math.min(1, p[k] + APP_TRI_STEP); });
+  // 前の重みが下限より小さかった手法でも解があるように（Σlo ≤ 1）
+  const sumLo = APP_TRI_METHODS.reduce((a, k) => a + lo[k], 0);
+  if (sumLo > 1) APP_TRI_METHODS.forEach(k => { lo[k] = APP_TRI_FLOOR; });
+  return appTriProject_(appTriNormalize_(w), lo, hi);
+}
+
+/** 対数の重みを、合計 1 の重みに（大きい値で割ってから指数） */
+function appTriSoftmax_(lp) {
+  const mx = Math.max.apply(null, APP_TRI_METHODS.map(k => lp[k]));
+  const e = {};
+  let sum = 0;
+  APP_TRI_METHODS.forEach(k => { e[k] = Math.exp(lp[k] - mx); sum += e[k]; });
+  APP_TRI_METHODS.forEach(k => { e[k] /= sum; });
+  return e;
+}
+
+/** 'yyyy/MM' どうしの月の差（b − a） */
+function appTriMonths_(a, b) {
+  const n = ym => { const m = /^(\d{4})\/(\d{2})$/.exec(String(ym || '')); return m ? Number(m[1]) * 12 + Number(m[2]) - 1 : null; };
+  const x = n(a), y = n(b);
+  return x === null || y === null ? null : y - x;
+}
+
+/**
+ * 事後の重み。pts = [{ maker, ym, v: { LINEAR, RECENT, ROBUST, SIM }, actual }]（4 つそろった点だけ数える）、ownMaker = 重みを出すメーカー、
+ * asOfYm = 予測の「今」の月（古さの重みの基準）。返り値 { weights（下限前の事後）, pool（ほかのメーカーの事後 = このメーカーの事前）, sigma,
+ * points（数えた点）, makers（点のあるメーカー）, own（このメーカーの点）}
+ */
+function appTriPosterior_(pts, ownMaker, asOfYm) {
+  const by = {};
+  (pts || []).forEach(p => {
+    if (!(p.actual > 0)) return;
+    if (!APP_TRI_METHODS.every(k => typeof p.v[k] === 'number' && isFinite(p.v[k]) && p.v[k] > 0)) return;
+    const age = Math.max(0, appTriMonths_(p.ym, asOfYm) || 0);
+    const r = Math.pow(0.5, age / APP_TRI_HALFLIFE);
+    const o = by[p.maker] = by[p.maker] || { n: 0, cnt: 0, sse: {} };
+    o.n += r; o.cnt++;
+    APP_TRI_METHODS.forEach(k => { const e = Math.log(p.actual / p.v[k]); o.sse[k] = (o.sse[k] || 0) + r * e * e; });
+  });
+  const makers = Object.keys(by);
+  const mse = m => { const o = by[m]; const x = {}; APP_TRI_METHODS.forEach(k => { x[k] = o.sse[k] / o.n; }); return x; };
+  let num = 0, den = 0;
+  makers.forEach(m => { const x = mse(m); APP_TRI_METHODS.forEach(k => { num += by[m].n * x[k]; }); den += by[m].n * APP_TRI_METHODS.length; });
+  const sigma2 = Math.max(APP_TRI_SIGMA2_MIN, den > 0 ? num / den : APP_TRI_SIGMA2_MIN);
+  const strength = m => Math.min(by[m].n, APP_TRI_YEAR) / APP_TRI_YEAR;
+  const lp = {};
+  APP_TRI_METHODS.forEach(k => { lp[k] = Math.log(APP_TRI_PRIOR[k]); });
+  makers.filter(m => m !== String(ownMaker)).forEach(m => { const x = mse(m); APP_TRI_METHODS.forEach(k => { lp[k] -= 0.5 * strength(m) * x[k] / sigma2; }); });
+  const pool = appTriSoftmax_(lp);
+  const lo = {};
+  APP_TRI_METHODS.forEach(k => { lo[k] = Math.log(pool[k]); });
+  if (by[ownMaker]) { const x = mse(ownMaker); APP_TRI_METHODS.forEach(k => { lo[k] -= 0.5 * strength(ownMaker) * x[k] / sigma2; }); }
+  return { weights: appTriSoftmax_(lo), pool: pool, sigma: Math.sqrt(sigma2), points: makers.reduce((a, m) => a + by[m].cnt, 0), makers: makers.length,
+    own: by[ownMaker] ? by[ownMaker].cnt : 0 };
+}
+
+/**
+ * 重みの証拠: 全部の計画（片付けた計画は除く）の、予測の「今」（asOfMs）までに締まった月の点。物差し（今の数え方 BT-3 の、区切りごとに一番新しい回）と、
+ * 本番の記録（FORECAST_METHODS の今の数え方。各月が始まる前の最後の回）。返り値 [{ maker, plan, ym, src, v, actual }]
+ */
+function appTriEvidence_(asOfMs) {
+  const day = Utilities.formatDate(new Date(asOfMs), APP_TZ, 'yyyy-MM-dd');
+  const out = [];
+  appReadTable_('PLANS').filter(p => p.state !== 'ARCHIVED').forEach(p => {
+    const bt = appReadPlanTable_('BACKTEST', p.plan_id).filter(r => String(r.calc_version) === APP_BACKTEST_CALC_VERSION);
+    const lastOf = {};
+    bt.forEach(r => { const b = lastOf[r.cutoff_ym]; if (!b || String(r.computed_at) > String(b.computed_at) || (String(r.computed_at) === String(b.computed_at) && r._row > b._row)) lastOf[r.cutoff_ym] = r; });
+    const pt = {};
+    bt.forEach(r => {
+      const last = lastOf[r.cutoff_ym];
+      if (!last || r.bt_id !== last.bt_id || !r.counted || typeof r.actual !== 'number' || !appActualClosed_(r.target_ym, day)) return;
+      if (APP_TRI_METHODS.indexOf(r.method) < 0) return;
+      const o = pt[r.bt_id + '\u0001' + r.target_ym] = pt[r.bt_id + '\u0001' + r.target_ym] || { maker: p.client_id, plan: p.plan_id, ym: r.target_ym, src: 'BACKTEST', v: {}, actual: r.actual };
+      o.v[r.method] = appMethodsNum_(r.p50);
+    });
+    Object.keys(pt).forEach(k => out.push(pt[k]));
+    appMethodsLivePoints_(p).pts.forEach(x => {
+      if (!appActualClosed_(x.ym, day)) return;
+      const v = {};
+      APP_TRI_METHODS.forEach(k => { v[k] = appMethodsNum_(x.row[APP_METHODS_COLUMN[k]]); });
+      out.push({ maker: p.client_id, plan: p.plan_id, ym: x.ym, src: 'LIVE', v: v, actual: x.actual });
+    });
+  });
+  return out;
+}
+
+/**
+ * その計画の予測に使う三角測量の重み（予測の計算の段で、旧来の予測を動かす前に）。失敗したら初めの重み（エラーのログに残す）。返り値:
+ * { weights（使う重み。合計 1）, posterior（下限・幅の前の事後）, basis（PRIOR = 初めの重み・POSTERIOR = 証拠から）, points, makers, own, sigma,
+ *   hash（証拠の印。同じ証拠なら同じ重み = 何も変えずに予測し直しても数字が揺れない）, prev（幅の基準にした前の重み）}
+ * 幅の基準: 証拠の印が今と違う、一番新しい記録の重み（無ければ初めの重み）。同じ証拠のまま何回予測しても、重みは動かない
+ */
+function appTriWeights_(ctx, plan, asOfMs) {
+  try {
+    const pts = appTriEvidence_(asOfMs);
+    const asOfYm = Utilities.formatDate(new Date(asOfMs), APP_TZ, 'yyyy/MM');
+    const hash = appSha256Hex_(pts.map(p => [p.plan, p.src, p.ym, p.actual].concat(APP_TRI_METHODS.map(k => p.v[k])).join(',')).sort().join('|'));
+    const post = appTriPosterior_(pts, plan.client_id, asOfYm);
+    let prev = null;
+    try {
+      appReadPlanTable_('METHOD_WEIGHTS', plan.plan_id).filter(r => String(r.calc_version) === APP_TRI_CALC_VERSION && r.evidence_hash !== hash)
+        .forEach(r => { if (!prev || String(r.recorded_at) > String(prev.recorded_at) || (String(r.recorded_at) === String(prev.recorded_at) && r._row > prev._row)) prev = r; });
+    } catch (e) { prev = null; }   // 表の版がそろう前
+    const prevW = prev ? { LINEAR: Number(prev.w_linear), RECENT: Number(prev.w_recent), ROBUST: Number(prev.w_robust), SIM: Number(prev.w_sim) } : Object.assign({}, APP_TRI_PRIOR);
+    const enough = post.points >= APP_TRI_MIN_POINTS;
+    const weights = enough ? appTriStep_(post.weights, prevW) : Object.assign({}, APP_TRI_PRIOR);
+    return { weights: weights, posterior: enough ? post.weights : null, basis: enough ? 'POSTERIOR' : 'PRIOR', points: post.points, makers: post.makers, own: post.own,
+      sigma: post.points ? post.sigma : null, hash: hash, prev: prevW };
+  } catch (e) {
+    appLogError_('LOG.METHOD_WEIGHTS', e, ctx);
+    return { weights: Object.assign({}, APP_TRI_PRIOR), posterior: null, basis: 'PRIOR', points: 0, makers: 0, own: 0, sigma: null, hash: '', prev: null };
+  }
+}
+
+/** 予測の保存の段で足す METHOD_WEIGHTS の 1 行（使った重みと証拠）。重みが無ければ足さない */
+function appTriWeightsOps_(ctx, plan, p) {
+  try {
+    const t = p.tri;
+    if (!t || !t.weights) return [];
+    return appLogOps_('METHOD_WEIGHTS', [{ plan_id: plan.plan_id, weight_id: appStableLogId_(APP_LOG_PREFIX.METHOD_WEIGHTS, [p.runId]), run_id: p.runId,
+      as_of: Utilities.formatDate(new Date(p.asOfMs), APP_TZ, "yyyy-MM-dd'T'HH:mm:ssZ"),
+      w_linear: t.weights.LINEAR, w_recent: t.weights.RECENT, w_robust: t.weights.ROBUST, w_sim: t.weights.SIM, basis: t.basis,
+      posterior_json: t.posterior || null, evidence_points: t.points, evidence_makers: t.makers, own_points: t.own, sigma: t.sigma,
+      evidence_hash: t.hash, calc_version: APP_TRI_CALC_VERSION, recorded_at: appNowIso_() }]);
+  } catch (e) {
+    appLogError_('LOG.METHOD_WEIGHTS', e, ctx);
+    return [];
+  }
+}
+
+/**
+ * 根拠の「予測の土台」（その回の重みと、手法ごとの 12 か月の合計）。記録が無ければ null（段 2 より前の回）。
+ * 返り値 { weights: { LINEAR, RECENT, ROBUST, SIM }, basis, points, makers, own, sums: { LINEAR, RECENT, ROBUST, SIM, TRI }（背景のスポット込み）}
+ */
+function appBasisTriangulation_(planId, runId) {
+  if (!runId) return null;
+  try {
+    const w = appReadPlanTable_('METHOD_WEIGHTS', planId).filter(r => r.run_id === runId)[0];
+    if (!w) return null;
+    const rows = appReadPlanTable_('FORECAST_METHODS', planId).filter(r => r.run_id === runId);
+    const sums = {};
+    APP_TRI_METHODS.concat(['TRI']).forEach(k => {
+      const xs = rows.map(r => appMethodsNum_(r[APP_METHODS_COLUMN[k]]));
+      sums[k] = xs.length === 12 && xs.every(v => v !== null) ? xs.reduce((a, b) => a + b, 0) : null;
+    });
+    const n = v => appMethodsNum_(v);
+    return { weights: { LINEAR: n(w.w_linear), RECENT: n(w.w_recent), ROBUST: n(w.w_robust), SIM: n(w.w_sim) }, basis: String(w.basis || ''),
+      points: n(w.evidence_points) || 0, makers: n(w.evidence_makers) || 0, own: n(w.own_points) || 0, sums: sums };
+  } catch (e) {
+    return null;   // 表の版がそろう前
+  }
 }
 
 // ---- 本番の予測の回（予測の計算 FORECAST.RUN_CALC → 保存 FORECAST.RUN_SAVE）----
 
 /**
  * 本番の予測の回の手法（計算の段で、旧来の予測を動かした後の計算用ブックで、統計の部分だけをもう一度動かす）。
- * 売上の表は旧来の予測が作り直したものをそのまま読む（作り直さない。計算用ブックは書き換えない）。乱数の種は予測の種から決める（同じ入力なら同じ数字）。
- * 失敗しても予測は止めない（エラーのログに残し null）。返り値 { v: 手法ごとの 12 か月, ms }
+ * 売上の表は旧来の予測が作り直したものをそのまま読む（作り直さない。計算用ブックは書き換えない）。乱数の種は予測の種から決める。
+ * 三角測量は、その回に使った重み（weights）で混ぜる。失敗しても予測は止めない（エラーのログに残し null）。返り値 { v: 手法ごとの 12 か月, ms }
  */
-function appMethodsLive_(ctx, plan, book, p, seed) {
+function appMethodsLive_(ctx, plan, book, p, seed, weights) {
   const t0 = new Date().getTime();
   try {
     const fy = Number(plan.fy);
@@ -144,7 +277,7 @@ function appMethodsLive_(ctx, plan, book, p, seed) {
     const day = Utilities.formatDate(new Date(p.asOfMs), APP_TZ, 'yyyy-MM-dd');
     const startYm = (fy - 4) + '/04';
     const lastYear = Array.from({ length: 12 }, (_, i) => (appActualClosed_(appBacktestYmAdd_(startYm, 36 + i), day) ? Number(stat.total48[36 + i] || 0) : null));
-    return { v: appMethodsFromStat_(stat, lastYear), ms: new Date().getTime() - t0 };
+    return { v: appMethodsFromStat_(stat, lastYear, weights), ms: new Date().getTime() - t0 };
   } catch (e) {
     appLogError_('LOG.FORECAST_METHODS', e, ctx);
     return null;
@@ -264,7 +397,7 @@ function appMethodsCard_(fy) {
       const pt = {};
       rows.filter(r => r.bt_id === last.bt_id && r.counted && typeof r.actual === 'number').forEach(r => {
         const o = pt[r.target_ym] = pt[r.target_ym] || { maker: p.client_id, ym: r.target_ym, v: {}, actual: r.actual };
-        const k = r.method === 'STAT_ONLY' ? 'SIM' : r.method;
+        const k = r.method;
         if (APP_METHODS_KEYS.indexOf(k) >= 0) o.v[k] = appMethodsNum_(r.p50);
       });
       Object.keys(pt).forEach(ym => backPts.push(pt[ym]));

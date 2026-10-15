@@ -14,7 +14,7 @@
  * 版 11（2026-10-09 村井さん承認「推奨する対応を継続」。SCHEMA_PLAN_v10-12_JA.md の 4 章）で、予算の下書き（BUDGET_DRAFTS。追記だけ）を足し、
  * 公式版（PLAN_VERSIONS）の後ろに、出したときの届く見込みと前提の列を足した（APP_ADDED_COLUMNS。出した後は変えない）。中身は BudgetDrafts.js・V11.js・Versions.js
  */
-const APP_SCHEMA_VERSION = 12;
+const APP_SCHEMA_VERSION = 13;
 
 /**
  * 版を上げて、今ある表の後ろに足した列（古い順）。データ本体の 1 行目が足す前の列なら、版を上げた後の最初の操作で後ろに列の名前を書き足す
@@ -202,6 +202,15 @@ const APP_TABLES = {
       'stat', 'plus_spot', 'plus_human', 'plus_ai', 'final', 'calc_version', 'recorded_at'],
     types: { last_year: 'num', linear: 'num', recent: 'num', robust: 'num', sim: 'num', tri: 'num',
       stat: 'num', plus_spot: 'num', plus_human: 'num', plus_ai: 'num', final: 'num' }
+  },
+  // ---- 版 13 の表（追記だけ。2026-10-15 段 2。app/DESIGN_triangulation_bayes_JA.md の 1 章）----
+  METHOD_WEIGHTS: {
+    // 三角測量の重み（Methods.js の appTriWeights_）: 予測 1 回で 1 行。その回の予測の土台に使った 4 つの手法の重みと、出した証拠。
+    // basis = PRIOR（初めの重み）・POSTERIOR（締まった月の当たり方からベイズで）。evidence_hash が同じなら同じ重み（幅 ±0.10 の基準は印の違う一番新しい行）
+    key: ['weight_id'], appendOnly: true,
+    columns: ['plan_id', 'weight_id', 'run_id', 'as_of', 'w_linear', 'w_recent', 'w_robust', 'w_sim', 'basis', 'posterior_json',
+      'evidence_points', 'evidence_makers', 'own_points', 'sigma', 'evidence_hash', 'calc_version', 'recorded_at'],
+    types: { w_linear: 'num', w_recent: 'num', w_robust: 'num', w_sim: 'num', evidence_points: 'num', evidence_makers: 'num', own_points: 'num', sigma: 'num' }
   }
 };
 
