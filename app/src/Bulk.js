@@ -42,26 +42,70 @@ function appBulkName_(planId) {
   return p ? String(p.client_label || '') : '';
 }
 
-/** 今の計画の処理を始める（所有者が始めたときは画面と同じ入口 appStartJob_、続きはその場で待ち行列に入れる） */
-function appBulkStartPlan_(ctx, st, planId, parentId) {
+/** 今の計画の処理を始める（所有者が始めたときは画面と同じ入口 appStartJob_、続きはその場で待ち行列に入れる。移行待ちなら断る） */
+function appBulkStartPlan_(ctx, st, planId) {
   const kind = APP_BULK_KIND[st.mode];
   const now = new Date().toISOString();
   if (ctx) {
     const r = appStartJob_(ctx, { kind: kind, payload: { planId: planId } });
     st.current = { planId: planId, jobId: r.jobId, startedAt: now };
-  } else {
-    const j = appWithLock_(() => appEnqueueJob_(kind, { planId: planId }, st.requestedBy, parentId || ''));
-    st.current = { planId: planId, jobId: j.id, startedAt: now };
+    return;
   }
+  const refused = appV10WaitRefusal_(kind, { planId: planId });   // 表の版の移行がバックアップを待っている間は、予測を始めない（画面と同じ）
+  if (refused) throw new Error(refused);
+  const j = appWithLock_(() => appEnqueueJob_(kind, { planId: planId }, st.requestedBy, ''));   // 前の計画の続きにしない（最初の段をたどって今の計画の処理かを確かめるため）
+  st.current = { planId: planId, jobId: j.id, startedAt: now };
+}
+
+/** 済んだ計画の記録を 1 件足す */
+function appBulkNote_(st, planId, status, error) {
+  st.done = (st.done || []).concat([{ planId: planId, name: appBulkName_(planId), at: new Date().toISOString(), status: status, error: String(error || '').slice(0, 160) }]);
+}
+
+/**
+ * 次の計画を始める（残りが無ければ、予測の後の物差しへ・終わり）。始められなかった計画は FAILED として記録して、その次へ進む（鎖を止めない）。
+ * 状態は呼んだ側が保存する
+ */
+function appBulkAdvance_(st) {
+  for (let guard = 0; guard < 500; guard++) {
+    if (!(st.queue || []).length && st.then === 'BACKTEST') {
+      st.forecastDone = st.done;
+      st.done = [];
+      st.mode = 'BACKTEST';
+      st.then = '';
+      st.queue = appBulkQueue_(st.fy);
+    }
+    if (!(st.queue || []).length) {
+      st.active = false;
+      st.current = null;
+      st.finishedAt = new Date().toISOString();
+      return;
+    }
+    const next = st.queue.shift();
+    try {
+      appBulkStartPlan_(null, st, next);
+      return;
+    } catch (e) {
+      appBulkNote_(st, next, 'FAILED', '始められませんでした: ' + String(e && e.message ? e.message : e));
+    }
+  }
+}
+
+/** 処理の最初の段の ID（続きの段は parentId をたどる） */
+function appBulkRootId_(job) {
+  let cur = job;
+  for (let k = 0; k < 20 && cur && cur.parentId; k++) cur = appJobGet_(cur.parentId) || null;
+  return cur ? cur.id : '';
 }
 
 /**
  * 始める（所有者の操作）。mode = FORECAST・BACKTEST、then = 予測の後に物差しも回すか。
- * まとめて動かしている途中なら断る（今の計画の処理が 1 時間より長く止まっていれば、止まった鎖として新しく始める）
+ * まとめて動かしている途中なら断る。ただし今の計画の処理が終わっている（失敗・時間切れで次へ進めなかった）か、1 時間より長く止まっていれば、
+ * 止まった鎖として新しく始める
  */
 function appBulkStart_(ctx, mode, fy, then) {
   const cur = appBulkState_();
-  if (cur.active && cur.current && new Date().getTime() - Date.parse(cur.current.startedAt || 0) < APP_BULK_STALE_MS) {
+  if (cur.active && cur.current && !appBulkStuck_(cur)) {
     throw new Error('全部の計画をまとめて動かしている途中です（' + (cur.mode === 'FORECAST' ? '予測' : '物差し') + '・残り ' + (cur.queue || []).length + ' 計画）。終わってから始めてください。');
   }
   const y = fy === undefined || fy === null || fy === '' ? appFy_(new Date()) : Number(fy);
@@ -76,34 +120,35 @@ function appBulkStart_(ctx, mode, fy, then) {
 }
 
 /**
+ * 止まった鎖か: 今の計画の処理（続きの段の最後）が、もう動いていない（DONE・FAILED で次へ進んだ記録が無い）か、1 時間より長くたっている。
+ * 待ち行列で 15 分たって失敗にされた処理（appExpireQueuedJobs_）は、終わりのフックを通らないので、ここで見つける
+ */
+function appBulkStuck_(st) {
+  if (!st.active || !st.current) return false;
+  if (new Date().getTime() - Date.parse(st.current.startedAt || 0) >= APP_BULK_STALE_MS) return true;
+  let j = appJobGet_(st.current.jobId);
+  for (let k = 0; k < 20 && j && j.nextJobId; k++) j = appJobGet_(j.nextJobId);
+  return !!j && (j.status === 'DONE' || j.status === 'FAILED');
+}
+
+/**
  * 裏の処理が終わったとき（続きの段が無いとき）: まとめて動かしている今の計画の処理なら、結果を記録して次の計画を始める。
+ * 今の計画の処理かは、続きの段をたどった最初の段の ID で確かめる（同じ計画を手で動かした処理と取り違えない）。
  * job = 終わった処理の記録（payload は画面に要る項目だけ）、status = DONE・FAILED
  */
 function appBulkAfterJob_(job, status) {
   if (!job || job.nextJobId) return null;
   const st = appBulkState_();
   if (!st.active || !st.current) return null;
-  if (APP_BULK_ROOT[job.kind] !== APP_BULK_KIND[st.mode] || (job.payload || {}).planId !== st.current.planId || job.requestedBy !== st.requestedBy) return null;
+  if (APP_BULK_ROOT[job.kind] !== APP_BULK_KIND[st.mode] || appBulkRootId_(job) !== st.current.jobId) return null;
   let needConfirm = null;
   if (status === 'DONE') { try { const r = appJobGetResult_(job.id); needConfirm = r.found && r.value && r.value.needConfirm ? r.value.needConfirm : null; } catch (e) { needConfirm = null; } }
-  st.done = (st.done || []).concat([{ planId: st.current.planId, name: appBulkName_(st.current.planId), at: new Date().toISOString(),
-    status: status === 'FAILED' ? 'FAILED' : needConfirm ? 'CONFIRM' : 'DONE', error: String(job.error || (needConfirm && needConfirm.message) || '').slice(0, 160) }]);
-  if ((st.queue || []).length) {
-    const next = st.queue.shift();
-    appBulkStartPlan_(null, st, next, job.id);
-  } else if (st.then === 'BACKTEST') {
-    st.forecastDone = st.done;
-    st.done = [];
-    st.mode = 'BACKTEST';
-    st.then = '';
-    const q = appBulkQueue_(st.fy);
-    if (q.length) { st.queue = q.slice(1); appBulkStartPlan_(null, st, q[0], job.id); } else { st.active = false; st.current = null; st.finishedAt = new Date().toISOString(); }
-  } else {
-    st.active = false;
-    st.current = null;
-    st.finishedAt = new Date().toISOString();
+  appBulkNote_(st, st.current.planId, status === 'FAILED' ? 'FAILED' : needConfirm ? 'CONFIRM' : 'DONE', job.error || (needConfirm && needConfirm.message) || '');
+  try {
+    appBulkAdvance_(st);
+  } finally {
+    appBulkSave_(st);   // 次を始められなくても、記録と状態は必ず残す
   }
-  appBulkSave_(st);
   appRunLog_({ requestId: job.id, kind: 'BULK.NEXT', status: 'OK', detail: { mode: st.mode, active: st.active, done: st.done.length, remaining: (st.queue || []).length,
     next: st.current ? st.current.planId : '' } });
   return st;

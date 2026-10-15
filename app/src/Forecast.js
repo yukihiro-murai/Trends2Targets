@@ -118,7 +118,7 @@ function appForecastRunCalc_(ctx, p) {
     // 手法ごとの予測（素の回帰との比べ。Methods.js）: 統計の部分だけをもう一度動かす（計算用ブックは書き換えない。失敗しても予測は止めない）
     const methods = appMethodsLive_(ctx, plan, scratch, p, run.seed, tri.weights);
     const payload = Object.assign({}, p, { seed: run.seed, engine: { version: run.version, sourceSha256: run.sourceSha256 }, headline: headline,
-      runMs: new Date().getTime() - t0, layerTail: layerTail, methods: methods, tri: tri, eff: eff });
+      runMs: new Date().getTime() - t0, layerTail: layerTail }, appPayloadCompact_(methods, tri, eff));
     return { __next: { kind: 'FORECAST.RUN_SAVE', payload: payload }, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
   });
 }

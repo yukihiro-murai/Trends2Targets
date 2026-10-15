@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.6.0-dev、SHA-256 225d0af090d3e541d88e2a71f75ee187b8076ccdadec469eb8066d707e50feb6）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.0-dev、SHA-256 c66c3bfff180f9d72817d2d51f00ddb9cfcb8624118d5cb5ad0c1533b7039970）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,7 +31,7 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.6.0-dev';
+const VERSION = '2.7.0-dev';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -794,24 +794,6 @@ function runForecastFYCore_(fy, clientName) {
     }
   }
 
-  // 効き係数の不確かさ（段 3）: 予測の月の P10・P90 を、人と AI の押し（生の値の対数）× 効き係数の事後の幅だけ外へ広げる（真ん中は変えない）
-  const effectBandByMonth = new Array(12).fill(0);
-  if (learnedEffects && mixed.diagnostics) {
-    const dg = mixed.diagnostics;
-    for (let i = 0; i < months.length; i++) {
-      if (sourceByMonth[i] !== 'forecast_open') continue;
-      const xh = Math.log(Math.max(1e-9, Number((dg.kProdRawByMonth || [])[i] || 1) * Number((dg.kClientRawByMonth || [])[i] || 1) * Number((dg.kOpinionRawP50ByMonth || [])[i] || 1)));
-      const xa = Math.log(Math.max(1e-9, Number((dg.kAIRawByMonth || [])[i] || 1)));
-      const v = xh * xh * Math.max(0, Number(learnedEffects.varHuman) || 0) + xa * xa * Math.max(0, Number(learnedEffects.varAi) || 0)
-        + 2 * xh * xa * (Number(learnedEffects.covHumanAi) || 0);
-      const sd = Math.sqrt(Math.max(0, v));
-      effectBandByMonth[i] = sd;
-      if (!(sd > 0)) continue;
-      mixed.p10[i] = Number(mixed.p10[i] || 0) * Math.exp(-EFFECT_BAND_Z * sd);
-      mixed.p90[i] = Number(mixed.p90[i] || 0) * Math.exp(EFFECT_BAND_Z * sd);
-    }
-  }
-
   let productWeightWarning = '';
   if (factorsProduct.length > 0 && mixed.diagnostics && mixed.diagnostics.kProdRawByMonth && mixed.diagnostics.kProdRawByMonth.every(k => Math.abs(Number(k || 1) - 1) < 1e-9)) {
     const zeroWeightProducts = Array.from(new Set(
@@ -850,7 +832,6 @@ function runForecastFYCore_(fy, clientName) {
     modelInfo: { residP10, residP50, residP90, slope: model.slope, intercept: model.intercept },
     triangulation,
     learnedEffects,
-    effectBandByMonth,
     baseSeries48: salesData.baseSeries48 || [],
     adjustedBaseSeries48: aggY_adj,
     seriesStart,
@@ -2698,14 +2679,19 @@ function findFirstExtremeMultiplierIssue_(fy) {
   const aiTotal = (ai.Market || 0) + (ai.Competitor || 0) + (ai.Channel || 0) + (ai.DX || 0);
   const aiRaw = aiTotal * (isFinite(tuning.aiWeight) ? tuning.aiWeight : AI_WEIGHT_DEFAULT);
   const aiEff = Math.max(-(isFinite(tuning.aiMaxAbsEffect) ? tuning.aiMaxAbsEffect : AI_MAX_ABS_EFFECT), Math.min((isFinite(tuning.aiMaxAbsEffect) ? tuning.aiMaxAbsEffect : AI_MAX_ABS_EFFECT), aiRaw));
-  const kAI = 1 + aiEff;
+  // 段 3: 本番の予測と同じく、AI は月ごとの強さ（話題の時期）、人と AI は効き係数（β 乗）を掛けた倍率で確かめる
+  const aiW = aiMonthWeights_(months, ai && ai.meta ? ai.meta.horizonMonths : null);
+  const eff = readLearnedEffects_(client);
+  const bH = eff && isFinite(eff.betaHuman) ? clamp_(Number(eff.betaHuman), 0, 2) : 1;
+  const bA = eff && isFinite(eff.betaAi) ? clamp_(Number(eff.betaAi), 0, 2) : 1;
 
   for (let i = 0; i < 12; i++) {
     const m = months[i];
     const kProd = productFactorsMultiplier_(factorsProduct, m, weights);
     const kClient = clientFactorsMultiplier_(factorsClient, m);
     const kOpinion = opinionExpectedMultiplier_(opinions, m);
-    const kTotal = kProd * kClient * kOpinion * kAI;
+    const kAI = Math.pow(Math.max(1e-9, 1 + aiEff * aiW[i]), bA);
+    const kTotal = Math.pow(Math.max(1e-9, kProd * kClient * kOpinion), bH) * kAI;
     const ym = fmtYM_(m);
 
     if (kTotal < K_TOTAL_BLOCK_MIN || kTotal > K_TOTAL_BLOCK_MAX) {
@@ -4031,8 +4017,8 @@ function readAIResearchScores_(calibration, opt) {
     const topic = normalizeAiTopic_(vals[i][topicIdx]);
     if (eventArr[topic] === undefined) continue;
     if (horizonIdx !== undefined) {
-      const hm = /(\d+(?:\.\d+)?)/.exec(String(vals[i][horizonIdx] || ''));
-      if (hm && Number(hm[1]) > 0) horizonList.push(Math.min(24, Number(hm[1])));
+      const hz = parseAiHorizonMonths_(vals[i][horizonIdx]);
+      if (hz !== null) horizonList.push(hz);
     }
     const rowTypeRaw = rowTypeIdx === undefined ? 'event' : normalizeAiCellValue_(vals[i][rowTypeIdx]);
     const rowType = (rowTypeRaw === 'benchmark') ? 'benchmark' : 'event';
@@ -4605,7 +4591,6 @@ function buildTriangulationBase_(y, model, q50, weights) {
 /** ====== AI の時期と効き係数（2026-10-15 段 3。app/DESIGN_triangulation_bayes_JA.md の 3・4 章） ====== */
 const AI_HORIZON_DEFAULT_MONTHS = 6;   // 話題の時期が無いときの、全部効く月の数
 const AI_FAR_MONTH_WEIGHT = 0.5;       // 12 か月先の強さ（全部効く月の後、ここまで下げる）
-const EFFECT_BAND_Z = 1.2816;          // 見通しの幅（P10・P90）に足す効き係数の不確かさの z
 
 /**
  * AI の押しの月ごとの強さ（0.5〜1）: 「今」の月から何か月先か d が、話題の時期 H（か月。無ければ 6）以内なら 1、その先は 12 か月先で 0.5 まで下げる
@@ -4619,6 +4604,20 @@ function aiMonthWeights_(months, horizonMonths) {
     if (d <= H) return 1;
     return Math.max(AI_FAR_MONTH_WEIGHT, 1 - (1 - AI_FAR_MONTH_WEIGHT) * (d - H) / Math.max(1, 12 - H));
   });
+}
+
+/**
+ * 話題の「いつ効くか」（time_horizon の文字）→ か月（1〜24。読めなければ null）。'6M'・'6か月'・'1年'・'1Y'・'2週間'・'3〜6か月'（範囲は大きい方）。
+ * 年号（100 以上の数。'2026年下期' など）は読まない
+ */
+function parseAiHorizonMonths_(v) {
+  const t = String(v === null || v === undefined ? '' : v).trim().toUpperCase();
+  if (!t) return null;
+  const nums = (t.match(/\d+(?:\.\d+)?/g) || []).map(Number).filter(n => n > 0 && n < 100);
+  if (!nums.length) return null;
+  const n = Math.max.apply(null, nums);
+  const months = /年|Y/.test(t) ? n * 12 : /週|W/.test(t) ? n / 4 : /日|D/.test(t) ? n / 30 : n;
+  return Math.max(1, Math.min(24, months));
 }
 
 /** 効き係数（新アプリが渡す AppLearning.effects。{ betaHuman, betaAi, varHuman, varAi, covHumanAi }。無ければ null = 押したとおり・幅は足さない） */
@@ -4800,6 +4799,13 @@ function forecastMonteCarloMixed_(model, opt) {
   const betaH = effects && isFinite(effects.betaHuman) ? clamp_(Number(effects.betaHuman), 0, 2) : 1;
   const betaA = effects && isFinite(effects.betaAi) ? clamp_(Number(effects.betaAi), 0, 2) : 1;
   const powEff_ = (k, b) => (b === 1 ? k : Math.pow(Math.max(1e-9, Number(k)), b));
+  // 効き係数の不確かさ（段 3）: シミュレーション 1 回ごとに (δH, δAI) を事後の分散・共分散から引き、人の押しを exp(δH × 人の押しの対数)・
+  // AI の押しを exp(δAI × AI の押しの対数) 倍する（押しの分だけに幅が付き、月にも年度合計にも入る）。押しの無い回は引かない（乱数の並びを変えない）
+  const vH = effects && isFinite(effects.varHuman) ? Math.max(0, Number(effects.varHuman)) : 0;
+  const vA = effects && isFinite(effects.varAi) ? Math.max(0, Number(effects.varAi)) : 0;
+  const sdH = Math.sqrt(vH), sdA = Math.sqrt(vA);
+  const rhoHA = sdH > 0 && sdA > 0 && effects && isFinite(effects.covHumanAi) ? clamp_(Number(effects.covHumanAi) / (sdH * sdA), -0.999, 0.999) : 0;
+  const effDraw = sdH > 0 || sdA > 0;
   const kProdRawByMonth = months.map(m => productFactorsMultiplier_(factorsProduct, m, productWeights, reliabilityMap));
   const kClientRawByMonth = months.map(m => clientFactorsMultiplier_(factorsClient, m, reliabilityMap));
   const kProdByMonth = kProdRawByMonth.map(k => powEff_(k, betaH));
@@ -4851,6 +4857,7 @@ function forecastMonteCarloMixed_(model, opt) {
   });
 
   for (let s = 0; s < nSim; s++) {
+    let dH = null, dA = 0;   // この回の効き係数のずれ（押しのある月で初めて引く）
     for (let i = 0; i < 12; i++) {
       const t = startT + (i + 1);
       const mIdx = i % 12;
@@ -4869,8 +4876,21 @@ function forecastMonteCarloMixed_(model, opt) {
       ops *= kProdByMonth[i];
       ops *= kClientByMonth[i];
       const kOpinionRaw = sampleOpinionMultiplier_(opinions, months[i], reliabilityMap);
-      const kOpinion = powEff_(kOpinionRaw, betaH);
-      const kAI = kAIEffByMonth[i];
+      let kOpinion = powEff_(kOpinionRaw, betaH);
+      let kAI = kAIEffByMonth[i];
+      if (effDraw) {
+        const xh = Math.log(Math.max(1e-9, kProdRawByMonth[i] * kClientRawByMonth[i] * kOpinionRaw));
+        const xa = Math.log(Math.max(1e-9, kAIRawByMonth[i]));
+        if (Math.abs(xh) > 1e-12 || Math.abs(xa) > 1e-12) {
+          if (dH === null) {
+            const z1 = dlmGaussianRandom_(), z2 = dlmGaussianRandom_();
+            dH = sdH * z1;
+            dA = sdA * (rhoHA * z1 + Math.sqrt(1 - rhoHA * rhoHA) * z2);
+          }
+          kOpinion *= Math.exp(dH * xh);   // 人の押し全体のずれを、見解の倍率に寄せて掛ける（製品・全体・見解の積に効く）
+          kAI *= Math.exp(dA * xa);
+        }
+      }
       ops *= kOpinion;
       ops *= kAI;
       const subjectiveContinuousDelta = quantOpsAfterResidual * ((kProdByMonth[i] * kClientByMonth[i] * kOpinion * kAI) - 1);
@@ -9324,9 +9344,12 @@ function writeAIHistoriesForRun_(result, runId) {
     const aiTotal = ((((result || {}).mixed || {}).diagnostics || {}).aiTotalScore) || 0;
     const aiNeutralized = ((((result || {}).mixed || {}).diagnostics || {}).aiNeutralized) ? 1 : 0;
     const disabledCount = ((result && result.tuningApplied && result.tuningApplied.disabledTopics) || []).length;
+    // 向きは、効き係数と時期の重みを掛ける前の AI の押し（段 3）で決める（学んだ βAI で当たりの数えが減らないように）。k_ai は予測に効いた値
+    const kRawByMonth = (((result || {}).mixed || {}).diagnostics || {}).kAIRawByMonth || kByMonth;
     const impactRows = (result.months || []).map((m, i) => {
       const k = Number(kByMonth[i] || 1);
-      const dir = k > 1.01 ? 'up' : (k < 0.99 ? 'down' : 'flat');
+      const kr = Number(kRawByMonth[i] || 1);
+      const dir = kr > 1.01 ? 'up' : (kr < 0.99 ? 'down' : 'flat');
       const fs = (result.sourceByMonth && result.sourceByMonth[i]) ? result.sourceByMonth[i] : 'forecast_open';
       return [runId, runAt, client, fmtYM_(m), k, aiTotal, dir, Number((result.mixed.p50 || [])[i] || 0), Number(((result.quantOnly || {}).p50 || [])[i] || 0), aiNeutralized, disabledCount, fs];
     });
@@ -11070,7 +11093,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: '225d0af090d3e541d88e2a71f75ee187b8076ccdadec469eb8066d707e50feb6',
+    SOURCE_SHA256: 'c66c3bfff180f9d72817d2d51f00ddb9cfcb8624118d5cb5ad0c1533b7039970',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

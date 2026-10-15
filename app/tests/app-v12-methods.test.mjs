@@ -99,6 +99,9 @@ const parts = (y, model, q50) => JSON.parse(JSON.stringify(env.run(`${ENG}.compu
   assert.ok(Math.abs(few.weights.ROBUST - prior.ROBUST) < 0.3 && few.weights.ROBUST > prior.ROBUST, '2 か月だけ: ' + JSON.stringify(few.weights));
   const other = post(pts.filter((p) => p.maker !== 'A'), 'A');
   Object.keys(other.pool).forEach((k) => assert.ok(near(other.weights[k], other.pool[k], 1e-12), '自分の点が無ければ、ほかの社の事後 = 自分の重み'));
+  // 古さの基準は証拠の中の一番新しい月: 予測した月が変わっても、同じ証拠なら同じ重み
+  const later = env.call('appTriPosterior_(__p, "A", "2027/03")', { __p: pts });
+  Object.keys(r.weights).forEach((k) => assert.ok(near(later.weights[k], r.weights[k], 1e-12), '同じ証拠なら月をまたいでも同じ: ' + k));
   // 4 つそろわない点・実績 0 以下の点は数えない
   assert.equal(post([{ maker: 'A', ym: '2026/04', actual: 100, v: { LINEAR: 90, RECENT: 95, ROBUST: 99 } }, { maker: 'A', ym: '2026/05', actual: 0, v: { LINEAR: 1, RECENT: 1, ROBUST: 1, SIM: 1 } }], 'A').points, 0);
 }
@@ -213,12 +216,19 @@ let runA;
     assert.equal(Number(r.last_year), sales[prevYm], r.ym + ': 前年同月 = 前の年度の同じ月の売上');
     assert.equal(r.source, 'forecast_open');
     assert.equal(r.calc_version, 'M-2');
-    assert.ok(near(r.stat, r.tri, 1e-9), r.ym + ': 統計の土台 = 三角測量（予測の土台が 4 つの手法の重み付き平均になっている）: ' + r.stat + ' / ' + r.tri);
+    assert.ok(Math.abs(Number(r.stat) - Number(r.tri)) <= 1, r.ym + ': 統計の土台 = 三角測量（予測の土台が 4 つの手法の重み付き平均になっている。記録は円に丸める）: ' + r.stat + ' / ' + r.tri);
     assert.match(r.method_row_id, /^FMR-[0-9A-F]{24}$/);
   });
   assert.ok(rows.some((r) => Math.abs(r.plus_human - r.plus_spot) > 0), '人の入力が効いた月がある');
   assert.ok(rows.some((r) => Math.abs(Number(r.tri) - Number(r.linear)) > 1), '三角測量は線形回帰と違う');
   // 使った重み（METHOD_WEIGHTS）: 締まった月の点が無いので初めの重み
+  // 計算から保存へ渡した中身（続きの処理の記録）は、上限 8,000 バイトに十分ゆとりがある
+  const calcJob = env.call('appJobList_()').filter((j) => j.kind === 'FORECAST.RUN_SAVE').pop();
+  assert.ok(calcJob, '保存の段の処理');
+  const compact = env.call('appPayloadCompact_(__m, __t, __e)', { __m: { v: { LINEAR: [1234.56], SIM: [null] }, ms: 5, triUsed: true },
+    __t: { weights: { LINEAR: 0.123456789 }, prev: { LINEAR: 1 }, hash: 'h', basis: 'PRIOR' }, __e: { betaHuman: 0.987654321, prev: { betaHuman: 1 }, hash: 'h', basis: 'PRIOR', capped: false } });
+  assert.deepEqual([compact.methods.v.LINEAR[0], compact.methods.v.SIM[0], compact.tri.weights.LINEAR, compact.tri.prev, compact.eff.betaHuman, compact.eff.prev, compact.eff.hash],
+    [1235, null, 0.123457, undefined, 0.987654, undefined, 'h'], '円に丸める・小数 6 桁・前の値は渡さない');
   const mw = env.table('METHOD_WEIGHTS').filter((r) => r.run_id === runA.run_id);
   assert.equal(mw.length, 1);
   assert.deepEqual([mw[0].basis, Number(mw[0].w_linear), Number(mw[0].w_recent), Number(mw[0].w_robust), Number(mw[0].w_sim), mw[0].calc_version], ['PRIOR', 0.15, 0.25, 0.4, 0.2, 'W-1']);

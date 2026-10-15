@@ -454,8 +454,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .anx{margin-top:var(--s3)}
 .anx[data-tip]{display:inline-block}
 .tbl.anw{width:max(100%,560px)}
-.tbl.anbt td.num > .note{display:block}
-.tbl.anmt .chip.st{min-width:0;width:100%}   /* 素の回帰との比べ: 札は 112px の列いっぱい（.chip.st の 112px は列の余白ではみ出す） */   /* 物差し: 95% の幅は値の下の行に（152px の列に入る） */
+.tbl.anbt td.num > .note{display:block}   /* 物差し: 95% の幅は値の下の行に（152px の列に入る） */
+.tbl.anmt .chip.st{min-width:0;width:100%}   /* 素の回帰との比べ: 札は 112px の列いっぱい（.chip.st の 112px は列の余白ではみ出す） */
 .tbl.fc-layers th.num{padding-left:var(--s1)}   /* 根拠の層の表: 「前回から（月の合計）」を 1 マス（160px）の列に 1 行で（右寄せなので左の余白を詰める） */
 .anwx{display:inline-flex;align-items:center;gap:var(--s2)}
 @media (max-width:760px){
@@ -2203,7 +2203,7 @@ function yomiSays(h){
   var items = homeSysItems(sys);
   if (items.length === 1) add(5, 'warn', 'explain', items[0][1] + '。', items[0][2], null, true);
   else if (items.length > 1) add(5, 'warn', 'explain', '仕組みの確認が ' + items.length + ' 件あります（' + items.map(function(x){ return x[0]; }).join('・') + '）。',
-    items.map(function(x){ return x[1] + '\n' + x[2]; }).join('\n\n'), null, true);
+    items.map(function(x){ return [x[1], x[2]].filter(Boolean).join('\n'); }).join('\n\n'), null, true);
   var fog = plans.filter(function(p){ return skyKey(p) === 'mikakunin'; });
   if (fog.length) {
     var kinds = [['no_budget', '予算なし'], ['no_forecast', '予測なし'], ['stale_actuals', '実績の遅れ'], ['eval_pending', '当たり具合の計算待ち']].map(function(k){ var c = fog.filter(function(p){ return p.skyReason === k[0]; }).length; return c ? k[1] + ' ' + c : ''; }).filter(Boolean).join('・');
@@ -3260,9 +3260,13 @@ function fcTriCard(t){
   var how = t.basis === 'POSTERIOR' ? '締まった ' + (t.points || 0) + ' か月分（' + (t.makers || 0) + ' 社。このメーカー ' + (t.own || 0) + ' か月）の当たり方から、ベイズで決めた重みです。当たった手法ほど重くなります（1 回で動くのは ±0.10 まで・どの手法も 0.05 以上）'
     : 'まだ実績の締まった月が少ないので、初めの重み（線形回帰 0.15・直近重視 0.25・季節の中央値 0.40・シミュレーション 0.20）です。月が締まるたびに、当たった手法ほど重くなります';
   var s = t.sums || {};
-  var rows = FC_TRI.map(function(x){ var w = t.weights[x[0]];
-    return '<tr><td data-tip="' + esc(x[2]) + '">' + esc(x[1]) + '</td><td class="num">' + (isNum(w) ? (w * 100).toFixed(0) + '%' : '-') + '</td><td class="num">' + yen(s[x[0]]) + '</td></tr>'; }).join('')
-    + '<tr class="total"><td data-tip="4 つの手法を重みで混ぜたもの（予測の土台。この上に確定スポット・人の入力・AI・補正が乗ります）">三角測量</td><td class="num">100%</td><td class="num">' + yen(s.TRI) + '</td></tr>';
+  // 重みは 1% 刻みに丸めて、足すと 100% になるように（いちばん大きい手法で合わせる）
+  var pc = FC_TRI.map(function(x){ var w = t.weights[x[0]]; return isNum(w) ? Math.round(w * 100) : null; });
+  var big = pc.reduce(function(b, v, i){ return v !== null && (b < 0 || v > pc[b]) ? i : b; }, -1), tot = pc.reduce(function(a, v){ return a + (v || 0); }, 0);
+  if (big >= 0 && tot !== 100) pc[big] += 100 - tot;
+  var rows = FC_TRI.map(function(x, i){
+    return '<tr><td data-tip="' + esc(x[2]) + '">' + esc(x[1]) + '</td><td class="num">' + (pc[i] === null ? '-' : pc[i] + '%') + '</td><td class="num">' + yen(s[x[0]]) + '</td></tr>'; }).join('')
+    + '<tr class="total"><td data-tip="4 つの手法を重みで混ぜたもの（予測の土台。この上に確定スポット・人の入力・AI・補正が乗ります）">三角測量</td><td class="num">100%</td><td class="num" data-tip="手法ごとの予測の 12 か月の合計（目安）。上の「過去の売上だけ」は見通しの真ん中で、締まった月は実績なので、同じ数にはなりません">' + yen(s.TRI) + '</td></tr>';
   return '<div class="card"><div class="card-head"><h2>予測の土台' + tip('過去の売上だけの予測は、4 つの手法を重みで混ぜたものです（三角測量）。' + how + '。金額は背景のスポットを含む 12 か月の合計です') + '</h2></div>'
     + '<div class="tblwrap"><table class="tbl"><colgroup><col><col style="width:112px"><col style="width:160px"></colgroup><thead><tr><th>手法</th><th class="num" data-tip="' + esc(how) + '">重み</th><th class="num" data-tip="背景のスポットを含む 12 か月の合計">12 か月</th></tr></thead><tbody>'
     + rows + '</tbody></table></div></div>';
@@ -4432,11 +4436,11 @@ function anBacktestCard(d){
 // 手法（統計だけ）と段（統計の土台に、確定スポット・人・AI・補正を順に足したもの）の外れ幅を並べ、線形回帰との差・1 つ前の段との差を言う。
 // 数え方は物差しと同じ（メーカーごとに平均してから 95% の幅。30 点・2 社より少なければ比べない）。金額は出さない
 var AN_MT = { LAST_YEAR: ['前年同月', '前の年の同じ月の売上（比べるための物差し）'],
-  LINEAR: ['線形回帰', '過去 48 か月に直線を当てて季節の波を掛けたもの（今の予測の土台と同じ式）。何も足さない素の予測'],
+  LINEAR: ['線形回帰', '過去 48 か月に直線を当てて季節の波を掛けたもの。何も足さない素の予測'],
   RECENT: ['直近重視の回帰', '同じ直線を、新しい月ほど重く当てたもの（半減期 12 か月）'],
   ROBUST: ['季節の中央値', '年ごとの同じ月の比の中央値で季節の形を出し、直近 12 か月の水準に掛けたもの（飛び値に強い）'],
-  SIM: ['シミュレーション', '過去の外れ方を 1000 回足して、真ん中を取ったもの（人の入力・AI・補正なし）'],
-  TRI: ['三角測量（試し）', '線形回帰・季節の中央値・直近重視・シミュレーションを、0.15・0.40・0.25・0.20 の重みで混ぜたもの（まだ予測には使っていない）'],
+  SIM: ['シミュレーション', '線形回帰に、過去の外れ方の真ん中を掛けたもの（人の入力・AI・補正なし）'],
+  TRI: ['三角測量', '4 つの手法を、その回の重み（当たった手法ほど重い）で混ぜたもの。予測の土台'],
   STAT: ['統計の土台', '本番の予測のうち、過去の売上だけの部分'], PLUS_SPOT: ['＋確定スポット', '統計の土台に、確定しているスポット案件を足したもの'],
   PLUS_HUMAN: ['＋人', 'さらに、製品・メーカー全体・見解の入力を足したもの'], PLUS_AI: ['＋AI', 'さらに、AI の市場調査の押しを足したもの'],
   FINAL: ['最終（本番）', 'さらに、学んだ補正を掛けたもの（本番の予測の真ん中）'] };
@@ -5210,7 +5214,7 @@ function lrEffectsCard(e){
   var say = function(b){ return !isNum(b) ? '' : b >= 0.9 && b <= 1.1 ? 'ほぼ押したとおり' : b > 1.1 ? '押したより強く効いた' : b < 0.1 ? 'ほとんど効いていない' : '押した分の ' + Math.round(b * 100) + '% が当たった'; };
   var st = function(p){ return p.capped ? ['止めた', 'warn', '1 回に動ける幅（±0.2）か範囲（0〜2）で止めました。所有者が確かめてください'] : p.basis === 'POSTERIOR' ? ['学び中', 'ok', '締まった月の実績から学んでいます'] : ['初めの値', 'off', 'まだ締まった月の記録が少ないので、押したとおり（1）です'] };
   var cell = function(p, b, sd, who){ return { h: f2(b), tip: who + 'の効き ' + f2(b) + '（' + say(b) + '）' + (band(b, sd) ? '\n80% の幅 ' + band(b, sd) : '') }; };
-  var table = lrTable([['メーカー', 'lr-wr', LR_C1, '締まった月の点の数は、メーカーの下に出ます'],
+  var table = lrTable([['メーカー', 'lr-wr', LR_CM, '締まった月の点の数は、メーカーの下に出ます'],
     ['人の効き', 'num', LR_C1, '製品・メーカー全体・見解の入力で押した分が、実績でどれだけ当たったか（1 = 押したとおり・0 = 効いていない）'],
     ['AI の効き', 'num', LR_C1, 'AI の市場調査で押した分が、実績でどれだけ当たったか（1 = 押したとおり・0 = 効いていない）'],
     ['残る偏り', 'num', LR_C1, '補正を掛けた後に残る偏り（プラスは予測が低め）。見せるだけで、予測には掛けません（全体の偏りは「補正を学び直す」が直します）'],

@@ -104,14 +104,17 @@ function appEffEvidence_(asOfMs) {
       if (!(ps > 0 && ph > 0 && pa > 0 && fin > 0 && a > 0)) return;
       const u = used[x.row.run_id];
       const bh = u ? Number(u.beta_human) : 1, ba = u ? Number(u.beta_ai) : 1;
-      const raw = (eff, b) => (Math.abs(eff) < 1e-12 ? 0 : b >= 0.05 ? eff / b : null);
+      // 効き係数が 0.05 より小さい回は、記録の押しから生の押しを戻せない（押しが 0 に見えても数えない）
+      const raw = (eff, b) => (b < 0.05 ? null : eff / b);
       const xh = raw(Math.log(ph / ps), bh), xa = raw(Math.log(pa / ph), ba);
       if (xh === null || xa === null) return;
       const c = fin / pa;
-      const age = Math.max(0, appTriMonths_(x.ym, asOfYm) || 0);
-      out.push({ maker: String(p.client_id), plan: p.plan_id, ym: x.ym, y: Math.log(a / (ps * c)), xh: xh, xa: xa, w: Math.pow(0.5, age / APP_EFF_HALFLIFE), actual: a, runId: x.row.run_id });
+      out.push({ maker: String(p.client_id), plan: p.plan_id, ym: x.ym, y: Math.log(a / (ps * c)), xh: xh, xa: xa, w: 1, actual: a, runId: x.row.run_id });
     });
   });
+  // 古さの重みの基準は証拠の中の一番新しい月（同じ証拠なら、予測した月が変わっても同じ係数。無ければ予測の「今」の月）
+  const baseYm = out.reduce((m, p) => (String(p.ym) > m ? String(p.ym) : m), '') || asOfYm;
+  out.forEach(p => { p.w = Math.pow(0.5, Math.max(0, appTriMonths_(p.ym, baseYm) || 0) / APP_EFF_HALFLIFE); });
   return out;
 }
 

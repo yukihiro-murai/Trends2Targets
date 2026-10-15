@@ -317,6 +317,8 @@ function appRawTable_(name, known) {
 
 /** 書いた表の控えを捨てる（name を省くと全部） */
 function appStoreForget_(name) {
+  delete APP_STORE_CACHE_.livePts;   // 本番の記録の点と予測の回の控え（Methods.js）も捨てる
+  delete APP_STORE_CACHE_.runsByPlan;
   if (APP_STORE_CACHE_.plan) {
     if (name) Object.keys(APP_STORE_CACHE_.plan).forEach(k => { if (k.split('\u0001')[0] === name) delete APP_STORE_CACHE_.plan[k]; });
     else APP_STORE_CACHE_.plan = {};

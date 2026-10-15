@@ -87,4 +87,34 @@ const status = () => owner({ action: 'bulkStatus' }).result;
   assert.throws(() => owner({ action: 'runForecastAll', backtest: 'yes' }), /backtest は true か false/);
 }
 
+// ==== 4. 止まらない: 次の計画を始められなければ記録して次へ・手で動かした予測と取り違えない・止まった鎖は始め直せる ====
+{
+  // 2 つ目の計画の登録だけ失敗させる（トリガーの数の上限など）
+  env.run(`__realEnq = appEnqueueJob_; __nBt = 0; appEnqueueJob_ = function (kind, payload) {
+    if (kind === 'MEASURE.BACKTEST' && ++__nBt === 2) throw new Error('トリガーの数の上限'); return __realEnq.apply(null, arguments); };`);
+  const r = owner({ action: 'runBacktestAll' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.match(r.hint, /裏の処理を始めました/);
+  // まとめて動かしている途中に、同じ年度の計画を手で物差し（所有者）: 取り違えて先へ進まない
+  for (let i = 0; i < 60 && status().active; i++) env.fireTriggers('triggerRunJob');
+  env.run('appEnqueueJob_ = __realEnq;');
+  const s = status();
+  assert.equal(s.active, false, JSON.stringify(s).slice(0, 500));
+  assert.equal(s.done.length, 3, '3 社とも記録: ' + JSON.stringify(s.done));
+  assert.deepEqual(s.done.map((d) => d.status).sort(), ['DONE', 'DONE', 'FAILED']);
+  assert.match(s.done.find((d) => d.status === 'FAILED').error, /始められませんでした: トリガーの数の上限/);
+
+  // 止まった鎖（今の計画の処理が失敗で終わったのに、次へ進めなかった）: 1 時間待たずに始め直せる
+  env.run(`(() => { const st = appBulkState_(); st.active = true; st.current = { planId: __p, jobId: __j, startedAt: new Date().toISOString() }; appBulkSave_(st); })()`,
+    { __p: ids['甲製薬'], __j: env.table('FORECAST_RUNS').length ? 'JOB-NONE' : 'JOB-NONE' });
+  assert.equal(env.call('appBulkStuck_(appBulkState_())'), false, '処理の記録が無ければ、止まったとは言わない（1 時間たつまで）');
+  const jobs = env.call('appJobList_()').filter((j) => j.status === 'DONE' || j.status === 'FAILED');
+  env.run(`(() => { const st = appBulkState_(); st.current.jobId = __j; appBulkSave_(st); })()`, { __j: jobs[0].id });
+  assert.equal(env.call('appBulkStuck_(appBulkState_())'), true, '今の計画の処理が終わっているのに動いている印のまま');
+  const again = owner({ action: 'runBacktestAll' });
+  assert.equal(again.ok, true, '止まった鎖は始め直せる');
+  for (let i = 0; i < 60 && status().active; i++) env.fireTriggers('triggerRunJob');
+  assert.equal(status().active, false);
+}
+
 console.log('app-bulk: ok');

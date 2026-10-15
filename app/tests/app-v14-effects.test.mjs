@@ -147,17 +147,21 @@ let runA;
   assert.equal(e.length, 1);
   assert.deepEqual([e[0].basis, Number(e[0].beta_human), Number(e[0].beta_ai), Number(e[0].var_human), e[0].calc_version], ['PRIOR', 1, 1, 0.25, 'E-1']);
   assert.match(e[0].coef_id, /^EFC-[0-9A-F]{24}$/);
-  // 効き係数を渡さないとき（今までの動き）と比べる: 真ん中は同じ・人の押しのある月は幅が広い
+  // 効き係数を渡さないとき（今までの動き）と比べる: 真ん中はほぼ同じ・人の押しのある月は幅が広い（シミュレーション 1 回ごとに効き係数を引き直す）・年度合計の幅も広い
   env.run('__realEff = appEffForEngine_; appEffForEngine_ = function () { return null; };');
   assert.equal(forecast().status, 'DONE');
   env.run('appEffForEngine_ = __realEff;');
   const runB = env.table('FORECAST_RUNS').filter((r) => r.plan_id === planId).pop();
   const m = (id) => Object.fromEntries(env.table('FORECAST_MONTHLY').filter((x) => x.run_id === id).map((x) => [x.ym, x]));
   const a = m(runA.run_id), b = m(runB.run_id);
-  Object.keys(a).forEach((ym) => assert.ok(Math.abs(Number(a[ym].p50) - Number(b[ym].p50)) < 1e-6, ym + ': 真ん中は同じ'));
+  Object.keys(a).forEach((ym) => assert.ok(Math.abs(Number(a[ym].p50) / Number(b[ym].p50) - 1) < 0.03, ym + ': 真ん中はほぼ同じ ' + a[ym].p50 + ' / ' + b[ym].p50));
   const pushed = Object.keys(a).filter((ym) => Math.abs(Number(a[ym].p90) - Number(b[ym].p90)) > 1);
   assert.ok(pushed.length > 0, '人の押しのある月は幅が広がる');
-  pushed.forEach((ym) => assert.ok(Number(a[ym].p90) > Number(b[ym].p90) && Number(a[ym].p10) < Number(b[ym].p10), ym + ': 外へ広げる'));
+  const width = (x) => Number(x.p90) - Number(x.p10);
+  assert.ok(pushed.some((ym) => width(a[ym]) > width(b[ym])), '押しのある月は幅が広い');
+  const pushedAll = Object.keys(a).filter((ym) => width(a[ym]) > width(b[ym]) * 1.01);
+  assert.ok(pushedAll.length >= 1, '少なくとも 1 か月は幅が 1% 以上広い');
+  assert.ok(Number(runA.annual_p90) - Number(runA.annual_p10) > Number(runB.annual_p90) - Number(runB.annual_p10), '年度合計の幅も広い（OUTPUT の年度の P10〜P90）');
 }
 
 // ==== 5. 証拠から効き係数を出す ====

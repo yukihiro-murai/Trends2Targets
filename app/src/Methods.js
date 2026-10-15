@@ -138,10 +138,12 @@ function appTriMonths_(a, b) {
  */
 function appTriPosterior_(pts, ownMaker, asOfYm) {
   const by = {};
+  // 古さの基準は証拠の中の一番新しい月（同じ証拠なら、予測した月が変わっても同じ重み。無ければ予測の「今」の月）
+  const baseYm = (pts || []).reduce((m, p) => (String(p.ym) > m ? String(p.ym) : m), '') || asOfYm;
   (pts || []).forEach(p => {
     if (!(p.actual > 0)) return;
     if (!APP_TRI_METHODS.every(k => typeof p.v[k] === 'number' && isFinite(p.v[k]) && p.v[k] > 0)) return;
-    const age = Math.max(0, appTriMonths_(p.ym, asOfYm) || 0);
+    const age = Math.max(0, appTriMonths_(p.ym, baseYm) || 0);
     const r = Math.pow(0.5, age / APP_TRI_HALFLIFE);
     const o = by[p.maker] = by[p.maker] || { n: 0, cnt: 0, sse: {} };
     o.n += r; o.cnt++;
@@ -180,18 +182,21 @@ function appTriEvidence_(asOfMs) {
       const last = lastOf[r.cutoff_ym];
       if (!last || r.bt_id !== last.bt_id || !r.counted || typeof r.actual !== 'number' || !appActualClosed_(r.target_ym, day)) return;
       if (APP_TRI_METHODS.indexOf(r.method) < 0) return;
-      const o = pt[r.bt_id + '\u0001' + r.target_ym] = pt[r.bt_id + '\u0001' + r.target_ym] || { maker: p.client_id, plan: p.plan_id, ym: r.target_ym, src: 'BACKTEST', v: {}, actual: r.actual };
+      const o = pt[r.bt_id + '\u0001' + r.target_ym] = pt[r.bt_id + '\u0001' + r.target_ym] || { maker: p.client_id, plan: p.plan_id, ym: r.target_ym, src: 'BACKTEST', v: {}, actual: r.actual, cutoff: r.cutoff_ym };
       o.v[r.method] = appMethodsNum_(r.p50);
     });
-    Object.keys(pt).forEach(k => out.push(pt[k]));
+    Object.keys(pt).forEach(k => out.push(Object.assign(pt[k], { stamp: String(lastOf[pt[k].cutoff] ? lastOf[pt[k].cutoff].computed_at : '') })));
     appMethodsLivePoints_(p).pts.forEach(x => {
       if (!appActualClosed_(x.ym, day)) return;
       const v = {};
       APP_TRI_METHODS.forEach(k => { v[k] = appMethodsNum_(x.row[APP_METHODS_COLUMN[k]]); });
-      out.push({ maker: p.client_id, plan: p.plan_id, ym: x.ym, src: 'LIVE', v: v, actual: x.actual });
+      out.push({ maker: p.client_id, plan: p.plan_id, ym: x.ym, src: 'LIVE', v: v, actual: x.actual, stamp: String(x.row.recorded_at || '') });
     });
   });
-  return out;
+  // 同じメーカー・同じ出どころ・同じ月は 1 点だけ（年度の違う計画・区切りの違う物差しで同じ月を二重に数えない）。新しい方を残す
+  const keep = {};
+  out.forEach(p => { const k = p.maker + '\u0001' + p.src + '\u0001' + p.ym; if (!keep[k] || String(p.stamp) > String(keep[k].stamp)) keep[k] = p; });
+  return Object.keys(keep).sort().map(k => keep[k]);
 }
 
 /**
@@ -222,11 +227,28 @@ function appTriWeights_(ctx, plan, asOfMs) {
   }
 }
 
+/**
+ * 予測の計算から保存へ渡す中身を小さくする（1 つの処理に渡せるのは約 8,000 バイト。Jobs.js の appEnqueueJob_）:
+ * 手法の値は円に丸め、重み・効き係数は小数 6 桁に、記録に使わない「前の値」（prev）は渡さない
+ */
+function appPayloadCompact_(methods, tri, eff) {
+  const r6 = v => (typeof v === 'number' && isFinite(v) ? Math.round(v * 1e6) / 1e6 : v);
+  const obj6 = o => { if (!o || typeof o !== 'object') return o; const x = {}; Object.keys(o).forEach(k => { x[k] = r6(o[k]); }); return x; };
+  const m = methods ? { v: {}, ms: methods.ms, triUsed: methods.triUsed } : null;
+  if (m) Object.keys(methods.v || {}).forEach(k => { m.v[k] = (methods.v[k] || []).map(v => (typeof v === 'number' && isFinite(v) ? Math.round(v) : v)); });
+  const t = tri ? Object.assign({}, tri, { weights: obj6(tri.weights), posterior: obj6(tri.posterior), sigma: r6(tri.sigma) }) : tri;
+  if (t) delete t.prev;
+  const e = eff ? Object.assign({}, obj6(eff), { posterior: obj6(eff.posterior) }) : eff;
+  if (e) { delete e.prev; e.hash = eff.hash; e.basis = eff.basis; e.capped = eff.capped; }
+  return { methods: m, tri: t, eff: e };
+}
+
 /** 予測の保存の段で足す METHOD_WEIGHTS の 1 行（使った重みと証拠）。重みが無ければ足さない */
 function appTriWeightsOps_(ctx, plan, p) {
   try {
     const t = p.tri;
     if (!t || !t.weights) return [];
+    if (p.methods && p.methods.triUsed === false) return [];   // 三角測量を使わなかった回（TRIANGULATION_ENABLED = 0・DLM が primary）は記録しない（根拠に土台のカードを出さない）
     return appLogOps_('METHOD_WEIGHTS', [{ plan_id: plan.plan_id, weight_id: appStableLogId_(APP_LOG_PREFIX.METHOD_WEIGHTS, [p.runId]), run_id: p.runId,
       as_of: Utilities.formatDate(new Date(p.asOfMs), APP_TZ, "yyyy-MM-dd'T'HH:mm:ssZ"),
       w_linear: t.weights.LINEAR, w_recent: t.weights.RECENT, w_robust: t.weights.ROBUST, w_sim: t.weights.SIM, basis: t.basis,
@@ -277,7 +299,8 @@ function appMethodsLive_(ctx, plan, book, p, seed, weights) {
     const day = Utilities.formatDate(new Date(p.asOfMs), APP_TZ, 'yyyy-MM-dd');
     const startYm = (fy - 4) + '/04';
     const lastYear = Array.from({ length: 12 }, (_, i) => (appActualClosed_(appBacktestYmAdd_(startYm, 36 + i), day) ? Number(stat.total48[36 + i] || 0) : null));
-    return { v: appMethodsFromStat_(stat, lastYear, weights), ms: new Date().getTime() - t0 };
+    // triUsed: 統計の部分を同じ計算用ブック（CONFIG・DLM の設定）で動かしたとき、三角測量の土台を使ったか（本番の A-9 と同じ決まり）
+    return { v: appMethodsFromStat_(stat, lastYear, weights), ms: new Date().getTime() - t0, triUsed: !!stat.triWeights };
   } catch (e) {
     appLogError_('LOG.FORECAST_METHODS', e, ctx);
     return null;
@@ -320,16 +343,15 @@ function appMethodsOps_(ctx, plan, p, headline, layerOps) {
  * 返り値 { recs（その計画の今の数え方の記録の行の数）, pts: [{ plan_id, ym, row（FORECAST_METHODS の行）, actual }] }
  */
 function appMethodsLivePoints_(plan) {
+  // 1 回の実行の中で計画ごとに 1 回だけ作る（重みと効き係数の両方が使う。書き込みがあれば appStoreForget_ が捨てる）
+  const memo = APP_STORE_CACHE_.livePts = APP_STORE_CACHE_.livePts || {};
+  if (memo[plan.plan_id]) return memo[plan.plan_id];
+  const recs = appReadPlanTable_('FORECAST_METHODS', plan.plan_id).filter(r => String(r.calc_version) === APP_METHODS_CALC_VERSION);
+  if (!recs.length) return (memo[plan.plan_id] = { recs: 0, pts: [] });   // 記録が無ければ、実績の表を読まない
   const yms = appLandingFyYms_(Number(plan.fy));
   const days = appBacktestImportDays_(plan.plan_id);
   const actual = appBacktestActuals_(plan.plan_id, yms, days.actuals);
-  const recs = appReadPlanTable_('FORECAST_METHODS', plan.plan_id).filter(r => String(r.calc_version) === APP_METHODS_CALC_VERSION);
-  if (!recs.length) return { recs: 0, pts: [] };
-  const runs = {};
-  appReadTable_('FORECAST_RUNS').filter(r => r.plan_id === plan.plan_id && r.status === 'DONE').forEach(r => {
-    const at = appLandingTime_('', r.as_of);
-    if (at !== null) runs[r.run_id] = { at: at, fin: String(r.finished_at || ''), row: r._row };
-  });
+  const runs = appMethodsRunsOf_(plan.plan_id);
   const out = [];
   yms.forEach(ym => {
     const a = actual[ym];
@@ -339,7 +361,21 @@ function appMethodsLivePoints_(plan) {
       .sort((x, y) => runs[y.run_id].at - runs[x.run_id].at || runs[y.run_id].fin.localeCompare(runs[x.run_id].fin) || runs[y.run_id].row - runs[x.run_id].row)[0];
     if (best) out.push({ plan_id: plan.plan_id, ym: ym, row: best, actual: a });
   });
-  return { recs: recs.length, pts: out };
+  return (memo[plan.plan_id] = { recs: recs.length, pts: out });
+}
+
+/** 計画の済んだ予測の回（{ run_id: { at, fin, row } }）。FORECAST_RUNS を 1 回の実行で 1 回だけ計画ごとに分ける */
+function appMethodsRunsOf_(planId) {
+  if (!APP_STORE_CACHE_.runsByPlan) {
+    const by = {};
+    appReadTable_('FORECAST_RUNS').forEach(r => {
+      if (r.status !== 'DONE') return;
+      const at = appLandingTime_('', r.as_of);
+      if (at !== null) (by[r.plan_id] = by[r.plan_id] || {})[r.run_id] = { at: at, fin: String(r.finished_at || ''), row: r._row };
+    });
+    APP_STORE_CACHE_.runsByPlan = by;
+  }
+  return APP_STORE_CACHE_.runsByPlan[planId] || {};
 }
 
 /**
