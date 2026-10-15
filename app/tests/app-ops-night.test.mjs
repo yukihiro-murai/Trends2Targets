@@ -254,7 +254,7 @@ const shiftMark = (env, minutes, patch) => {
   const stalled = items({ state: 'RUNNING', stalled: true, at: '2026-10-13T03:02:00+0900', startedAt: '2026-10-13T03:02:00+0900', lastDoneAt: ago(30) });
   assert.equal(stalled.length, 1, '止まった 1 行だけ（古さの行と重ねない）');
   assert.equal(stalled[0][1], '毎日の手入れが途中で止まりました（2026-10-13 03:02 に始めて、終わりの記録がありません）');
-  assert.match(stalled[0][2], /"action":"listAudit","kind":"RUN","query":"HOUSEKEEPING"/);
+  assert.doesNotMatch(stalled[0][2], /OWNER_TASK|apiOwnerTask|"action":|README|スクリプト プロパティ|BACKUP_AUTO_ENABLE/, 'エディタの操作の手順は画面に出さない（2026-10-15 村井さん）');
   assert.deepEqual(items({ state: 'RUNNING', stalled: false, at: ago(0.05), startedAt: ago(0.05), lastDoneAt: ago(20) }), [], '動いている間は出さない');
   assert.match(items({ state: 'RUNNING', stalled: false, at: ago(0.05), startedAt: ago(0.05), lastDoneAt: ago(30) })[0][1], /最後に終わってから 30 時間たっています/, '最後に終わった時刻で見る');
   assert.deepEqual(items({ state: 'DONE', at: ago(31), startedAt: ago(31), finishedAt: ago(20), lastDoneAt: ago(20), ok: true }), []);

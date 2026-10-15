@@ -270,15 +270,17 @@ const dropBackupTriggers = (env) => { for (let i = env.triggers.length - 1; i >=
     assert.equal(today.length, 1);
     assert.match(today[0][1], /明日以降に所有者が開いたときに自動で有効になります/, `今日は済んでいる（${JSON.stringify(reason)}）`);
     assert.doesNotMatch(today[0][1], /次に開いたとき/);
-    assert.match(today[0][2], /今日の分は済んでいます[\s\S]*"action":"enableBackup"/);
+    assert.match(today[0][2], /今日の分は済んでいます$/);
+    assert.doesNotMatch(today[0][2], /OWNER_TASK|apiOwnerTask|"action":|README|スクリプト プロパティ|BACKUP_AUTO_ENABLE/, 'エディタの操作の手順は画面に出さない（2026-10-15 村井さん）');
   }
   assert.match(items({ backup })[0][1], /自動で有効になります/, '前の版のサーバー（backupAuto が無い）でも同じ');
   const off = items({ backup, backupAuto: { off: true, checkedOn: '', reason: '' } });
   assert.match(off[0][1], /まだ動いていません/);
-  assert.match(off[0][2], /BACKUP_AUTO_ENABLE[\s\S]*"action":"enableBackup"/, '止めてあるときは手で有効にする方法を出す');
+  assert.equal(off[0][2], '自動で有効にしないよう止めてあります', '止めてあることだけ（エディタの操作の手順は出さない）');
   const limit = items({ backup, backupAuto: { off: false, checkedOn: jstDay(0), checkedToday: true, reason: 'TRIGGER_LIMIT' } });
   assert.match(limit[0][1], /自動で有効にできませんでした/);
-  assert.match(limit[0][2], /トリガーの数に余裕がありません[\s\S]*BACKUP\.ENSURE[\s\S]*"action":"enableBackup"/);
+  assert.match(limit[0][2], /トリガーの数に余裕がありません/);
+  assert.doesNotMatch(limit[0][2], /OWNER_TASK|apiOwnerTask|"action":|README|スクリプト プロパティ|BACKUP_AUTO_ENABLE/);
   const failed = items({ backup, backupAuto: { off: false, checkedOn: jstDay(0), checkedToday: true, reason: 'FAILED' } });
   assert.match(failed[0][1], /自動で有効にできませんでした/);
   assert.doesNotMatch(failed[0][2], /トリガーの数/);
