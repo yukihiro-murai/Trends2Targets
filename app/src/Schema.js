@@ -14,7 +14,7 @@
  * 版 11（2026-10-09 村井さん承認「推奨する対応を継続」。SCHEMA_PLAN_v10-12_JA.md の 4 章）で、予算の下書き（BUDGET_DRAFTS。追記だけ）を足し、
  * 公式版（PLAN_VERSIONS）の後ろに、出したときの届く見込みと前提の列を足した（APP_ADDED_COLUMNS。出した後は変えない）。中身は BudgetDrafts.js・V11.js・Versions.js
  */
-const APP_SCHEMA_VERSION = 11;
+const APP_SCHEMA_VERSION = 12;
 
 /**
  * 版を上げて、今ある表の後ろに足した列（古い順）。データ本体の 1 行目が足す前の列なら、版を上げた後の最初の操作で後ろに列の名前を書き足す
@@ -192,6 +192,16 @@ const APP_TABLES = {
     key: ['draft_id'], appendOnly: true,
     columns: ['plan_id', 'draft_id', 'action_id', 'ym', 'adopted', 'uplift', 'basis', 'prob', 'alloc', 'run_id', 'center', 'actor_email', 'saved_at'],
     types: { adopted: 'num', uplift: 'num', prob: 'num', center: 'num' }
+  },
+  // ---- 版 12 の表（追記だけ。2026-10-15 村井さん承認。app/DESIGN_triangulation_bayes_JA.md の 2 章）----
+  FORECAST_METHODS: {
+    // 手法ごとの予測と段（素の回帰との比べ。Methods.js）: 予測 1 回 × 月。手法 = 前年同月・線形回帰・直近を重くした回帰・ロバスト季節・シミュレーション・
+    // 三角測量（試し）、段 = 統計の土台 → + 確定スポット → + 人 → + AI → 最終（本番の真ん中）。source = forecast_open・actual_closed（予測の月か、実績に置き換えた月か）
+    key: ['method_row_id'], appendOnly: true,
+    columns: ['plan_id', 'method_row_id', 'run_id', 'ym', 'source', 'last_year', 'linear', 'recent', 'robust', 'sim', 'tri',
+      'stat', 'plus_spot', 'plus_human', 'plus_ai', 'final', 'calc_version', 'recorded_at'],
+    types: { last_year: 'num', linear: 'num', recent: 'num', robust: 'num', sim: 'num', tri: 'num',
+      stat: 'num', plus_spot: 'num', plus_human: 'num', plus_ai: 'num', final: 'num' }
   }
 };
 

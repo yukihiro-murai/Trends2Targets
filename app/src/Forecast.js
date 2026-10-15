@@ -110,8 +110,11 @@ function appForecastRunCalc_(ctx, p) {
     const run = appRunLegacyForecast_(scratch, { asOfMs: p.asOfMs, seed: eng => appForecastSeed_(plan, forecastInputHash, eng), uuidSeed: p.runId,
       confirms: p.confirms || [], actor: ctx.actor });
     if (!run.ok) return { needConfirm: run.needConfirm, planId: plan.plan_id, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
-    const payload = Object.assign({}, p, { seed: run.seed, engine: { version: run.version, sourceSha256: run.sourceSha256 }, headline: appForecastHeadline_(scratch),
-      runMs: new Date().getTime() - t0, layerTail: layerTail });
+    const headline = appForecastHeadline_(scratch);
+    // 手法ごとの予測（素の回帰との比べ。Methods.js）: 統計の部分だけをもう一度動かす（計算用ブックは書き換えない。失敗しても予測は止めない）
+    const methods = appMethodsLive_(ctx, plan, scratch, p, run.seed);
+    const payload = Object.assign({}, p, { seed: run.seed, engine: { version: run.version, sourceSha256: run.sourceSha256 }, headline: headline,
+      runMs: new Date().getTime() - t0, layerTail: layerTail, methods: methods });
     return { __next: { kind: 'FORECAST.RUN_SAVE', payload: payload }, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
   });
 }
@@ -137,6 +140,7 @@ function appForecastRunSave_(ctx, p) {
     const now = appNowIso_();
     const obj = {};
     (h.objectiveMonthly || []).forEach(m => { obj[m.month] = m; });
+    const layerOps = appLayerEffectsOps_(ctx, plan, p, h, scratch);
     const ops = appChangedOps_(ctx, plan.plan_id, cap.changed, p.runId).concat([
       { table: 'FORECAST_RUNS', mode: 'ensure', rows: [{
         run_id: p.runId, plan_id: plan.plan_id, status: 'DONE', engine_version: p.engine.version, engine_sha256: p.engine.sourceSha256,
@@ -148,7 +152,7 @@ function appForecastRunSave_(ctx, p) {
       { table: 'FORECAST_MONTHLY', mode: 'ensure', rows: (h.monthly || []).map(m => ({
         run_id: p.runId, plan_id: plan.plan_id, ym: m.month, p10: num(m.p10), p50: num(m.p50), p90: num(m.p90),
         obj_p10: obj[m.month] ? num(obj[m.month].p10) : null, obj_p50: obj[m.month] ? num(obj[m.month].p50) : null, obj_p90: obj[m.month] ? num(obj[m.month].p90) : null })) }
-    ], appLayerEffectsOps_(ctx, plan, p, h, scratch), budget.ops);   // 層ごとの効き 12 行（LAYER_EFFECTS。3-3）と、写す前の予算の BASELINE（版 11）を同じ控えで足す
+    ], layerOps, appMethodsOps_(ctx, plan, p, h, layerOps), budget.ops);   // 層ごとの効き 12 行（LAYER_EFFECTS。3-3）・手法ごとの予測 12 行（FORECAST_METHODS。版 12）・写す前の予算の BASELINE（版 11）を同じ控えで足す
     const written = appJournalRun_(ctx, '予測の保存（' + p.runId + '）', plan.plan_id, ops);
     appScratchMarkSynced_(plan.plan_id, p.build.token, null, p.build.problems);   // 次の予測は組み立て直さずに使える
     return { runId: p.runId, planId: plan.plan_id, changed: names, written: written, headline: h, unknown: cap.unknown,

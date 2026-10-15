@@ -77,7 +77,7 @@ function oldEnv(from, { closePast = false } = {}) {
   { __pv: JSON.stringify(V10_VERSIONS), __from: from, __v10t: JSON.stringify(V10_TABLES), __v9: JSON.stringify(V9) });
   env.as(OWNER);
   env.call('apiSetup()');
-  env.props.APP_TABLES_VERSION = '11';   // 前の版の間は、最初の操作の移行を動かさない（今の版の印にしておく）
+  env.props.APP_TABLES_VERSION = String(env.call('APP_SCHEMA_VERSION'));   // 前の版の間は、最初の操作の移行を動かさない（今の版の印にしておく）
   env.data().getSheetByName('_SCHEMA').rows.slice(1).forEach((r) => { if (r && r[0]) r[1] = String(from); });
   const fy = env.run('appFy_(new Date())');
   const ids = {
@@ -112,14 +112,14 @@ function toV11(env, from) {
 
 /** 移行の後の姿: 見出し・_SCHEMA・新しい表・前の値が 1 文字も変わっていない（変わってよいのは _SCHEMA の移した表の行だけ） */
 function checkMigrated(env, before, moved) {
-  assert.equal(env.props.APP_TABLES_VERSION, '11');
+  assert.equal(env.props.APP_TABLES_VERSION, String(env.call('APP_SCHEMA_VERSION')));
   const cols = (n) => env.call(`APP_TABLES['${n}'].columns.slice()`);
   assert.deepEqual([...env.data().getSheetByName('PLAN_VERSIONS').rows[0]], V10_VERSIONS.concat(ADDED), 'PLAN_VERSIONS の後ろに 9 列');
   assert.deepEqual([...env.data().getSheetByName('BUDGET_DRAFTS').rows[0]], cols('BUDGET_DRAFTS'), '下書きの表を作った');
   const schema = env.table('_SCHEMA');
   for (const n of moved) {
     const s = schema.find((r) => r.table === n);
-    assert.deepEqual([s.schema_version, s.columns_hash], ['11', sha(cols(n).join('|'))], '_SCHEMA: ' + n);
+    assert.deepEqual([s.schema_version, s.columns_hash], [String(env.call('APP_SCHEMA_VERSION')), sha(cols(n).join('|'))], '_SCHEMA: ' + n);
   }
   assert.ok(schema.some((r) => r.table === 'BUDGET_DRAFTS' && r.columns_hash === sha(cols('BUDGET_DRAFTS').join('|'))));
   const after = Object.fromEntries(sheetsOf(env).map((s) => [s.name, s]));
@@ -156,7 +156,7 @@ function checkMigrated(env, before, moved) {
   assert.deepEqual(ma.map((a) => [a.phase, a.result]), [['START', ''], ['END', 'OK']]);
   assert.deepEqual(JSON.parse(ma[0].before_json).tables.map((t) => [t.table, t.columns]), [['PLAN_VERSIONS', V10_VERSIONS]]);
   assert.deepEqual(JSON.parse(ma[1].after_json).tables.map((t) => [t.table, t.columns, t.wroteHead]), [['PLAN_VERSIONS', V10_VERSIONS.concat(ADDED), true]]);
-  assert.equal(JSON.parse(ma[0].detail_json).version, 11);
+  assert.equal(JSON.parse(ma[0].detail_json).version, env.call('APP_SCHEMA_VERSION'));
   // 一度だけの写し: 手で直した跡のある計画（edit）だけ 12 行。測る専用・締めた年度・跡の無い計画は写さない
   const d = env.table('BUDGET_DRAFTS');
   assert.deepEqual([...new Set(d.map((r) => r.plan_id))], [ids.edit]);
@@ -243,7 +243,7 @@ function checkMigrated(env, before, moved) {
   assert.equal(st.result.draft, null);
   assert.equal(nums(env, ids.plain).monthly[0].adopted, 1234);
   assert.throws(() => env.call('appTestVersionSubmit_(__in)', { __in: { planId: ids.plain } }), /表の列を足す移行がまだです（PLAN_VERSIONS）/);
-  assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'FORECAST.RUN', payload: { planId: ids.plain } } }), /表の版 11 の移行（列を足す）がまだ済んでいないので、予測の実行は始めません/);
+  assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'FORECAST.RUN', payload: { planId: ids.plain } } }), /表の版 \d+ の移行（列を足す）がまだ済んでいないので、予測の実行は始めません/);
   // 取れるようになったら移す。_SCHEMA を書く前に止まっても、次の操作が続きから終わる
   env.props.APP_ARCHIVE_FOLDER_ID = archiveId;
   delete env.props.APP_MIGRATE_BACKUP_FAILED_AT;
@@ -253,7 +253,7 @@ function checkMigrated(env, before, moved) {
   assert.deepEqual([...env.data().getSheetByName('PLAN_VERSIONS').rows[0]], V10_VERSIONS.concat(ADDED), '見出しは書いた');
   env.data().getSheetByName('_SCHEMA').failWrites = false;
   env.call('apiListPlans()');
-  assert.equal(env.props.APP_TABLES_VERSION, '11');
+  assert.equal(env.props.APP_TABLES_VERSION, String(env.call('APP_SCHEMA_VERSION')));
   const ma = migrateAudits(env);
   assert.deepEqual(JSON.parse(ma[ma.length - 2].detail_json).tables.map((t) => [t.table, t.resume]), [['PLAN_VERSIONS', true]], '続きは _SCHEMA だけ');
   assert.deepEqual(env.task('health()').tables.filter((t) => !t.ok).map((t) => t.name), []);

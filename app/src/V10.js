@@ -9,7 +9,7 @@
 
 /** 記録の番号の頭（appNewLogId_・appStableLogId_ に渡す） */
 const APP_LOG_PREFIX = { INPUT_LOG: 'INL', AI_RESEARCH_LOG: 'AIR', LAYER_EFFECTS: 'LEF', HIT_RECORDS: 'HIT', LEARNING_LOG: 'LRN',
-  PERSON_LINKS: 'PLK', BACKTEST: 'BTP' };
+  PERSON_LINKS: 'PLK', BACKTEST: 'BTP', FORECAST_METHODS: 'FMR' };
 
 /** 測る専用の計画（PLANS.purpose。3-9）と、その数の上限（9 章 9: まず 5 計画） */
 const APP_PLAN_MEASURE = 'MEASURE';

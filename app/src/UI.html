@@ -454,7 +454,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .anx{margin-top:var(--s3)}
 .anx[data-tip]{display:inline-block}
 .tbl.anw{width:max(100%,560px)}
-.tbl.anbt td.num > .note{display:block}   /* 物差し: 95% の幅は値の下の行に（152px の列に入る） */
+.tbl.anbt td.num > .note{display:block}
+.tbl.anmt .chip.st{min-width:0;width:100%}   /* 素の回帰との比べ: 札は 112px の列いっぱい（.chip.st の 112px は列の余白ではみ出す） */   /* 物差し: 95% の幅は値の下の行に（152px の列に入る） */
 .tbl.fc-layers th.num{padding-left:var(--s1)}   /* 根拠の層の表: 「前回から（月の合計）」を 1 マス（160px）の列に 1 行で（右寄せなので左の余白を詰める） */
 .anwx{display:inline-flex;align-items:center;gap:var(--s2)}
 @media (max-width:760px){
@@ -3996,7 +3997,7 @@ function anOverview(d){
     : (onlyAcc && z.zero && !z.rest ? '' : 'まだ数字がそろっていないため、') + esc(miss.join('・')) + 'は出していません。' + (onlyAcc ? '' : more) + esc(accHow);
   // 全体の読み解き（サーバーの insights。予算を立てるメーカーだけ）は、メーカーごとのグラフより先に
   var whole = bud.length ? anDistCard(d) + anWaterfallCard(d) + anSpreadCard(d) : '';
-  return anHero(d, bud, g) + anMeasure(ms) + whole + body + anBacktestCard(d) + anMarket(d);   // 物差しは見通しと当たり具合の後、市場は最後
+  return anHero(d, bud, g) + anMeasure(ms) + whole + body + anMethodsCard(d) + anBacktestCard(d) + anMarket(d);   // 素の回帰との比べ・物差しは見通しと当たり具合の後、市場は最後
 }
 
 // ---- 分析の要点（よみ。サーバーの insights から、数字で言える示唆を気になる順に 5 つまで。根拠の式はカーソルで）----
@@ -4408,6 +4409,63 @@ function anBacktestCard(d){
   return anCard('物差し', tip + 'FY' + (b.fy || d.fy) + ' の計画ごとに一番新しい回（' + (b.plans || 0) + ' 計画）。幅は、メーカーごとの平均のばらつきから出した 95% の目安です（1 社だけなら出しません）'
     + (b.oldCalcRuns ? '。数え方を直す前の回（' + b.oldCalcRuns + ' 回）は入れていません' : ''),
     '<div class="tblwrap">' + tbl + '</div><p class="note" data-tip="' + esc(sayTip) + '">' + esc(say) + '</p>');
+}
+
+// ---- 素の回帰との比べ（apiCrossMaker の methods。表の版 12。Methods.js。2026-10-15 村井さん「単なる線形回帰の方が精度が高いなら、それも一つの帰結」）----
+// 手法（統計だけ）と段（統計の土台に、確定スポット・人・AI・補正を順に足したもの）の外れ幅を並べ、線形回帰との差・1 つ前の段との差を言う。
+// 数え方は物差しと同じ（メーカーごとに平均してから 95% の幅。30 点・2 社より少なければ比べない）。金額は出さない
+var AN_MT = { LAST_YEAR: ['前年同月', '前の年の同じ月の売上（比べるための物差し）'],
+  LINEAR: ['線形回帰', '過去 48 か月に直線を当てて季節の波を掛けたもの（今の予測の土台と同じ式）。何も足さない素の予測'],
+  RECENT: ['直近重視の回帰', '同じ直線を、新しい月ほど重く当てたもの（半減期 12 か月）'],
+  ROBUST: ['季節の中央値', '年ごとの同じ月の比の中央値で季節の形を出し、直近 12 か月の水準に掛けたもの（飛び値に強い）'],
+  SIM: ['シミュレーション', '過去の外れ方を 1000 回足して、真ん中を取ったもの（人の入力・AI・補正なし）'],
+  TRI: ['三角測量（試し）', '線形回帰・季節の中央値・直近重視・シミュレーションを、0.15・0.40・0.25・0.20 の重みで混ぜたもの（まだ予測には使っていない）'],
+  STAT: ['統計の土台', '本番の予測のうち、過去の売上だけの部分'], PLUS_SPOT: ['＋確定スポット', '統計の土台に、確定しているスポット案件を足したもの'],
+  PLUS_HUMAN: ['＋人', 'さらに、製品・メーカー全体・見解の入力を足したもの'], PLUS_AI: ['＋AI', 'さらに、AI の市場調査の押しを足したもの'],
+  FINAL: ['最終（本番）', 'さらに、学んだ補正を掛けたもの（本番の予測の真ん中）'] };
+var AN_MT_STAGES = ['STAT', 'PLUS_SPOT', 'PLUS_HUMAN', 'PLUS_AI', 'FINAL'];
+var AN_MT_V = { smaller: ['良い', 'ok'], larger: ['悪い', 'ng'], unclear: ['差なし', 'off'], wait: ['判断前', 'off'], oneMaker: ['1 社', 'off'] };
+/** 差の札（d = { diff, lo, hi, n, makers, verdict }。who = 比べた相手の名前） */
+function anMtVs(d, who){
+  if (!d) return '<td class="ctr">-</td>';
+  var v = AN_MT_V[d.verdict] || AN_MT_V.wait;
+  var t = who + 'と比べて: ' + v[0] + (isNum(d.diff) ? '\n外れ幅の差 ' + pct1(d.diff) + (isNum(d.lo) && isNum(d.hi) ? '（95% の幅 ' + pct1(d.lo) + '〜' + pct1(d.hi) + '）' : '') : '')
+    + '\n' + (d.n || 0) + ' 点・' + (d.makers || 0) + ' 社' + (d.verdict === 'wait' ? '（30 点・2 社から比べます）' : '');
+  return '<td class="ctr"><span class="chip st ' + v[1] + '" data-tip="' + esc(t) + '">' + v[0] + '</span></td>';
+}
+function anMethodsCard(d){
+  var m = d.methods;
+  if (!m || !m.live) return '';
+  var live = {}, back = {};
+  (m.live.rows || []).forEach(function(r){ live[r.key] = r; });
+  ((m.back && m.back.rows) || []).forEach(function(r){ back[r.key] = r; });
+  var keys = ['LAST_YEAR', 'LINEAR', 'RECENT', 'ROBUST', 'SIM', 'TRI'].concat(AN_MT_STAGES);
+  var rows = keys.map(function(k){
+    var r = live[k] || {}, b = back[k] || {}, nm = AN_MT[k], si = AN_MT_STAGES.indexOf(k);
+    return '<tr' + (k === 'LINEAR' || k === 'FINAL' ? ' class="total"' : '') + '><td data-tip="' + esc(nm[0] + '：' + nm[1]) + '">' + esc(nm[0]) + '</td>'
+      + anBtCell(r.mape, r.mapeLo, r.mapeHi, anPct1, '外れ幅（各月が始まる前の最後の予測。' + (r.n || 0) + ' 点）', r.makers)
+      + anBtCell(r.bias, r.biasLo, r.biasHi, pct1, '偏り（プラスは予測が実績より高め）', r.makers)
+      + (k === 'LINEAR' ? '<td class="ctr">-</td>' : anMtVs(r.vsLinear, '線形回帰'))
+      + (si > 0 ? anMtVs(r.vsPrev, AN_MT[AN_MT_STAGES[si - 1]][0]) : '<td class="ctr">-</td>')
+      + (si < 0 ? anBtCell(b.mape, b.mapeLo, b.mapeHi, anPct1, '外れ幅（年度の初め 4/1 に戻って 1〜12 か月先を予測し直したもの。' + (b.n || 0) + ' 点）', b.makers) : '<td class="num" data-tip="人の入力・AI は過去に戻って作り直せないので、本番の記録だけで比べます">-</td>')
+      + '</tr>';
+  }).join('');
+  var tbl = anTable(['', 152, 152, 112, 112, 152], '<th>予測</th><th class="num" data-tip="各月が始まる前の最後の予測と実績の差の割合（メーカーごとに平均してから）。小さいほどよく当たっています">外れ幅</th>'
+    + '<th class="num" data-tip="プラスは予測が実績より高め、マイナスは低め">偏り</th><th class="ctr" data-tip="線形回帰（何も足さない素の予測）より外れが小さければ「良い」、大きければ「悪い」。95% の幅が 0 をまたげば「差なし」">線形回帰より</th>'
+    + '<th class="ctr" data-tip="1 つ前の段より外れが小さくなったか（足したものが効いたか）">前の段より</th>'
+    + '<th class="num" data-tip="年度の初め（4/1）に戻って、統計だけで予測し直したときの外れ幅（物差し）。作ったその日から過去の分で比べられます">4/1 に戻って</th>', rows, 'anbt anmt');
+  var f = live.FINAL && live.FINAL.vsLinear, L = m.live;
+  var say = !L.ready ? 'まだ判断できません（実績の締まった月 ' + (L.points || 0) + ' 点・' + (L.makers || 0) + ' 社。' + (m.minPoints || 30) + ' 点・' + (m.minMakers || 2) + ' 社から比べます）'
+    : !f || f.verdict === 'wait' || f.verdict === 'oneMaker' ? 'まだ判断できません'
+    : f.verdict === 'smaller' ? '本番の予測は、線形回帰だけより外れが小さい（外れ幅の差 ' + anPct1(Math.abs(f.diff)) + '）'
+    : f.verdict === 'larger' ? '線形回帰だけの方が、本番の予測より外れが小さい（外れ幅の差 ' + anPct1(Math.abs(f.diff)) + '）'
+    : '本番の予測と線形回帰だけに、はっきりした差はありません';
+  var B = m.back || {};
+  var best = (B.rows || []).filter(function(r){ return isNum(r.mape) && r.key !== 'LAST_YEAR'; }).sort(function(a, b){ return a.mape - b.mape; })[0];
+  var sayBack = B.ready && best ? '4/1 に戻ると、外れがいちばん小さいのは' + AN_MT[best.key][0] + '（' + anPct1(best.mape) + '）' : '';
+  return anCard('素の回帰との比べ', '何も足さない線形回帰と、統計の手法・本番の予測（確定スポット・人・AI・補正を順に足したもの）の外れ幅を比べます。'
+    + '本番は、各月が始まる前の最後の予測で比べます（同じ回・同じ時点の値なので、持っていた情報の差がありません）。幅は、メーカーごとの平均のばらつきから出した 95% の目安です',
+    '<div class="tblwrap">' + tbl + '</div><p class="note">' + esc(say) + (sayBack ? '。' + esc(sayBack) : '') + '</p>');
 }
 
 // ---- 市場 ----

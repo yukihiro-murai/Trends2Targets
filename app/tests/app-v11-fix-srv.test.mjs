@@ -215,7 +215,7 @@ part('F5 移行を待つ間の記録', () => {
     delete APP_TABLES.BUDGET_DRAFTS; delete APP_ADDED_COLUMNS.PLAN_VERSIONS; APP_TABLES.PLAN_VERSIONS.columns = JSON.parse(__pv);`, { __pv: JSON.stringify(V10_VERSIONS) });
   env.as(OWNER);
   env.call('apiSetup()');
-  env.props.APP_TABLES_VERSION = '11';
+  env.props.APP_TABLES_VERSION = String(env.call('APP_SCHEMA_VERSION'));
   env.data().getSheetByName('_SCHEMA').rows.slice(1).forEach((r) => { if (r && r[0]) r[1] = '10'; });
   const fy = env.run('appFy_(new Date())');
   const HPR = J(env.run('APP_ENGINE_SHEETS.PRODUCT.header'));
@@ -247,12 +247,12 @@ part('F5 移行を待つ間の記録', () => {
   assert.equal(env.call('appLogReady_("BUDGET_DRAFTS")'), false);
   assert.equal(env.call('appLogReady_("INPUT_LOG")'), true);
   assert.equal(env.call('appLogReady_()'), false, '表を渡さなければ版の印だけ（一度だけの写し・予測を断るか）');
-  assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'FORECAST.RUN', payload: { planId } } }), /表の版 11 の移行（列を足す）がまだ済んでいないので/, '予測は今までどおり断る');
+  assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'FORECAST.RUN', payload: { planId } } }), /表の版 \d+ の移行（列を足す）がまだ済んでいないので/, '予測は今までどおり断る');
   // バックアップが取れるようになって移行が済んでも、その保存の記録は 1 行のまま残る
   env.props.APP_ARCHIVE_FOLDER_ID = archiveId;
   delete env.props.APP_MIGRATE_BACKUP_FAILED_AT;
   env.call('apiListPlans()');
-  assert.equal(env.props.APP_TABLES_VERSION, '11');
+  assert.equal(env.props.APP_TABLES_VERSION, String(env.call('APP_SCHEMA_VERSION')));
   assert.equal(env.table('INPUT_LOG').filter((r) => r.self_conf === '高い' && r.action === 'INPUT.SAVE').length, 1);
   assert.ok(env.table('BUDGET_DRAFTS').some((r) => r.plan_id === planId && r.basis === 'BASELINE'), '保存した予算は移行の後の写しで下書きになる');
 });

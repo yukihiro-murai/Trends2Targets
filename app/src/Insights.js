@@ -720,6 +720,7 @@ function appCrossMaker_(fy) {
     market: Object.keys(market).map(k => ({ topic: k, makers: market[k].makers, up: market[k].up, down: market[k].down, flat: market[k].flat,
       meanScore: appInsightMean_(market[k].scores) })).sort((x, y) => y.makers - x.makers || x.topic.localeCompare(y.topic)),
     backtest: appBacktestCard_(pick),   // 物差し（Backtest.js。割合と点の数だけ。動かした計画が無ければ null）
+    methods: appMethodsCard_(pick),     // 素の回帰との比べ（Methods.js。割合と点の数だけ。記録も物差しも無ければ null）
     insights: appCrossInsights_(rows)   // 全体の読み解き（予算を立てる計画だけ。2026-10-13）
   };
 }

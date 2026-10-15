@@ -1,7 +1,7 @@
 /**
  * Backtest.js — 物差し（表の版 10 の 3-7・決定 9 (b)。2026-10-08 村井さん承認「版10はおすすめで」）。
  * 過去の区切り（年度の初めの 4 月）に戻って予測し直し、単純な方法・本番の予測と並べて、締まった月の実績で採点する点を BACKTEST に足す。
- * 1 回 = 12 か月 × 6 方法 = 72 行（追記だけ。予測の数字・OUTPUT・ENG_*・FORECAST_*・PLAN_VERSIONS は変えない）。記録は計算に使わない。
+ * 1 回 = 12 か月 × 10 方法 = 120 行（追記だけ。予測の数字・OUTPUT・ENG_*・FORECAST_*・PLAN_VERSIONS は変えない）。記録は計算に使わない。
  * 比べる時点は 2 つ（2026-10-13 村井さん承認。時点の違う予測を比べると、情報の差だけで外れの差が出る）:
  *   区切りの「今」（4/1）に 1〜12 か月先を予測したもの（horizon = 1〜12）
  *     STAT_ONLY … 旧来の A-9（runForecastFYCore_）の統計の部分だけを、同じ順で呼ぶ（人の入力・AI・補正・既知のスポットを入れない）。
@@ -37,7 +37,9 @@ const APP_BACKTEST_CALC_VERSION = 'BT-2';
 /** 組み立てる計算用のシート（統計の部分が読むものだけ） */
 const APP_BACKTEST_SHEETS = ['CONFIG', 'SALES_INPUT', 'SALES_MONTHLY'];
 /** 方法（記録の順。画面は比べる組で並べ直す）。単純な方法は p50 だけ */
-const APP_BACKTEST_METHODS = ['STAT_ONLY', 'LIVE', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL', 'LAST_YEAR_PACE'];
+const APP_BACKTEST_METHODS = ['STAT_ONLY', 'LIVE', 'LAST_YEAR', 'TWO_YEAR', 'SEASONAL', 'LAST_YEAR_PACE', 'LINEAR', 'RECENT', 'ROBUST', 'TRI'];
+// 後ろの 4 つは、素の回帰との比べ（Methods.js。2026-10-15 村井さん承認）の手法を、同じ 4/1 の統計の部分から出したもの（乱数は使わない。前からの 6 つの数字は変わらない）。
+// 物差しのカードには出さず、分析の「素の回帰との比べ」に出す
 const APP_BACKTEST_SIMPLE = ['LAST_YEAR', 'TWO_YEAR', 'SEASONAL'];   // 区切りの「今」（4/1）の単純な方法（統計だけと比べる。外れ幅のいちばん小さいもの）
 const APP_BACKTEST_SIMPLE_LIVE = 'LAST_YEAR_PACE';                    // 本番と同じ時点の単純な方法（本番と比べる）
 const APP_BACKTEST_WINDOW = 48;          // 区切りの前の月の数（旧来の A-9 の 48 か月）
@@ -126,7 +128,7 @@ function appBacktestStatRun_(book, opts) {
   const eng = appLegacyEngine_(svc);
   const engine = { version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256 };
   const seed = String(typeof opts.seed === 'function' ? opts.seed(engine) : opts.seed);
-  return appWithSeededRandom_(seed, () => Object.assign(appBacktestStatCore_(eng, book, Number(opts.fy), opts.asOfMs, opts.closed), { seed: seed, engine: engine }));
+  return appWithSeededRandom_(seed, () => Object.assign(appBacktestStatCore_(eng, book, Number(opts.fy), opts.asOfMs, opts.closed, !!opts.skipSync), { seed: seed, engine: engine }));
 }
 
 /**
@@ -134,13 +136,14 @@ function appBacktestStatRun_(book, opts) {
  * 人の入力（製品・メーカー全体・見解・既知のスポット）・AI・補正（CALIBRATION_STATE の値・学んだ偏り・AI のアシスト）・情報源の信頼度は入れない。
  * 売上の表は runPhase1Forecast と同じく SALES_INPUT から作り直す（syncSalesFromSalesInput_）。
  * closed（省ける）の締まっていない月の売上は、読んだ後に 0 円にする（その時点では分からない。旧来の「今」をその月に置けば、旧来の計算が
- * 締まっていない月として補う。SALES_MONTHLY のその月を 0 円にして本番の A-9 を動かすのと同じ）
+ * 締まっていない月として補う。SALES_MONTHLY のその月を 0 円にして本番の A-9 を動かすのと同じ）。
+ * skipSync = true なら売上の表を作り直さない（本番の予測の直後に、旧来の予測が作り直した表をそのまま読む。計算用ブックを書き換えない。Methods.js）
  */
-function appBacktestStatCore_(eng, book, fy, asOfMs, closed) {
+function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync) {
   const cfg = book.getSheetByName(eng.SHEETS.CONFIG);
   const client = eng.normalizeClientName_(String(cfg ? cfg.getRange('B2').getValue() || '' : '').trim());
   if (!client) throw new Error('計画の CONFIG にメーカーがありません。');
-  eng.syncSalesFromSalesInput_(fy, client);
+  if (!skipSync) eng.syncSalesFromSalesInput_(fy, client);
   const salesData = eng.readSales48Months_(book.getSheetByName(eng.SHEETS.SALES_MONTHLY));
   const rawTotal48 = (salesData.baseSeries48 || []).map((v, i) => Number(v || 0) + Number((salesData.spotSeries48 || [])[i] || 0));
   if (closed) {
@@ -200,7 +203,9 @@ function appBacktestStatCore_(eng, book, fy, asOfMs, closed) {
   // 季節加重（本番は OUTPUT を書くときに、補正を入れないチューニングで計算する）
   const seasonal = eng.forecastSeasonalWeighted48_({ adjustedBaseSeries48: aggYAdj, seriesStart: seriesStart, lastClosedMonthStart: ctx.lastClosedMonthStart,
     spotBackgroundExpectedByMonth: spotBg, knownSpotExpectedByMonth: known, tuning: eng.readModelTuningFromConfig_() });
-  return { p10: mixed.p10.slice(), p50: mixed.p50.slice(), p90: mixed.p90.slice(), seasonal: seasonal.totalByMonth.slice(), total48: rawTotal48 };
+  // 手法の材料（Methods.js。乱数を使った後に読むだけ）: 土台の売上・土台の式・背景のスポット・予測の月の印
+  return { p10: mixed.p10.slice(), p50: mixed.p50.slice(), p90: mixed.p90.slice(), seasonal: seasonal.totalByMonth.slice(), total48: rawTotal48,
+    y: aggYAdj.slice(), model: { slope: model.slope, intercept: model.intercept, seasonalIndex: model.seasonalIndex.slice() }, spotBg: spotBg.slice(), sourceByMonth: sourceByMonth.slice() };
 }
 
 // ---- 実績・本番の予測・本物の月 ----
@@ -268,7 +273,7 @@ function appBacktestRealMonths_(total48, startYm, salesDay) {
 }
 
 /**
- * 物差し 1 回の行（12 か月 × 6 方法）。id と時刻はここで決める（控えの書き直しで同じ行になるように）。
+ * 物差し 1 回の行（12 か月 × 10 方法）。id と時刻はここで決める（控えの書き直しで同じ行になるように）。
  * horizon = 予測した時点から何か月先か: 区切りの「今」の方法は i + 1（4 月 = 1）、本番と同じ時点の単純な方法は、その月の本番の回の「今」の月から
  * （3/20 の回の 4 月 = 1）。本番の回が無い月は 0（予測が無い。数えない）
  */
@@ -302,8 +307,10 @@ function appBacktestRows_(ctx, plan, fy, btId, stat) {
     }
     return base * (b > 0 ? a / b : 1);
   };
+  const meth = appMethodsFromStat_(stat, Array.from({ length: 12 }, (_, i) => t(36 + i)));   // 線形回帰・直近重視・ロバスト季節・三角測量（試し）
   const value = (m, i, ym) => {
     if (m === 'STAT_ONLY') return [stat.p10[i], stat.p50[i], stat.p90[i]];
+    if (meth[m] && m !== 'LAST_YEAR' && m !== 'SIM') return [null, meth[m][i], null];
     if (m === 'LIVE') return live[ym] ? [live[ym].p10, live[ym].p50, live[ym].p90] : [null, null, null];
     if (m === 'LAST_YEAR') return [null, t(36 + i), null];
     if (m === 'TWO_YEAR') return [null, t(24 + i) === null || t(36 + i) === null ? null : (t(24 + i) + t(36 + i)) / 2, null];
@@ -351,7 +358,7 @@ function appBacktestBuild_(ctx, p, job) {
 }
 
 /**
- * 計算と保存（MEASURE.BACKTEST_CALC）: 統計だけを動かし、6 つの方法の 72 行を、控えの書き方 append で BACKTEST に足す。
+ * 計算と保存（MEASURE.BACKTEST_CALC）: 統計だけを動かし、10 の方法の 120 行を、控えの書き方 append で BACKTEST に足す。
  * 統計だけは区切りの「今」に締まっていた月の売上だけで動かす（appBacktestClosed_・appBacktestStatAsOf_）
  */
 function appBacktestCalc_(ctx, p) {

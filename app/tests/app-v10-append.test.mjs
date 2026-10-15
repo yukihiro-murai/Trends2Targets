@@ -146,7 +146,7 @@ const journal = (label, planId, list) => env.call(`appWithLock_(() => appJournal
   ss.deleteSheet(sh);
   env.run('APP_STORE_CACHE_ = {}');
   assert.deepEqual(ops('BACKTEST', [{ plan_id: planB, point_id: 'BTP-T' }]), [], '表が無ければ足さない（本体の保存は止めない）');
-  env.props.APP_TABLES_VERSION = '11';
+  env.props.APP_TABLES_VERSION = String(env.call('APP_SCHEMA_VERSION'));
   assert.equal(ops('BACKTEST', [{ plan_id: planB, point_id: 'BTP-T' }]).length, 1, '版がそろっていれば足す（今までどおり。書くところで表を確かめる）');
 }
 

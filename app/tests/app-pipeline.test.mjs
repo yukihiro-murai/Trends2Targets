@@ -315,7 +315,7 @@ const ends = (env, re) => env.audit().filter((a) => re.test(a.action) && a.phase
 {
   const { env, planId } = imported();
   const builds = () => env.audit().filter((a) => a.action === 'FORECAST.RUN.BUILD' && a.phase === 'END').map((a) => JSON.parse(a.after_json));
-  const scratchWrites = () => Object.entries(STATS.bySheet).filter(([n]) => !/^(ENG_|PLANS|FORECAST_RUNS|FORECAST_MONTHLY|PLAN_|AUDIT|RUN_|ERROR_|_SCHEMA|CLIENTS|MEMBERS|ROLES|SETTINGS|IMPORT_)/.test(n)).reduce((s, [, b]) => s + b.writeCells, 0);
+  const scratchWrites = () => Object.entries(STATS.bySheet).filter(([n]) => !/^(ENG_|PLANS|FORECAST_RUNS|FORECAST_MONTHLY|FORECAST_METHODS|LAYER_EFFECTS|PLAN_|AUDIT|RUN_|ERROR_|_SCHEMA|CLIENTS|MEMBERS|ROLES|SETTINGS|IMPORT_)/.test(n)).reduce((s, [, b]) => s + b.writeCells, 0);
   const reset = () => { for (const k of Object.keys(STATS)) STATS[k] = k === 'bySheet' ? {} : 0; };
   assert.equal(env.runJob('FORECAST.RUN', { planId }).status, 'DONE');
   reset();

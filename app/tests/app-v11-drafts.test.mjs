@@ -91,7 +91,7 @@ const planA = env.seedPlan(planBook('テスト製薬', FY, { p50: P0, sales: sal
 
 // ==== 1. 表の定義（4-1・4-2） ====
 {
-  assert.equal(env.call('APP_SCHEMA_VERSION'), 11);
+  assert.ok(env.call('APP_SCHEMA_VERSION') >= 11);
   const d = env.call('APP_TABLES.BUDGET_DRAFTS');
   assert.deepEqual(d.columns, ['plan_id', 'draft_id', 'action_id', 'ym', 'adopted', 'uplift', 'basis', 'prob', 'alloc', 'run_id', 'center', 'actor_email', 'saved_at']);
   assert.deepEqual([d.key, d.appendOnly], [['draft_id'], true]);
@@ -100,7 +100,7 @@ const planA = env.seedPlan(planBook('テスト製薬', FY, { p50: P0, sales: sal
   assert.deepEqual(v.slice(-9), add, '公式版の後ろに 9 列');
   assert.deepEqual(env.call('APP_ADDED_COLUMNS.PLAN_VERSIONS'), [{ version: 11, columns: add }]);
   assert.deepEqual(env.call('appBackfillNames_()').slice(-1), ['appV11BackfillBudgetDrafts_'], '版 11 の写しは版 10 の写しの後');
-  assert.ok(env.table('_SCHEMA').some((r) => r.table === 'BUDGET_DRAFTS' && r.schema_version === '11'));
+  assert.ok(env.table('_SCHEMA').some((r) => r.table === 'BUDGET_DRAFTS' && r.schema_version === String(env.call('APP_SCHEMA_VERSION'))));
 }
 
 // ==== 2. 予算の保存のたびに 12 行の下書き ====
