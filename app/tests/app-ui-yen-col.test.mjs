@@ -72,13 +72,14 @@ const CARD_1280 = 922;   // 1280px の画面のカードの中の幅（1280 − 
   const planId = env.seedPlan(env.makeBook('A', { CONFIG: { values: [['項目', '値'], ['[必須] メーカー名（外部集計キー）', 'テスト製薬'], ['[必須] 予測年度FY（YYYY）', fy], ['[必須] 担当者（カンマ区切り）', '担当A']] }, OUTPUT: { values: output } }));
   const d = env.call('apiForecastLatest(__in)', { __in: { planId } });
   const v = env.call('apiPlanView(__in)', { __in: { planId } });
-  run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.cv.fcMonthly = 'table'`, { __l: env.call('apiListPlans()').plans, __id: planId, __v: v, __d: d });
-  const html = run('fcForecastTab(S.fc.data, S.fc.view)');
+  run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.cv.fcMonthly = S.cv.fcBudgetM = 'table'`, { __l: env.call('apiListPlans()').plans, __id: planId, __v: v, __d: d });
+  const html = run('fcBothTabs(S.fc.data, S.fc.view)');
   const t = cols(html, 'tbl scroll edit');
-  assert.deepEqual(t.th, ['月', '下振れ', '中心', '上振れ', '採用予測', '上乗せ', '最終予算']);
-  assert.deepEqual(t.w, [96, 0, 0, 0, 160, 160, 0], '採用予測・上乗せは 1 マス');
+  // 予算策定の表（2026-10-16 から下振れ・上振れは予測結果の画面だけ）
+  assert.deepEqual(t.th, ['月', '中心', '採用予測', '上乗せ', '最終予算']);
+  assert.deepEqual(t.w, [96, 0, 160, 160, 0], '採用予測・上乗せは 1 マス');
   // 1280px の画面で、残りを分けた 4 つの金額の列にも年度合計（279,000,000）が入る幅が残る（横に送らない）
-  const rest = (CARD_1280 - t.w.reduce((a, b) => a + b, 0)) / 4;
+  const rest = (CARD_1280 - t.w.reduce((a, b) => a + b, 0)) / 2;
   assert.ok(rest >= 9 * 8.5 + 2 * 4 + 16, '残りの列に 279,000,000 が入る: ' + rest);
   assert.match(html, /<tr class="total"><td>年度合計<\/td>/);
   assert.match(html, /279,000,000/);

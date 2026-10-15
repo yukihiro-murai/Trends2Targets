@@ -199,7 +199,7 @@ part('D2 予算の下書きの言い方', () => {
   const view = env.call('apiPlanView(__in)', { __in: { planId: idMid } });
   const latest = env.call('apiForecastLatest(__in)', { __in: { planId: idMid } });
   assert.deepEqual([view.boot.budgetDraft.centerAtDraft, view.boot.budgetDraft.centerNow, latest.shadow.annual.basis], [12000, 12000, 'landing'], '前提: 下書きの値は月の合計・上の中心は着地の推定');
-  const html = R(`S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; fcForecastTab(__d, __v)`, { __id: idMid, __v: J(view), __d: J(latest) });
+  const html = R(`S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; fcBothTabs(__d, __v)`, { __id: idMid, __v: J(view), __d: J(latest) });
   assert.equal(kpi(html, '中心').v, ys(latest.shadow.annual.p50), '上の中心は着地の推定');
   assert.ok(!tipsOf(html).some((t) => t.startsWith('予算の下書き')) && !/予算の下書き/.test(html), '予算の下書きの 1 行は出さない（2026-10-13 村井さん「細かいテキストは不要」）');
 });

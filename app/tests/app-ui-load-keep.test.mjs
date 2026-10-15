@@ -102,11 +102,11 @@ assert.equal(run('S.fc.learn.planId'), X);
 assert.equal(run('S.fc.ver.planId'), X);
 assert.equal(run('S.fc.jump'), 'basis', '根拠の区切りへ送る（描けたら送る）');
 {
-  const page = run('viewForecast()');
+  const page = run('viewForecastAll()');
   assert.doesNotMatch(page, /観測中…/, '読めた中身をすぐ出す（「観測中…」を出さない）');
   assert.doesNotMatch(page, /role="tablist"[^>]*>\s*<button class="tab/, '画面の中のタブは無い');
   const ids = [...page.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]);
-  assert.deepEqual(ids, ['forecast', 'basis', 'input', 'review', 'version', 'steps'], '区切りは今までのタブの順に上から');
+  assert.deepEqual(ids, ['input', 'steps', 'forecast', 'basis', 'review', 'budget', 'version'], '区切りは画面ごとに上から（予測準備・予測結果・予算策定）');
 }
 assert.deepEqual(callsOf(`go('home'); go('makers'); go('forecast')`).filter((f) => f !== 'apiAiLearning'), [], 'ホーム・メーカー・予測（計画の一覧・根拠・振り返り・公式版）を行き来しても読み直さない');
 assert.deepEqual(callsOf(`openPlan('${X}', 'review')`), [], '同じ計画を開き直しても読み直さない');
@@ -128,7 +128,7 @@ assert.deepEqual(callsOf('fcLoadPlans()'), ['apiListPlans']);
 // 失敗した後は、その区切りの場所に理由ともう一度読む。開き直すと読む（「もう一度読み込む」と同じ）
 run(`S.ld.fcVer = { error: 'つながりません', at: Date.now() }`);
 {
-  const page = run(`S.fc.ver = null; viewForecast()`);
+  const page = run(`S.fc.ver = null; viewForecastAll()`);
   assert.match(fcSection(page, 'version'), /読み込めませんでした[\s\S]*fcLoadVersions\(\)[\s\S]*もう一度読み込む/, '公式版の場所だけに出す');
   assert.doesNotMatch(fcSection(page, 'basis'), /読み込めませんでした/, 'ほかの区切りはそのまま');
 }
@@ -143,7 +143,7 @@ assert.deepEqual(callsOf(`go('forecast')`).sort(), ['apiForecastPage', 'apiListP
 // ==== 4. 保存（裏の処理）の後は古いとみなす。開いている計画は根拠・振り返り・公式版も並べて読み直す ====
 {
   // 製品の入力のカードで保存する（PLAN.EDIT）。終わると開いている計画を読み直す
-  run(`viewForecast(); fcInput(0, 'reason', '甲の理由（直した）', 'product')`);
+  run(`viewForecastAll(); fcInput(0, 'reason', '甲の理由（直した）', 'product')`);
   const n0 = u.calls.length;
   run(`fcSaveInput('product')`); u.flush();   // 裏の処理の問い合わせ（setTimeout）は残す
   assert.deepEqual(u.calls.slice(n0), ['apiStartJob']);
@@ -225,7 +225,7 @@ assert.deepEqual(callsOf(`go('forecast')`).sort(), ['apiForecastPage', 'apiListP
   assert.equal(u3.run('__renders'), 0, '先読みは今の画面（ホーム）を描き直さない');
   assert.deepEqual(u3.callsOf(`go('forecast')`), [], '先読みした予測は、開いても読まない');
   assert.ok(u3.run('!!(S.fc.view && S.fc.data && S.fc.basis && S.fc.learn && S.fc.ver)'), 'すぐに中身を出す');
-  assert.doesNotMatch(u3.run('viewForecast()'), /class="skel"/, '読み込み中の帯は出ない');
+  assert.doesNotMatch(u3.run('viewForecastAll()'), /class="skel"/, '読み込み中の帯は出ない');
   assert.deepEqual(u3.callsOf(`go('analysis')`), [], '先読みした分析は、開いても読まない');
   assert.deepEqual(u3.callsOf(`go('learning')`), [], '先読みした学び（人の学び・AI の学び）は、開いても読まない');
   // 予測を開いたら、同じ年度のほかのメーカーを先読みする。切り替えても読まない

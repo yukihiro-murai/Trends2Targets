@@ -96,7 +96,7 @@ flush();   // 起動のときのホームの読み込み
 timers.length = 0;
 /** 製品の入力の表の、理由の欄の値（行の順）。入力の 4 種類は 1 カラムに並ぶので、製品のカードの欄だけ */
 const reasons = (html) => [...html.matchAll(/<input class="inp cell" type="text" value="([^"]*)" oninput="fcInputType\(\d+,'reason',this\.value,'product'\)/g)].map((m) => m[1]);
-const grid = () => run(`S.fc.inputKind = 'product'; viewForecast()`);
+const grid = () => run(`S.fc.inputKind = 'product'; viewForecastAll()`);
 const lastStart = () => started[started.length - 1];
 
 // ==== 1. X の入力を開き、「開く」で Y を開く ====
@@ -180,7 +180,7 @@ assert.equal(run('S.fc.inputDirty.product'), undefined, '保存した種類の�
   run(`fcSwitch('${Y}')`); flush();
   assert.deepEqual(reasons(grid()), ['乙の理由（3 回目）']);
   // メーカー全体を打ちかけ、製品を保存して読み直しても、メーカー全体の打ちかけは残る（同じ計画）
-  run(`S.fc.inputKind = 'client'; viewForecast(); fcInput(0, 'reason', '全体の打ちかけ'); S.fc.inputKind = 'product'; viewForecast(); fcInput(0, 'reason', '乙の製品の保存'); fcSaveInput()`);
+  run(`S.fc.inputKind = 'client'; viewForecastAll(); fcInput(0, 'reason', '全体の打ちかけ'); S.fc.inputKind = 'product'; viewForecastAll(); fcInput(0, 'reason', '乙の製品の保存'); fcSaveInput()`);
   flush(); finishJobs();
   assert.equal(run('S.fc.draft.client[0].reason'), '全体の打ちかけ', 'ほかの種類の入力中の行は残す');
   assert.equal(run('S.fc.inputDirty.client'), true);

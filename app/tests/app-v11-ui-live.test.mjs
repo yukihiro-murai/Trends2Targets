@@ -58,7 +58,7 @@ const fcTab = (annual) => {
   const d = { plan: { planId: 'P1', clientName: 'テスト製薬', fy: 2026, frozen: false }, latest, runs, stored: null,
     shadow: { planId: 'P1', live: !!annual, annual: annual || null, aligned: annual ? Object.assign({}, aligned, { k: annual.k }) : aligned, reach: null } };
   const v = { plan: d.plan, can: { plan: true, approve: true, admin: true }, inputHash: 'h', actions: [], boot: { output: { sections: [sec] } } };
-  const h = run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.cv.fcMonthly = 'table'; fcForecastTab(__d, __v)`, { __d: d, __v: v });
+  const h = run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.cv.fcMonthly = S.cv.fcBudgetM = 'table'; fcBothTabs(__d, __v)`, { __d: d, __v: v });
   assert.doesNotMatch(h, /undefined|NaN/);
   return h;
 };
@@ -69,7 +69,7 @@ const totalRow = (h) => {
   const row = /<tr class="total"><td>年度合計<\/td>([\s\S]*?)<\/tr>/.exec(h)[1];
   return [...row.matchAll(/<td class="num"( data-tip="([^"]*)")?>([^<]*)<\/td>/g)].slice(0, 3).map((m) => [m[3], m[2] === undefined ? null : unesc(m[2])]);
 };
-const headTip = (h) => unesc(/<h2>月ごとの見通しと予算<span class="tip" tabindex="0" role="img" aria-label="[^"]*" data-tip="([^"]*)">/.exec(h)[1]);
+const headTip = (h) => unesc(/<h2>月ごとの見通し<span class="tip" tabindex="0" role="img" aria-label="[^"]*" data-tip="([^"]*)">/.exec(h)[1]);
 // 予測の実行の注記（最新の日時・人・これまでの実行）は出さない（2026-10-13 村井さん）
 const noRunMeta = (h) => assert.ok(!/fc-run|予測の記録なし|最新 \d{4}\//.test(h), '予測の実行の注記を出さない');
 const LEG_LINE = '旧来の計算の年度合計 下振れ 100,000,000 円・中心 110,000,000 円・上振れ 120,000,000 円（年度の売上を何度も試して出した値。記録に残しています）';

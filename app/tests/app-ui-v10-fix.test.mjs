@@ -133,8 +133,8 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
     const d = env.call('apiForecastLatest(__in)', { __in: { planId: id } });
     const v = env.call('apiPlanView(__in)', { __in: { planId: id } });
     v.boot.output.sections[0].monthly = Array.from({ length: 12 }, (_, i) => ({ row: 29 + i, month: fy + '/' + String(i + 1).padStart(2, '0'), p10: 70, p50: 80, p90: 90, adopted: 80, uplift: '', final: 80 }));
-    run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.cv.fcMonthly = '${table ? 'table' : 'chart'}'`, { __l: env.call('apiListPlans()').plans, __id: id, __v: v, __d: d });
-    return run('fcForecastTab(S.fc.data, S.fc.view)');
+    run(`S.fc.plans = __l; S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; S.cv.fcMonthly = S.cv.fcBudgetM = '${table ? 'table' : 'chart'}'`, { __l: env.call('apiListPlans()').plans, __id: id, __v: v, __d: d });
+    return run('fcBothTabs(S.fc.data, S.fc.view)');
   };
   // 測る専用: 最終予算の数字・列・線を出さない。題は「月ごとの見通し」
   for (const table of [false, true]) {
@@ -142,7 +142,8 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
     assert.doesNotMatch(m, /undefined|NaN/);
     assert.doesNotMatch(m, /<div class="k">最終予算<\/div>/, '最終予算の数字を出さない');
     assert.equal((m.match(/<div class="kpi[ "]/g) || []).length, 3, '下振れ・中心・上振れの 3 つ（同じ 4 つの格子のまま）');
-    assert.match(m, /<h2>月ごとの見通し<span class="tip"[^>]*data-tip="[^"]*測る専用の計画なので、予算は立てません。/, '題は「月ごとの見通し」');
+    assert.match(m, /<h2>月ごとの見通し<span class="tip"/, '題は「月ごとの見通し」');
+    assert.match(m, /測る専用の計画なので、予算は立てません。/, '予算策定の画面は、予算を立てないことだけを言う');
     assert.doesNotMatch(m, /月ごとの見通しと予算|月ごとの見通しと最終予算/);
     assert.doesNotMatch(visible(m), /最終予算|採用予測|上乗せ/, '見える文字に予算の言葉を出さない（' + (table ? '表' : 'グラフ') + '）');
     assert.doesNotMatch(m, /fcBudget\(|fcSaveBudget\(\)/);
@@ -159,13 +160,13 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
   for (const table of [false, true]) {
     const a = fc(planA, table);
     assert.match(a, /<div class="k">最終予算<\/div>/);
-    assert.match(a, /<h2>月ごとの見通しと予算<span class="tip"/);
+    assert.match(a, /<h2>月ごとの予算<span class="tip"/, '予算策定の題は「月ごとの予算」（2026-10-16 予測と予算を分けた）');
     if (table) assert.match(a, />採用予測<\/th><th class="num"[^>]*>上乗せ<\/th><th class="num"[^>]*>最終予算<\/th>/);
-    else assert.match(a, /aria-label="月ごとの見通しと最終予算"/);
+    else assert.match(a, /aria-label="月ごとの中心と最終予算"/);
   }
   // 予測がまだ無い測る専用の計画: 「予算の欄」と言わない
   run(`S.fc.planId = __id; S.fc.view = { plan: { planId: __id, measure: true }, can: { plan: true }, boot: { output: null }, actions: [] }`, { __id: planM });
-  assert.match(run(`fcForecastTab({ latest: null, stored: null, runs: [] }, S.fc.view)`), /月ごとの見通しがここに出ます。/);
+  assert.match(run(`fcBothTabs({ latest: null, stored: null, runs: [] }, S.fc.view)`), /まだ予測がありません。予測準備で実行すると、ここに出ます。/, '予測の前は、予測準備で実行すると出ると言う');
 
   // 分析 > 市場: 測る専用の計画は「まだ調べていないメーカー」に入れない
   const an = env.call('apiCrossMaker(__in)', { __in: {} });

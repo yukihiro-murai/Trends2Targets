@@ -207,23 +207,23 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   ui.__v = view; ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } }); ui.__learn = env.call('apiLearningView(__in)', { __in: { planId } });
   vm.runInContext(`S.view='forecast'; S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.learn=__learn; S.fc.ver=__ver; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ui);
   for (const tab of ['forecast', 'input', 'review', 'version', 'steps']) {
-    const html = vm.runInContext(`S.fc.inputKind='product'; fcSection(viewForecast(), '${tab}')`, ui);
+    const html = vm.runInContext(`S.fc.inputKind='product'; fcSection(viewForecastAll(), '${tab}')`, ui);
     assert.doesNotMatch(html, WRITE_MARKS, `閲覧の人の ${tab} タブに書き込みの操作を出さない`);
     assert.ok(html, tab + ' の区切りがある');
     assert.doesNotMatch(html, /<input|<select/, tab + ' の区切りに入力欄を出さない');
   }
-  assert.doesNotMatch(vm.runInContext(`fcSection(viewForecast(), 'forecast')`, ui), /fcForecastRun\(\)/, '閲覧の人には予測を実行を出さない（注記も出さない。2026-10-13）');
-  assert.match(vm.runInContext(`fcSection(viewForecast(), 'input')`, ui), /入力は予算策定担当ができます/);
-  assert.match(vm.runInContext(`fcSection(viewForecast(), 'review')`, ui), /承認は承認者ができます/);
-  assert.match(vm.runInContext(`fcSection(viewForecast(), 'version')`, ui), /承認者が承認します/, '承認待ちを見せるが操作は出さない');
+  assert.doesNotMatch(vm.runInContext(`fcSection(viewForecastAll(), 'forecast')`, ui), /fcForecastRun\(\)/, '閲覧の人には予測を実行を出さない（注記も出さない。2026-10-13）');
+  assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'input')`, ui), /入力は予算策定担当ができます/);
+  assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ui), /承認は承認者ができます/);
+  assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'version')`, ui), /承認者が承認します/, '承認待ちを見せるが操作は出さない');
   // 担当者は見るだけ（画面からは変えない。変えるのは所有者がエディタから。2026-10-06 村井さん）
-  assert.match(vm.runInContext(`fcSection(viewForecast(), 'steps')`, ui), /担当者[\s\S]*変えるのは所有者です/);
+  assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'steps')`, ui), /担当者[\s\S]*変えるのは所有者です/);
   // 入力が空の画面でも同じ（読むだけ。操作は出さない）
   const empty = env.call('apiPlanView(__in)', { __in: { planId: planId2 } });
   ui.__v2 = empty; ui.__ver2 = env.call('apiVersionList(__in)', { __in: { planId: planId2 } });
   vm.runInContext(`S.fc.view=__v2; S.fc.ver=__ver2; S.fc.inputKind='devspot';`, ui);
   for (const tab of ['forecast', 'input', 'review', 'version', 'steps']) {
-    assert.doesNotMatch(vm.runInContext(`fcSection(viewForecast(), '${tab}')`, ui), WRITE_MARKS, `空の画面（${tab}）でも操作を出さない`);
+    assert.doesNotMatch(vm.runInContext(`fcSection(viewForecastAll(), '${tab}')`, ui), WRITE_MARKS, `空の画面（${tab}）でも操作を出さない`);
   }
   // ホームの役割の札は 2026-10-06 に外した（情報利得がない。村井さん）
   assert.equal(vm.runInContext(`typeof homeRolesCard`, ui), 'undefined');
@@ -241,21 +241,21 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   ua.fcSection = fcSection;
   ua.__v = av;
   vm.runInContext(`S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ua);
-  const q = vm.runInContext(`fcSection(viewForecast(), 'review')`, ua);
+  const q = vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ua);
   assert.match(q, /fcRvGo\(/, '承認者には「承認して反映」（判断の保存 → 見直しを反映）を出す');
   assert.match(q, /fcRun\('EVAL.INSIGHTS'\)/, '策定の実行も出る（承認者は策定担当の役割を含む）');
   // 見直し案を作る（C-1）は止めている（2026-10-07 所有者の決定）: 押せないボタンにして、理由はカーソルで出す
   assert.doesNotMatch(q, /fcRun\('REVIEW.GENERATE'\)/, '見直し案を作る操作は押せない');
   assert.match(q, /data-tip="AI の見直し案を作る\n見直し案を作る操作は、学びの仕組みを直すまで止めています（2026\/10\/07 所有者の決定）。"><button class="btn btn-ghost" disabled aria-disabled="true">見直し案を作る<\/button>/);
   assert.match(q, /fcDec\(/, '承認の選択は出す');
-  const ev = vm.runInContext(`fcSection(viewForecast(), 'review')`, ua);
+  const ev = vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ua);
   assert.match(ev, /fcRun\('EVAL.REPORT'\)/, '策定の実行は出る');
   assert.doesNotMatch(ev, /IMPORT.ACTUALS/, '管理者だけの取り込みは出さない');
-  const st = vm.runInContext(`fcSection(viewForecast(), 'steps')`, ua);
+  const st = vm.runInContext(`fcSection(viewForecastAll(), 'steps')`, ua);
   assert.match(st, /fcRun\('SALES.AGGREGATE'\)/, '策定の実行は出る');
   assert.doesNotMatch(st, /IMPORT.SALES|fc_people/, '管理者だけの操作は出さない');
   assert.match(st, /担当者[\s\S]*変えるのは所有者です/);
-  assert.match(vm.runInContext(`fcSection(viewForecast(), 'input')`, ua), /fcInput\(|fcSaveInput/, '入力の保存は出る');
+  assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'input')`, ua), /fcInput\(|fcSaveInput/, '入力の保存は出る');
 }
 
 // ==== 6. 2 人が同じ計画を同時に開いて保存: 入力のハッシュで後の人を止める（データは壊れない） ====

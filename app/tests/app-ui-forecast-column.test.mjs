@@ -72,7 +72,7 @@ vm.runInContext(js, ui);
 const run = (code, vars) => { Object.assign(ui, vars || {}); return vm.runInContext(code, ui); };
 flush();   // 起動のときのホームの読み込み（ホームの年度 = 今の年度・年度の選択肢）
 timers.length = 0;
-const page = () => run('viewForecast()');
+const page = () => run('viewForecastAll()');
 const head = (h) => h.slice(0, h.indexOf('</div>') + 6);
 const card = (h, kind) => { const i = h.indexOf('id="fc-in-' + kind + '"'); return i < 0 ? '' : h.slice(i, h.indexOf('<div class="card fc-inkind"', i + 10) > 0 ? h.indexOf('<div class="card fc-inkind"', i + 10) : h.indexOf('</section>', i)); };
 
@@ -81,7 +81,7 @@ run(`go('forecast')`);
 {
   // 一覧を読むまでも、区切りのカード（見出しと灰色の帯）を出しておく（読めたら同じ場所に中身が入る。2026-10-13 村井さん）
   const w = page();
-  assert.deepEqual([...w.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]), ['forecast', 'basis', 'input', 'review', 'version', 'steps'], '読み込み中も 6 つの区切り');
+  assert.deepEqual([...w.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'steps', 'forecast', 'basis', 'review', 'budget', 'version'], '読み込み中も区切り（予測準備・予測結果・予算策定の 3 つの画面）');
   assert.match(w, /class="skel" role="status"/, '中身の場所は灰色の帯');
   assert.doesNotMatch(w, /観測中…/, 'よみの待ちのカードは出さない（中身と大きさが違い、読めたときに画面が動くため）');
 }
@@ -91,14 +91,14 @@ let h = page();
 assert.doesNotMatch(h, /メーカーを選ぶ/);
 
 // ==== 2. 題の横: 年度とメーカー（1 マスずつ・名前だけ）。中身は 6 つの区切り ====
-assert.match(head(h), /^<div class="page-head"><h1>予測<\/h1><span class="fc-sels" data-near="1"><select class="inp sm" id="fc_fy" aria-label="年度"/, '題のすぐ横（data-near）に年度');
+assert.match(head(h), /^<div class="page-head"><h1>予測準備<\/h1><span class="fc-sels" data-near="1"><select class="inp sm" id="fc_fy" aria-label="年度"/, '題のすぐ横（data-near）に年度');
 assert.match(head(h), new RegExp('<option value="' + FY + '" selected>FY' + FY + '</option>'), '年度は開いている計画の年度');
 const mk = /<select class="inp sm" id="fc_mk" aria-label="メーカー"[^>]*>([\s\S]*?)<\/select>/.exec(head(h));
 assert.ok(mk, 'メーカーのプルダウン（1 マス: .inp.sm）');
 assert.deepEqual([...mk[1].matchAll(/>([^<]*)<\/option>/g)].map((m) => m[1]), byName, 'その年度のメーカーだけを名前の順に、名前だけ（年度や印を付けない）');
 assert.equal(run(`viewTitle(${JSON.stringify(head(h))})`).includes('<span class="vnear"><span class="fc-sels"'), true, '題の横の道具の位置（ホーム・メーカー一覧と同じ .vnear）');
-assert.deepEqual([...h.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]), ['forecast', 'basis', 'input', 'review', 'version', 'steps']);
-assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]), ['予測と予算', '根拠', '入力', '振り返り', '公式版', '進み'], 'どの区切りも同じ形の見出し');
+assert.deepEqual([...h.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'steps', 'forecast', 'basis', 'review', 'budget', 'version']);
+assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]), ['入力', '進み', '予測', '根拠', '振り返り', '予算', '公式版'], 'どの区切りも同じ形の見出し');
 assert.doesNotMatch(h, /class="tabs"|onclick="fcTab\(|class="tabs sub"><button/, 'タブ・目次は無い（グラフ / 表で見る の切り替えだけ）');
 assert.deepEqual([...fcSection(h, 'input').matchAll(/<div class="card fc-inkind" id="fc-in-(\w+)"><h2>([^<]*)</g)].map((m) => [m[1], m[2]]),
   [['product', '製品の入力'], ['client', 'メーカー全体の入力'], ['opinions', '見解の入力'], ['devspot', 'スポット案件の入力']], '入力の 4 種類はカードを縦に');
@@ -113,13 +113,13 @@ run(`fcSetFy('${FY + 2}')`); flush();
 assert.equal(run('S.fc.planId'), '', '計画の無い年度は、メーカーを開かない');
 h = page();
 assert.match(h, new RegExp('FY' + (FY + 2) + ' の計画はまだありません'), 'よみの案内 1 枚');
-assert.equal((h.match(/class="card"/g) || []).length, 1, 'カードは案内の 1 枚だけ');
+assert.equal((h.match(/class="card"/g) || []).length, 3, 'カードは画面ごとに案内の 1 枚だけ（予測準備・予測結果・予算策定）');
 assert.match(head(h), new RegExp('<option value="' + (FY + 2) + '" selected>'), '選んだ年度のまま');
 assert.doesNotMatch(head(h), /id="fc_mk"/, 'メーカーのプルダウンは出さない（選べるメーカーが無い）');
 run(`fcSetFy('${FY}')`); flush();
 assert.equal(run('S.fc.planId'), P[firstKey][FY], 'メーカーが決まっていなければ、その年度の最初のメーカー');
 // 保存していない入力があれば、先に確かめる（「やめる」なら今の年度・メーカーのまま）
-run(`viewForecast(); fcInputType(0, 'reason', '打ちかけ', 'client')`);
+run(`viewForecastAll(); fcInputType(0, 'reason', '打ちかけ', 'client')`);
 run(`fcSetFy('${FY - 1}')`);
 assert.match(el('askwrap').innerHTML, /保存していない入力があります。保存せずに、ほかのメーカーを開きますか？/);
 run('askDone(false)'); flush();
@@ -149,7 +149,7 @@ run('fcDropDrafts(); S.job = null');   // 保存の終わりは待たない（�
   run(`go('home'); openPlan('${P[firstKey][FY]}', 'version')`);
   assert.deepEqual(scrolled[scrolled.length - 1], ['version', 'start'], '公式版の区切りへ送る');
   assert.equal(run('S.fc.jump'), '', '送ったら控えを消す');
-  assert.equal(run('S.view'), 'forecast');
+  assert.equal(run('S.view'), 'budget', '公式版は予算策定の画面');
   run(`go('makers'); openPlan('${P[secondKey][FY]}')`);
   assert.equal(scrolled[scrolled.length - 1], 'top', 'メーカー一覧の「開く」は画面の先頭から');
   assert.equal(run('S.fc.jump'), '');
@@ -167,7 +167,7 @@ run('fcDropDrafts(); S.job = null');   // 保存の終わりは待たない（�
 
 // ==== 6. 1 つの区切りの表示で失敗しても、ほかの区切りは出す ====
 {
-  h = run(`var __st = fcStepsTab; fcStepsTab = function(){ throw new Error('テストの失敗'); }; var __h = viewForecast(); fcStepsTab = __st; __h`);
+  h = run(`var __st = fcStepsTab; fcStepsTab = function(){ throw new Error('テストの失敗'); }; var __h = viewForecastAll(); fcStepsTab = __st; __h`);
   assert.match(fcSection(h, 'steps'), /ここを表示できませんでした[\s\S]*テストの失敗/);
   for (const k of ['forecast', 'basis', 'input', 'review', 'version']) assert.doesNotMatch(fcSection(h, k), /ここを表示できませんでした/, k + ' は出す');
 }

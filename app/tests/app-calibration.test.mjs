@@ -567,7 +567,7 @@ let readmeTask;
   const ui = loadUi();
   ui.__v = view;
   vm.runInContext(`S.view='forecast'; S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ui);
-  const html = fcSection(vm.runInContext(`viewForecast()`, ui), 'review');
+  const html = fcSection(vm.runInContext(`viewForecastAll()`, ui), 'review');
   assert.doesNotMatch(html, /fcRun\('REVIEW\.GENERATE'\)/);
   assert.match(html, /data-tip="AI の見直し案を作る\n見直し案を作る操作は、学びの仕組みを直すまで止めています（2026\/10\/07 所有者の決定）。"><button class="btn btn-ghost" disabled aria-disabled="true">見直し案を作る<\/button>/);
   assert.match(html, /fcRun\('EVAL\.REPORT'\)/);

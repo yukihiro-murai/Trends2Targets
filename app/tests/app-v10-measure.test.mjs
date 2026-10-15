@@ -297,7 +297,7 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
 
   // メーカーの一覧: 状態の札の代わりに印・空模様と予算は出さない・合計は予算を立てるメーカーだけ・合計の行の後ろに分ける
   const pf = env.call('apiPortfolio()').plans;
-  const mk = clean(run(`S.pf = __p; S.mkFy = __fy; viewMakers()`, { __p: pf, __fy: String(fy) }), 'メーカーの一覧');
+  const mk = clean(run(`S.pf = __p; S.mkFy = __fy; viewBudgets()`, { __p: pf, __fy: String(fy) }), 'メーカーの一覧');
   assert.match(mk, /<span class="chip st off" data-tip="測る専用の計画です。[^"]*">測る専用<\/span>/, '状態の列の札（ほかの状態の札と同じ幅）');
   assert.match(mk, /<span class="chip off" data-tip="[^"]*">測る専用 1<\/span>/, '状態の数の横に、測る専用の数');
   const states = [...mk.matchAll(/>(承認済み|承認待ち|策定中|未着手) (\d+)<\/span>/g)].reduce((n, x) => n + Number(x[2]), 0);
@@ -344,10 +344,10 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
     return { d, v };
   };
   const m = fc(planM);
-  const head = clean(run('viewForecast()'), '予測（測る専用）');
+  const head = clean(run('viewForecastAll()'), '予測（測る専用）');
   assert.match(head, /<h1>予測[\s\S]*?<span class="chip off" data-tip="測る専用の計画です。[^"]*">測る専用<\/span><\/h1>/);
   assert.match(head, /<option value="[^"]*" selected>テスト薬品<\/option>/, '選ぶ欄はメーカーの名前だけ（測る専用の印は題の横。2026-10-13 村井さん）');
-  const tabM = clean(run('fcForecastTab(__d, __v)', { __d: m.d, __v: m.v }), '予測と予算（測る専用）');
+  const tabM = clean(run('fcBothTabs(__d, __v)', { __d: m.d, __v: m.v }), '予測と予算（測る専用）');
   assert.doesNotMatch(tabM, /fcBudget\(|fcSaveBudget\(\)|この予算に/, '予算の欄・保存・届く見込みを出さない');
   assert.match(run('fcRunBtn()'), /fcForecastRun\(\)/, '予測を実行は出す（物差しの点を作る。「予測と予算」の見出しの右）');
   const stepsM = clean(run('fcStepsTab(__d, __v)', { __d: m.d, __v: m.v }), '進み（測る専用）');
@@ -360,9 +360,9 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   assert.doesNotMatch(verM, /verSubmit\(\)/);
   // 予算を立てる計画は今までどおり
   const A = fc(planA);
-  const headA = run('viewForecast()');
+  const headA = run('viewForecastAll()');
   assert.doesNotMatch(headA, /<h1>[^]*?測る専用[^]*?<\/h1>/);
-  const tabA = clean(run('fcForecastTab(__d, __v)', { __d: A.d, __v: A.v }), '予測と予算');
+  const tabA = clean(run('fcBothTabs(__d, __v)', { __d: A.d, __v: A.v }), '予測と予算');
   assert.match(tabA, /fcBudget\(/);
   assert.match(tabA, /fcSaveBudget\(\)/);
   assert.match(clean(run('fcStepsTab(__d, __v)', { __d: A.d, __v: A.v }), '進み'), /fcRun\('AI\.RESEARCH'\)/);

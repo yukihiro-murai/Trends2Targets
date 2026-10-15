@@ -102,7 +102,7 @@ flush();
 timers.length = 0;
 
 /** 予算のカード（予測と予算のタブ）の HTML */
-const card = () => { const h = run(`fcForecastTab(S.fc.data, S.fc.view)`); assert.doesNotMatch(h, /undefined|NaN/); return h; };
+const card = () => { const h = run(`fcBothTabs(S.fc.data, S.fc.view)`); assert.doesNotMatch(h, /undefined|NaN/); return h; };
 const selectOf = (h) => /<span class="act" data-tip="([^"]*)"><select class="inp sm" id="fcProb"([^>]*)>([\s\S]*?)<\/select><\/span>/.exec(h);
 const optionsOf = (sel) => [...sel[3].matchAll(/<option value="(\d*)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], !!m[2], m[3]]);
 const chosen = (h) => optionsOf(selectOf(h)).find((o) => o[1])[0];
@@ -172,7 +172,7 @@ reachOn();
   const want = yms.map((m, i) => Math.round(1200000 * shape[i]));
   assert.deepEqual(JSON.parse(run(`JSON.stringify(S.fc.view.boot.output.sections[0].monthly.map(function(m){ return S.fc.budget[m.row] && S.fc.budget[m.row].adopted; }))`)), want.map(String), '採用予測の欄に入る（月は ym で合わせる）');
   assert.ok(run('fcDirty()'), '未保存');
-  assert.equal(run(`S.cv.fcMonthly`), 'table');
+  assert.equal(run(`S.cv.fcBudgetM`), 'table');
   const h = card();
   assert.match(h, /<span class="chip warn">未保存<\/span>/);
   assert.ok(h.includes('value="' + want[0].toLocaleString('ja-JP') + '"'), '表に入れた額が見える');
@@ -335,8 +335,8 @@ reachOn();
   const closedD = with_('', `S.fc.data.plan.frozen = true;`);
   run('S.fc.data.plan.frozen = false');
   assert.equal(selectOf(closedD), null, '予測の記録の側の締めの印でも出さない');
-  const chart = with_('', `S.cv.fcMonthly = 'chart';`);
-  run(`S.cv.fcMonthly = 'table'`);
+  const chart = with_('', `S.cv.fcBudgetM = 'chart';`);
+  run(`S.cv.fcMonthly = S.cv.fcBudgetM = 'table'`);
   assert.equal(selectOf(chart), null, 'グラフで見ていて入力も無いときは、下の欄ごと出さない（今までどおり）');
   assert.doesNotMatch(chart, /予算の下書き/, 'グラフでも出さない');
   run('delete S.fc.view.boot.budgetDraft');

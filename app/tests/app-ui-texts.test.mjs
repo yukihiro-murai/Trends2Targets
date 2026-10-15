@@ -846,13 +846,13 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   const tab = (sh, frozen) => {
     const d = { plan: { planId: 'P1', clientName: 'テスト製薬', fy: 2026, frozen: !!frozen }, latest, runs: [], stored: null, shadow: Object.assign({ planId: 'P1' }, sh) };
     const v = { plan: d.plan, can: { plan: true, approve: true, admin: true }, inputHash: 'h', actions: [], boot: { output: { sections: [sec] } } };
-    return run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; fcForecastTab(__d, __v)`, { __d: d, __v: v });
+    return run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; S.fc.confirm = null; fcBothTabs(__d, __v)`, { __d: d, __v: v });
   };
   const midTip = (h) => (/<div class="kpi main" data-tip="([^"]*)"><div class="k">中心<\/div>/.exec(h) || [])[1].split('\n');
   // 届く見込みは見える所に出さず、最終予算の箱のカーソルの説明に入れる（2026-10-13 村井さん「細かいテキストは不要」）。前の言い方（say）は説明の中身から作って比べる
   const meta = (h) => {
     assert.doesNotMatch(h.replace(/data-tip="[^"]*"/g, ''), /この予算に届/, '届く見込みを見える所に出さない');
-    const m = /<div class="kpi" data-tip="([^"]*)"><div class="k">最終予算<\/div>/.exec(h);
+    const m = /<div class="kpi(?: main)?" data-tip="([^"]*)"><div class="k">最終予算<\/div>/.exec(h);
     const parts = m ? m[1].replace(/&amp;/g, '&').split('\n\n') : [];
     if (parts.length < 2) return null;
     const tip = parts.slice(1).join('\n\n').split('\n').filter((x) => !/^[\d,]+ 円$/.test(x));   // 箱の正確な金額の行は除く
@@ -863,7 +863,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   };
   // (a) 見出しの説明: 年度合計の 3 つ（下振れ・中心・上振れ）が月の合計ではない
   const base = tab({ aligned: aligned(), reach: reach() });
-  assert.match(tipOf(base, '月ごとの見通しと予算'), /。年度合計（下振れ・中心・上振れ）は月の合計ではなく、年度で計算した値です$/);
+  assert.match(tipOf(base, '月ごとの見通し'), /。年度合計（下振れ・中心・上振れ）は月の合計ではなく、年度で計算した値です$/);
   assert.doesNotMatch(uiHtml, /年度合計の下振れ〜上振れは/);
   // (b) 年度の見込みの試し: 「この計画の年度合計」・金額は円まで。aligned.k が無い（前のサーバー）・0 なら幅も
   for (const al of [aligned(), aligned({ k: 0 })]) {

@@ -91,7 +91,7 @@ vm.runInContext(js, ui);
 const run = (code, vars) => { Object.assign(ui, vars || {}); return vm.runInContext(code, ui); };
 flush();   // 起動のときのホームの読み込み
 timers.length = 0;
-const grid = () => run(`S.fc.inputKind = 'product'; viewForecast()`);
+const grid = () => run(`S.fc.inputKind = 'product'; viewForecastAll()`);
 /** 入力の保存を押して、送った中身（INPUT.SAVE の args）を返す */
 const save = () => {
   const n = started.length;

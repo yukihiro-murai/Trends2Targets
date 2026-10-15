@@ -295,7 +295,7 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   const sec = { annual: { p10: 1050, p50: 1150, p90: 1250, adopted: 1200, uplift: 60, final: 1260 },
     monthly: yms.map((ym, i) => ({ row: 29 + i, month: ym, p10: 80, p50: 100, p90: 120, adopted: 100, uplift: i === 11 ? 60 : '', final: i === 11 ? 160 : 100 })) };
   const view = { plan: latest.plan, can: { plan: true, approve: true, admin: true }, inputHash: 'h', actions: [], boot: { output: { sections: [sec] } } };
-  const html = R(`S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; fcForecastTab(__d, __v)`, { __id: idCur, __d: latest, __v: view });
+  const html = R(`S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; fcBudgetTab(__d, __v)`, { __id: idCur, __d: latest, __v: view });
   const a = latest.shadow.aligned, rc = latest.shadow.reach;
   const ys = (n) => R(`yenShort(${n})`);
   assert.ok(!html.replace(/data-tip="[^"]*"/g, '').includes('（試し）'), '見える所に「試し」の注記を出さない（2026-10-13 村井さん）');
@@ -314,9 +314,9 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   assert.match(t, /年の水準のぶれ 15%・幅の倍率 1\.5 倍（締まった 6 か月の実績を入れています）/, 'いま使っている前提（書いた値。τ は 0.15 に戻した）');
   assert.match(t, /保存している数字は変わりません/);
   noCodes(html.replace(/<[^>]*>/g, ' ') + '\n' + t.replace(/80% の幅/g, ''), '予測と予算');
-  assert.match(R(`S.fc.budget = { 29: { adopted: '120' } }; fcForecastTab(__d, __v)`), /入力中の予算は、保存すると計算し直します/, '入力中の予算は保存すると計算し直す');
+  assert.match(R(`S.fc.budget = { 29: { adopted: '120' } }; fcBothTabs(__d, __v)`), /入力中の予算は、保存すると計算し直します/, '入力中の予算は保存すると計算し直す');
   // 試しの数が無い（前の控え・計画が違う）ときは、今までどおり出さない
-  const plain = R(`S.fc.budget = {}; S.fc.planId = 'other'; fcForecastTab(__d, __v)`);
+  const plain = R(`S.fc.budget = {}; S.fc.planId = 'other'; fcBothTabs(__d, __v)`);
   assert.doesNotMatch(plain, /試し|届く見込み/);
   R(`S.fc.planId = __id`);
   assert.deepEqual([R('reachPct(0)'), R('reachPct(100)'), R('reachPct(35)'), R('reachPct(null)')], ['5% 未満', '95% 超', '約 35%', '-']);

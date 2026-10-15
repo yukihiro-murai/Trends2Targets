@@ -186,7 +186,7 @@ const forecastTab = () => {
   const sum = (k) => ms.reduce((s, m) => s + m[k], 0);
   const sec = { annual: { p10: latest.latest.annual_p10, p50: latest.latest.annual_p50, p90: latest.latest.annual_p90, adopted: sum('p50'), uplift: 0, final: sum('p50') }, monthly: ms };
   const view = { plan: Object.assign({}, latest.plan, { measure: false }), can: { plan: true, approve: true, admin: true }, inputHash: 'h', actions: [], boot: { output: { sections: [sec] } } };
-  return { latest, html: R(`S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; fcForecastTab(__d, __v)`, { __id: planId, __d: latest, __v: view }) };
+  return { latest, html: R(`S.fc.planId = __id; S.fc.view = __v; S.fc.data = __d; S.fc.budget = {}; fcBothTabs(__d, __v)`, { __id: planId, __d: latest, __v: view }) };
 };
 
 let r1, r2;
