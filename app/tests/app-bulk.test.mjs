@@ -77,6 +77,18 @@ const status = () => owner({ action: 'bulkStatus' }).result;
   assert.deepEqual(s.done.map((d) => d.name).sort(), NAMES.slice().sort());
   assert.ok(s.done.every((d) => d.status === 'DONE'), JSON.stringify(s.done));
   assert.equal(env.table('BACKTEST').length, bt0 + 132 * 3);
+
+  // ホームの「仕組みの確認」: 確認が要った乙と止まった丙が出る（管理者のホームの system.bulk）
+  const home = () => env.call('appBulkHome_()');
+  let h = home();
+  assert.deepEqual(h.items.map((x) => [x.name, x.kind, x.status]).sort(), [['丙製薬', 'FORECAST', 'FAILED'], ['乙製薬', 'FORECAST', 'CONFIRM']]);
+  const sys = env.call('apiHome(__in)', { __in: {} }).system;
+  assert.ok(sys && sys.bulk && sys.bulk.items.length === 2, 'ホームの応答に入る');
+  // 乙を画面から確かめて予測（確認つき）→ 乙は消える
+  env.run(`appWithLock_(() => appEnqueueJob_('FORECAST.RUN', { planId: __p, confirms: ['extreme'] }, __by, '').id)`, { __p: ids['乙製薬'], __by: env.call('Session.getActiveUser().getEmail()') });
+  for (let i = 0; i < 10; i++) env.fireTriggers('triggerRunJob');
+  h = home();
+  assert.deepEqual(h.items.map((x) => x.name), ['丙製薬'], '済ませた計画は消える: ' + JSON.stringify(h.items));
 }
 
 // ==== 3. 片付けた計画は入れない・年度の確かめ ====

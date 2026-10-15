@@ -111,5 +111,7 @@ function appHomeSystem_() {
   try { journal = appJournalPending_(); } catch (e) { journal = null; }
   let autoResearch = null;   // 自動の AI 調査（AutoResearch.js）
   try { autoResearch = appAutoResearchStatus_(); } catch (e) { autoResearch = { error: String(e && e.message || e) }; }
-  return { backup: backup, backupAuto: backupAuto, housekeeping: appHousekeepingStatus_(), journal: journal, autoResearch: autoResearch };
+  let bulk = null;   // 全部の計画をまとめて動かした結果のうち、まだ片付いていない計画（Bulk.js）
+  try { bulk = appBulkHome_(); } catch (e) { bulk = null; }
+  return { backup: backup, backupAuto: backupAuto, housekeeping: appHousekeepingStatus_(), journal: journal, autoResearch: autoResearch, bulk: bulk };
 }

@@ -294,7 +294,7 @@ function appMethodsLive_(ctx, plan, book, p, seed, weights) {
   const t0 = new Date().getTime();
   try {
     const fy = Number(plan.fy);
-    const stat = appBacktestStatRun_(book, { fy: fy, asOfMs: p.asOfMs, closed: null, skipSync: true,
+    const stat = appBacktestStatRun_(book, { fy: fy, asOfMs: p.asOfMs, closed: null, skipSync: true, light: true,   // シミュレーションは使わない（手法は土台の式から）
       seed: appSha256Hex_(['methods-seed-v1', seed].join('|')), uuidSeed: p.runId + '-M', actor: ctx.actor });
     const day = Utilities.formatDate(new Date(p.asOfMs), APP_TZ, 'yyyy-MM-dd');
     const startYm = (fy - 4) + '/04';

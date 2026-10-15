@@ -129,7 +129,7 @@ function appBacktestStatRun_(book, opts) {
   const eng = appLegacyEngine_(svc);
   const engine = { version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256 };
   const seed = String(typeof opts.seed === 'function' ? opts.seed(engine) : opts.seed);
-  return appWithSeededRandom_(seed, () => Object.assign(appBacktestStatCore_(eng, book, Number(opts.fy), opts.asOfMs, opts.closed, !!opts.skipSync), { seed: seed, engine: engine }));
+  return appWithSeededRandom_(seed, () => Object.assign(appBacktestStatCore_(eng, book, Number(opts.fy), opts.asOfMs, opts.closed, !!opts.skipSync, !!opts.light), { seed: seed, engine: engine }));
 }
 
 /**
@@ -138,9 +138,11 @@ function appBacktestStatRun_(book, opts) {
  * 売上の表は runPhase1Forecast と同じく SALES_INPUT から作り直す（syncSalesFromSalesInput_）。
  * closed（省ける）の締まっていない月の売上は、読んだ後に 0 円にする（その時点では分からない。旧来の「今」をその月に置けば、旧来の計算が
  * 締まっていない月として補う。SALES_MONTHLY のその月を 0 円にして本番の A-9 を動かすのと同じ）。
- * skipSync = true なら売上の表を作り直さない（本番の予測の直後に、旧来の予測が作り直した表をそのまま読む。計算用ブックを書き換えない。Methods.js）
+ * skipSync = true なら売上の表を作り直さない（本番の予測の直後に、旧来の予測が作り直した表をそのまま読む。計算用ブックを書き換えない。Methods.js）。
+ * light = true なら混合のシミュレーション（1000 回）と季節加重を省く（手法の記録は土台の式と背景のスポットだけを使う。予測の計算の段の時間を縮める。
+ * p10・p50・p90・seasonal は null の並び）
  */
-function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync) {
+function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync, light) {
   const cfg = book.getSheetByName(eng.SHEETS.CONFIG);
   const client = eng.normalizeClientName_(String(cfg ? cfg.getRange('B2').getValue() || '' : '').trim());
   if (!client) throw new Error('計画の CONFIG にメーカーがありません。');
@@ -186,7 +188,8 @@ function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync) {
   const spotBgModel = eng.fitSpotRecurringModel_(salesData.spotSeries48 || [], seriesStart, ctx.lastClosedMonthStart, baseForSpotCap, tuning);
   const offsetRate = isFinite(tuning.knownSpotOffsetRate) ? tuning.knownSpotOffsetRate : eng.KNOWN_SPOT_OFFSET_RATE;
   const spotBg = spotBgModel.expectedByMonth.map((v, i) => Math.max(0, Number(v || 0) - Number(known[i] || 0) * offsetRate));
-  const mixed = eng.forecastMonteCarloMixed_(model, {
+  const none12 = () => ({ p10: new Array(12).fill(null), p50: new Array(12).fill(null), p90: new Array(12).fill(null) });
+  const mixed = light ? none12() : eng.forecastMonteCarloMixed_(model, {
     residualPct: residualPct, factorsProduct: [], factorsClient: [], opinions: [], productWeights: new Map(), aiScores: {},
     nSim: eng.N_SIM, months: months, sourceByMonth: sourceByMonth,
     aiWeight: tuningApplied.aiWeight, aiMaxAbsEffect: tuningApplied.aiMaxAbsEffect, tuning: tuningApplied,
@@ -196,7 +199,7 @@ function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync) {
   });
   const total48 = salesData.baseSeries48.map((v, i) => Number(v || 0) + Number((salesData.spotSeries48 || [])[i] || 0));   // 締まっていない月は 0 円
   // 締まった年度の月を実績で置き換える設定（本番と同じ。区切りの「今」では年度の月はまだ締まっていない）
-  if (eng.readForecastClosedMonthMode_() === 'actual') {
+  if (!light && eng.readForecastClosedMonthMode_() === 'actual') {
     months.forEach((_, i) => {
       if (sourceByMonth[i] !== 'actual_closed') return;
       const k = ctx.forecastMonthIndexesInSales[i];
@@ -205,7 +208,7 @@ function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync) {
     });
   }
   // 季節加重（本番は OUTPUT を書くときに、補正を入れないチューニングで計算する）
-  const seasonal = eng.forecastSeasonalWeighted48_({ adjustedBaseSeries48: aggYAdj, seriesStart: seriesStart, lastClosedMonthStart: ctx.lastClosedMonthStart,
+  const seasonal = light ? { totalByMonth: new Array(12).fill(null) } : eng.forecastSeasonalWeighted48_({ adjustedBaseSeries48: aggYAdj, seriesStart: seriesStart, lastClosedMonthStart: ctx.lastClosedMonthStart,
     spotBackgroundExpectedByMonth: spotBg, knownSpotExpectedByMonth: known, tuning: eng.readModelTuningFromConfig_() });
   // 手法の材料（Methods.js。乱数を使った後に読むだけ）: 土台の売上・土台の式・背景のスポット・予測の月の印
   return { p10: mixed.p10.slice(), p50: mixed.p50.slice(), p90: mixed.p90.slice(), seasonal: seasonal.totalByMonth.slice(), total48: rawTotal48,

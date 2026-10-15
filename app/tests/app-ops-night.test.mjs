@@ -251,6 +251,14 @@ const shiftMark = (env, minutes, patch) => {
   const okBackup = { enabled: true, count: 3, ageHours: 5 };
   const arOk = { enabled: true, failures7d: 0, trigger: { installed: true }, lastTickAt: ago(20), stalePlans: [] };
   const items = (hk) => JSON.parse(vm.runInContext(`JSON.stringify(homeSysItems(${JSON.stringify({ housekeeping: hk, backup: okBackup, autoResearch: arOk })}))`, ui));
+  // まとめて実行した中で片付いていない計画（Bulk.js の appBulkHome_）: 1 行・計画の名前と理由はカーソルで・エディタの操作の手順は出さない
+  const bulkItems = JSON.parse(vm.runInContext(`JSON.stringify(homeSysItems(${JSON.stringify({ backup: okBackup, autoResearch: arOk, bulk: { finishedAt: '2026-10-15T12:00:00Z',
+    items: [{ planId: 'P1', name: '甲製薬', kind: 'FORECAST', status: 'CONFIRM', error: 'Stepが極端です（±100%以上）。\n\nシート: PRODUCT' }, { planId: 'P2', name: '乙製薬', kind: 'BACKTEST', status: 'FAILED', error: '' }] } })}))`, ui));
+  assert.equal(bulkItems.length, 1);
+  assert.deepEqual([bulkItems[0][0], bulkItems[0][1]], ['まとめての実行', 'まとめて実行した中で、確認が要る計画が 1・止まった計画が 1 あります']);
+  assert.match(bulkItems[0][2], /甲製薬（予測・確認が要る）：Stepが極端です/);
+  assert.match(bulkItems[0][2], /乙製薬（物差し・止まった）/);
+  assert.doesNotMatch(bulkItems[0][2], /OWNER_TASK|apiOwnerTask|"action":/);
   const stalled = items({ state: 'RUNNING', stalled: true, at: '2026-10-13T03:02:00+0900', startedAt: '2026-10-13T03:02:00+0900', lastDoneAt: ago(30) });
   assert.equal(stalled.length, 1, '止まった 1 行だけ（古さの行と重ねない）');
   assert.equal(stalled[0][1], '毎日の手入れが途中で止まりました（2026-10-13 03:02 に始めて、終わりの記録がありません）');

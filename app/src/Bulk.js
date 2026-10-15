@@ -154,6 +154,31 @@ function appBulkAfterJob_(job, status) {
   return st;
 }
 
+/**
+ * ホームの「仕組みの確認」: 7 日以内に終わったまとめての処理で、確認が要った（CONFIRM）・止まった（FAILED）計画のうち、その後に画面から
+ * 同じ処理を済ませていない計画（予測なら、終わった後に済んだ予測の回が無い計画）。無ければ null。
+ * 返り値 { finishedAt, items: [{ planId, name, kind（FORECAST・BACKTEST）, status, error }] }
+ */
+function appBulkHome_() {
+  const st = appBulkState_();
+  if (!st.mode || st.active || !st.finishedAt) return null;
+  if (new Date().getTime() - Date.parse(st.finishedAt) > 7 * 864e5) return null;
+  const list = [].concat((st.forecastDone || (st.mode === 'FORECAST' ? st.done : []) || []).map(x => Object.assign({ kind: 'FORECAST' }, x)),
+    (st.mode === 'BACKTEST' ? st.done || [] : []).map(x => Object.assign({ kind: 'BACKTEST' }, x)))
+    .filter(x => x.status === 'CONFIRM' || x.status === 'FAILED');
+  if (!list.length) return null;
+  const runs = appReadTable_('FORECAST_RUNS').filter(r => r.status === 'DONE');
+  const bts = {};
+  list.filter(x => x.kind === 'BACKTEST').forEach(x => { try { bts[x.planId] = appReadPlanTable_('BACKTEST', x.planId); } catch (e) { bts[x.planId] = []; } });
+  const end = Math.floor(Date.parse(st.finishedAt) / 1000) * 1000;   // 記録の時刻は秒まで（同じ秒に済んだ回も「後」に数える）
+  const after = (at) => { const t = appLandingTime_('', at); return t !== null && t >= end; };   // 書き方の違う時刻（+0900・Z）も数で比べる
+  const items = list.filter(x => x.kind === 'FORECAST'
+    ? !runs.some(r => r.plan_id === x.planId && after(r.finished_at))
+    : !(bts[x.planId] || []).some(r => after(r.computed_at)))
+    .map(x => ({ planId: x.planId, name: x.name, kind: x.kind, status: x.status, error: x.error }));
+  return items.length ? { finishedAt: st.finishedAt, items: items } : null;
+}
+
 /** 様子（所有者の bulkStatus）: 動いているか・今の計画・残り・済んだ計画と結果（予測の後に物差しを回したときは、予測の結果も） */
 function appBulkStatus_() {
   const st = appBulkState_();
