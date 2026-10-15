@@ -112,8 +112,16 @@ const APP_OWNER_ACTIONS = {
     payload: i => ({ planId: i.planId, fy: i.cutoffFy === undefined ? undefined : Number(i.cutoffFy) }) },
   // 全部の計画の物差し（2026-10-15 村井さん「物差しを計画ごとに動かし直して」）: 年度 fy（省くと今の年度）の、片付けていない・売上を取り込んだ・年度を締めていない計画を
   // 1 つずつ順に動かす（裏の処理は同時に 1 つなので、1 つ終わるたびに次の計画を続きとして始める。appBacktestCalc_）。結果の done に計画ごとの点の数
-  runBacktestAll: { job: 'MEASURE.BACKTEST', args: ['fy'], check: t => appOwnerCheckBacktestFy_(t),
-    payload: i => ({ planId: appBacktestQueue_(i.fy)[0], all: true }) },   // 残りの計画の並びは、最初の組み立ての段で作る（appBacktestBuild_）
+  runBacktestAll: { name: 'BULK.START', args: ['fy'], check: t => appOwnerCheckBulkFy_(t),
+    opts: i => ({ minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'BULK', detail: Object.assign({ mode: 'BACKTEST' }, i) }),
+    run: (ctx, i) => appBulkStart_(ctx, 'BACKTEST', i.fy, false) },
+  // 全部の計画の予測（Bulk.js。2026-10-15 村井さん「全部の計画で予測を実行して」）: 同じく 1 つずつ順に。"backtest":true なら、続けて全部の計画の物差し。
+  // 予測の前の確認（影響が大きい入力）が要る計画は、確かめずに飛ばして一覧に残す（画面から確かめて実行する）
+  runForecastAll: { name: 'BULK.START', args: ['fy', 'backtest'], check: t => appOwnerCheckBulkFy_(t),
+    opts: i => ({ minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'BULK', detail: Object.assign({ mode: 'FORECAST' }, i) }),
+    run: (ctx, i) => appBulkStart_(ctx, 'FORECAST', i.fy, i.backtest === true) },
+  // まとめて動かしている状態（今の計画・残り・済んだ計画と結果）
+  bulkStatus: { name: 'BULK.STATUS', opts: () => ({ minRole: 'ADMIN', audit: false }), run: () => appBulkStatus_() },
   // ---- 人のつなぎ（PersonLinks.js。版 10 の 3-6）: 入力の担当者の名前とメンバーのメール。所有者だけ。外しても行は残す（ROLES と同じ） ----
   listPersonLinks: { name: 'PERSON_LINKS.LIST', opts: () => ({ minRole: 'ADMIN', audit: false }), run: ctx => appListPersonLinks_(ctx) },
   linkPerson: { name: 'PERSON.LINK', args: ['personName', 'email', 'clientId', 'validFrom', 'validTo', 'note'],
@@ -237,10 +245,11 @@ function appOwnerCheckPurpose_(t) {
 }
 
 /** 物差しの区切りの年度（cutoffFy）は省ける（計画の年度）。入れるなら 4 桁の数（計画の年度から 3 年前までかは、裏の処理が確かめる） */
-/** runBacktestAll の年度（省ける。入れるなら 4 桁）と、動かせる計画があるか */
-function appOwnerCheckBacktestFy_(t) {
-  if (t.fy !== undefined && !/^\d{4}$/.test(String(t.fy === null ? '' : t.fy).trim())) throw new Error('runBacktestAll の fy（年度）は 4 桁の数で入れてください（例: "fy":2026。省くと今の年度）。');
-  if (!appBacktestQueue_(t.fy).length) throw new Error('物差しを動かせる計画がありません（片付けていない・売上を取り込んだ・年度を締めていない計画）。');
+/** runForecastAll・runBacktestAll の年度（省ける。入れるなら 4 桁）と、動かせる計画があるか */
+function appOwnerCheckBulkFy_(t) {
+  if (t.fy !== undefined && !/^\d{4}$/.test(String(t.fy === null ? '' : t.fy).trim())) throw new Error(t.action + ' の fy（年度）は 4 桁の数で入れてください（例: "fy":2026。省くと今の年度）。');
+  if (t.backtest !== undefined && typeof t.backtest !== 'boolean') throw new Error(t.action + ' の backtest は true か false で入れてください。');
+  if (!appBulkQueue_(t.fy).length) throw new Error('動かせる計画がありません（片付けていない・売上を取り込んだ・年度を締めていない計画）。');
 }
 
 function appOwnerCheckCutoffFy_(t) {

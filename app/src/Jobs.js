@@ -248,7 +248,7 @@ function appActiveJobOf_(email) {
 // ---- 始める・動かす・状態を返す ----
 
 /** 画面から渡せる項目（ほかは裏の処理どうしの受け渡し専用。画面から渡されたら捨てる） */
-const APP_JOB_CLIENT_FIELDS = ['planId', 'confirms', 'action', 'args', 'inputHash', 'clientName', 'fy', 'peopleCsv', 'purpose', 'all'];   // all: 全部の計画の物差し（所有者だけ）
+const APP_JOB_CLIENT_FIELDS = ['planId', 'confirms', 'action', 'args', 'inputHash', 'clientName', 'fy', 'peopleCsv', 'purpose'];
 
 function appJobClientPayload_(payload) {
   const out = {};
@@ -468,6 +468,8 @@ function appRunJob_(id) {
   try { if (status === 'DONE') appJobRecordStage_(job, ranMs); } catch (e) { /* 見積もりの記録は処理の結果に関係しない */ }
   // 自動で始めた A-4 の終わりなら、次の計画へ（AutoResearch.js）。処理の結果には関係しない
   try { if (!nextJobId) appAutoResearchAfterJob_(done, status); } catch (e) { Logger.log('自動の AI 調査の続き: ' + (e && e.message ? e.message : e)); }
+  // 全部の計画をまとめて動かしている途中なら、次の計画へ（Bulk.js。失敗・確認待ちでも次へ進む）。処理の結果には関係しない
+  try { if (!nextJobId) appBulkAfterJob_(done, status); } catch (e) { appLogError_('BULK.NEXT', e, { requestId: id, actor: job.requestedBy }); }
   return { id: id, status: status, nextJobId: nextJobId };
 }
 

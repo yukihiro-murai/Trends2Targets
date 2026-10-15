@@ -341,22 +341,26 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   env.props.OWNER_TASK = JSON.stringify({ action: 'jobStatus', jobId: full.result.jobId });
   const done = env.call('apiOwnerTask()').result;
   assert.deepEqual([done.status, done.kind, done.result.rows, done.result.planId], ['DONE', 'MEASURE.BACKTEST_CALC', 132, planB], '組み立て → 計算と保存（続きをたどった結果）');
-  // 全部の計画（runBacktestAll）: 年度の計画を 1 つずつ順に（1 つ終わるたびに次の計画を続きとして始める）
+  // 全部の計画（runBacktestAll。Bulk.js）: 年度の計画を 1 つずつ順に（1 つ終わるたびに次の計画を始める）。様子は bulkStatus
   const plansFy = env.table('PLANS').filter((p) => String(p.fy) === String(FY) && p.state !== 'ARCHIVED').map((p) => p.plan_id);
   const nAll = bt().length;
   env.props.OWNER_TASK = JSON.stringify({ action: 'runBacktestAll', fy: FY });
   const all = env.call('apiOwnerTask()');
   assert.equal(all.ok, true, JSON.stringify(all));
+  assert.equal(all.result.plans, plansFy.length);
+  env.props.OWNER_TASK = JSON.stringify({ action: 'runBacktestAll', fy: FY });
+  assert.throws(() => env.call('apiOwnerTask()'), /まとめて動かしている途中です/, '途中ではもう一度始めない');
   for (let i = 0; i < 30; i++) env.fireTriggers('triggerRunJob');
-  env.props.OWNER_TASK = JSON.stringify({ action: 'jobStatus', jobId: all.result.jobId });
-  const allDone = env.call('apiOwnerTask()').result;
-  assert.equal(allDone.status, 'DONE', JSON.stringify(allDone).slice(0, 400));
-  assert.deepEqual(allDone.result.done.map((d) => d.planId).sort(), plansFy.slice().sort(), '年度の計画を全部');
+  env.props.OWNER_TASK = JSON.stringify({ action: 'bulkStatus' });
+  const bs = env.call('apiOwnerTask()').result;
+  assert.equal(bs.active, false, JSON.stringify(bs).slice(0, 400));
+  assert.deepEqual(bs.done.map((d) => d.planId).sort(), plansFy.slice().sort(), '年度の計画を全部');
+  assert.ok(bs.done.every((d) => d.status === 'DONE'), JSON.stringify(bs.done));
   assert.equal(bt().length, nAll + 132 * plansFy.length, '計画ごとに 132 行');
   env.props.OWNER_TASK = JSON.stringify({ action: 'runBacktestAll', fy: '20x6' });
   assert.throws(() => env.call('apiOwnerTask()'), /fy（年度）は 4 桁の数/);
   env.props.OWNER_TASK = JSON.stringify({ action: 'runBacktestAll', fy: 1999 });
-  assert.throws(() => env.call('apiOwnerTask()'), /物差しを動かせる計画がありません/);
+  assert.throws(() => env.call('apiOwnerTask()'), /動かせる計画がありません/);
   // 区切りの年度
   env.props.OWNER_TASK = JSON.stringify({ action: 'runBacktest', planId: planA, cutoffFy: '20x5' });
   assert.throws(() => env.call('apiOwnerTask()'), /cutoffFy（区切りの年度）は 4 桁の数/);
