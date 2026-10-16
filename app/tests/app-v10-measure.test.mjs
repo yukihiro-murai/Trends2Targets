@@ -363,7 +363,7 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   assert.doesNotMatch(headA, /<h1>[^]*?測る専用[^]*?<\/h1>/);
   const tabA = clean(run('fcBothTabs(__d, __v)', { __d: A.d, __v: A.v }), '予測と予算');
   assert.match(tabA, /fcBudget\(/);
-  assert.match(tabA, /fcSaveBudget\(\)/);
+  assert.match(tabA, /fcSaveBudget\(\d+\)/);
   run('S.fc.ver = __r', { __r: env.call('apiVersionList(__in)', { __in: { planId: planA } }) });
   assert.match(run('fcVersionTab(S.fc.data, S.fc.view)'), /verSubmit\(\)/);
   // 画面の名前は 8 字まで・中の印（MEASURE）を見せない

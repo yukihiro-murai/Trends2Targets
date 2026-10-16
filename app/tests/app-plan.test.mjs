@@ -402,8 +402,9 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.match(fcl, /<h1>予測一覧<\/h1>[\s\S]*見通し[\s\S]*テスト製薬/);
   assert.match(fcl, /openPlan\('[^']+','forecast'\)/, '名前を押すと予測結果');
   assert.doesNotMatch(fcl, /undefined|NaN|年間予算/, '予算は出さない');
-  // 年度は題のすぐ横に出す
-  assert.match(vm.runInContext(`viewTitle('<div class="page-head"><h1>メーカー</h1><select data-near="1"></select></div>')`, ui), /<h1[^>]*>メーカー<\/h1><span class="vnear"><select/);
+  // 2026-10-16: 画面の題の行は出さない（題は読み上げだけ）。年度の選ぶ欄は上の帯の右へ
+  const vt = JSON.parse(vm.runInContext(`JSON.stringify(viewTitle('<div class="page-head"><h1>メーカー</h1><select data-near="1"></select></div>'))`, ui));
+  assert.deepEqual(vt, { title: '<h1 id="vh" class="sr-only" tabindex="-1">メーカー</h1>', tools: '<select data-near="1"></select>' });
   // 予測は「メーカーを選ぶ」だけの画面を出さない: 題の横に年度とメーカーの選ぶ欄（2026-10-13 村井さん）
   const pick = vm.runInContext(`var __keep = [S.fc.planId, S.fc.plans]; S.fc.planId = null; S.fc.plans = [{ planId: 'P1', clientName: 'テスト製薬', fy: '2026' }]; var __p = viewForecastAll(); S.fc.planId = __keep[0]; S.fc.plans = __keep[1]; __p`, ui);
   assert.doesNotMatch(pick, /メーカーを選ぶ/);

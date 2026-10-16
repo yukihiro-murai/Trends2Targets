@@ -126,11 +126,10 @@ const OWNER_NOTE = 'owner-approved 2026-10-07 09:30: 自動の学びを止める
   // 人の記入の説明・保存の説明
   const n = review(planView({ insights }));
   assert.equal(tipOf(n, '人の記入'), '外れた月の原因と対応。次の予測の材料');
-  assert.match(n, /data-tip="次の予測の材料になります"><button class="btn" disabled onclick="fcSaveIns\(\)">保存</, '保存は見出しの右');
+  assert.match(n, /<td><button class="btn btn-sm" disabled onclick="fcSaveIns\(5\)">保存<\/button><\/td>/, '保存は行の横');
   assert.doesNotMatch(n, /見直し案の材料/);
   const n2 = review(planView({ paused: false, insights }));
   assert.equal(tipOf(n2, '人の記入'), '外れた月の原因と対応。次の予測と AI の見直し案の材料');
-  assert.match(n2, /data-tip="次の予測と AI の見直し案の材料になります"/);
   // 承認待ちの見直し案は、止めている間も承認して反映できる（ボタンを消さない）
   const props = [{ row: 8, pid: 'P1', target: 'ai_weight_override', current: '0.0008', proposed: '0.0004', conf: '中', rationale: '', impact: '', decision: '', rollback: '' }];
   const a = review(planView({ proposals: props }));

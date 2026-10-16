@@ -96,7 +96,7 @@ assert.match(head(h), new RegExp('<option value="' + FY + '" selected>FY' + FY +
 const mk = /<select class="inp sm" id="fc_mk" aria-label="メーカー"[^>]*>([\s\S]*?)<\/select>/.exec(head(h));
 assert.ok(mk, 'メーカーのプルダウン（1 マス: .inp.sm）');
 assert.deepEqual([...mk[1].matchAll(/>([^<]*)<\/option>/g)].map((m) => m[1]), byName, 'その年度のメーカーだけを名前の順に、名前だけ（年度や印を付けない）');
-assert.equal(run(`viewTitle(${JSON.stringify(head(h))})`).includes('<span class="vnear"><span class="fc-sels"'), true, '題の横の道具の位置（ホーム・メーカー一覧と同じ .vnear）');
+assert.equal(run(`viewTitle(${JSON.stringify(head(h))}).tools`).startsWith('<span class="fc-sels"'), true, '題の横の道具の位置（ホーム・メーカー一覧と同じ .vnear）');
 assert.deepEqual([...h.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'review', 'forecast', 'basis', 'tri', 'budget', 'version']);
 // 中身がすぐ小見出しで始まる区切り（入力など）は、区切りの見出しを重ねない（2026-10-16 村井さん）
 assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]).filter((t) => t !== '振り返り'), ['予測', '根拠', '手法ごとの見通し', '予算', '公式版'], '見出しのある区切りは同じ形の見出し（振り返りは中身の読み込みしだい）');
@@ -131,11 +131,13 @@ assert.equal(run('S.fc.draft.client[0].reason'), '打ちかけ', '打ちかけ�
 // ==== 4. 入力: 未保存の印と保存は種類ごと ====
 assert.equal(run('S.fc.inputDirty.client'), true);
 assert.equal(run('!!S.fc.inputDirty.product'), false, 'ほかの種類には印を付けない');
-assert.ok(selectors.includes(`[onclick="fcSaveInput('client')"]`), '打ったときは、その種類のカードの保存のボタンだけを押せるようにする（描き直さない）');
+assert.ok(selectors.includes(`[onclick="fcSaveInput('client',0)"]`), '打ったときは、その行の保存のボタンだけを押せるようにする（描き直さない）');
 h = fcSection(page(), 'input');
-assert.match(card(h, 'client'), /<span class="chip warn">未保存<\/span><span class="act"[^>]*><button class="btn" onclick="fcSaveInput\('client'\)">保存<\/button>/, 'メーカーの動向のカードの見出しの右に未保存の印と保存');
+assert.match(card(h, 'client'), /<h2>メーカーの動向<\/h2><span class="chip warn">未保存<\/span>/, 'メーカーの動向のカードに未保存の印');
+assert.match(card(h, 'client'), /<td><button class="btn btn-sm" onclick="fcSaveInput\('client',0\)">保存<\/button><\/td>/, '打った行の横の保存は押せる');
+assert.match(card(h, 'client'), /<button class="btn btn-sm" disabled onclick="fcSaveInput\('client',1\)">保存/, 'ほかの行の保存は押せないまま');
 for (const k of ['product', 'opinions', 'devspot']) {
-  assert.match(card(h, k), new RegExp(`<button class="btn" disabled onclick="fcSaveInput\\('${k}'\\)">保存`), k + ' の保存は押せないまま');
+  assert.doesNotMatch(card(h, k), /<button class="btn btn-sm" onclick=/, k + ' の保存は押せないまま');
   assert.doesNotMatch(card(h, k), /未保存/, k + ' に未保存の印は出さない');
 }
 run(`fcSaveInput('client')`); flush();

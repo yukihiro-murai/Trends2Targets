@@ -76,8 +76,8 @@ const CARD_1280 = 922;   // 1280px の画面のカードの中の幅（1280 − 
   const html = run('fcBothTabs(S.fc.data, S.fc.view)');
   const t = cols(html, 'tbl scroll edit');
   // 予算策定の表（2026-10-16 から下振れ・上振れは予測結果の画面だけ）
-  assert.deepEqual(t.th, ['月', '中心', '採用予測', '上乗せ', '最終予算']);
-  assert.deepEqual(t.w, [96, 0, 160, 160, 0], '採用予測・上乗せは 1 マス');
+  assert.deepEqual(t.th, ['月', '中心', '採用予測', '上乗せ', '最終予算', ''], '行の横に保存（2026-10-16）');
+  assert.deepEqual(t.w, [96, 0, 160, 160, 0, 144], '採用予測・上乗せは 1 マス・保存は 144px');
   // 1280px の画面で、残りを分けた 4 つの金額の列にも年度合計（279,000,000）が入る幅が残る（横に送らない）
   const rest = (CARD_1280 - t.w.reduce((a, b) => a + b, 0)) / 2;
   assert.ok(rest >= 9 * 8.5 + 2 * 4 + 16, '残りの列に 279,000,000 が入る: ' + rest);
