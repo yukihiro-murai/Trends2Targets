@@ -295,12 +295,7 @@ let planId;
   const html = render(vo, 'product');
   assert.match(html, /<th data-tip="この行の見立てにどれだけ自信があるか（任意）。記録にだけ残し、予測の計算には使いません">自信<\/th>/);
   assert.match(html, /<option value="低い" selected>低い<\/option>/, '一番新しい自信を選んだ形で出す');
-  assert.match(html, /<td><span class="incell"><input class="inp cell" type="text"[^>]*aria-label="理由"><span class="tip"/, '跡の (i) は理由のマスの中（列を足さない。1280px の画面で枠に入れる）');
-  const tips = [...html.matchAll(/class="tip"[^>]*data-tip="([^"]*)"/g)].map((m) => m[1]);
-  assert.ok(tips.length >= 2 && tips.every((t) => /^変わった跡/.test(t)), tips.join(' | '));
-  assert.match(tips[0], /自信を変えた|変えた（入力の保存）・owner/, tips[0]);
-  assert.match(tips.join('\n'), /増減率 0% → \+5%/, '変えた項目の前と後');
-  assert.doesNotMatch(html.replace(/(data-tip|aria-label)="[^"]*"/g, ''), /変わった跡/, '跡はカーソルで出す（見える文字にしない）');
+  assert.doesNotMatch(html, /変わった跡|incell/, '変わった跡は出さない（2026-10-16 村井さん）');
   assert.doesNotMatch(html, /INPUT\.SAVE|IMPORT\.SALES|PLAN\.CREATE|BASELINE|undefined|NaN/, '旧来・中の番号を出さない');
   // 保存: 画面だけの印（_lk・_conf0）は送らない。自信は変えた行だけ送る（変えていない行は送らない = サーバーは今の自信のまま）
   const sent = JSON.parse(vm.runInContext(`var __sent = null; var __e0 = fcEdit; fcEdit = function (a, args) { __sent = { action: a, args: args }; }; fcInput(0, 'selfConf', '高い'); fcSaveInput(); fcEdit = __e0; JSON.stringify(__sent)`, ui));
@@ -313,17 +308,14 @@ let planId;
   // 見解・スポットには自信の欄が無い（跡はある）
   const ho = render(vo, 'opinions');
   assert.doesNotMatch(ho, />自信</);
-  assert.match(ho, /data-tip="変わった跡/);
+  assert.doesNotMatch(ho, /変わった跡/);
   // 閲覧の人（つなぎなし）: 自信の欄も跡の列も出さない
   const hv = render(view(planId, MEMBER), 'product');
   assert.doesNotMatch(hv, />自信<|変わった跡|width:56px/);
   // 本人の行だけ届く閲覧の人: 自信は文字で、跡は本人の行だけ（保存した人の名前は無い）
   const hs = render(view(planId, OTHER), 'product');
   assert.match(hs, />自信</);
-  const ts = [...hs.matchAll(/class="tip"[^>]*data-tip="([^"]*)"/g)].map((m) => m[1]).filter((t) => /^変わった跡/.test(t));
-  assert.equal(ts.length, 1, '鷹野 の行だけ');
-  assert.match(ts[0], /自信を変えた/);
-  assert.doesNotMatch(ts[0], /・owner/);
+  assert.doesNotMatch(hs, /変わった跡/, '跡は出さない（2026-10-16）');
 }
 
 // ==== 9. 切り詰めたセルが無い・記録は計算に使わない ====

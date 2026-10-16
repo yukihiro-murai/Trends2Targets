@@ -298,12 +298,13 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   ui.__learn = env.call('apiLearningView(__in)', { __in: { planId } });
   const evalHtml = vm.runInContext(`S.view = 'forecast'; S.fc.learn = __learn; fcSection(viewForecastAll(), 'review')`, Object.assign(ui, { fcSection }));
   // 振り返り（検証と四半期をまとめた）: 記録が無い計画は案内 1 枚、記録があれば精度の天気と精度の推移（学習の影は『学び』へ。2026-10-06）
-  assert.match(evalHtml, ui.__learn.accuracy.months.length ? /精度の天気[\s\S]*精度の推移[\s\S]*振り返りの更新/ : /(まだ振り返りの記録がありません|人の記入|AI の見直し案)[\s\S]*振り返りの更新/);
+  assert.match(evalHtml, ui.__learn.accuracy.months.length ? /AI 補正[\s\S]*精度の推移/ : /まだ振り返りの記録がありません|人の記入|AI の見直し案|AI 補正/);
+  assert.doesNotMatch(evalHtml, /振り返りの更新/, '振り返りの更新は置かない（2026-10-16）');
   const withMonths = JSON.parse(JSON.stringify(ui.__learn)); withMonths.accuracy.months = [{ month: '2026/04', p10: 1, p50: 2, p90: 3, actual: 2, ape: 0, inside: true }];
   ui.__learn2 = withMonths;
-  assert.match(vm.runInContext(`S.fc.learn = __learn2; viewForecastAll()`, ui), /精度の天気[\s\S]*精度の推移/);
+  assert.match(vm.runInContext(`S.fc.learn = __learn2; viewForecastAll()`, ui), /AI 補正[\s\S]*精度の推移/);
   vm.runInContext(`S.fc.learn = __learn`, ui);
-  assert.ok(!/undefined|NaN/.test(evalHtml.split('振り返りの更新')[0]), '精度の推移に undefined や NaN を出さない');
+  assert.ok(!/undefined|NaN/.test(evalHtml), '精度の推移に undefined や NaN を出さない');
   // 管理の画面は外した（設定・記録と状態・年度の締め・計画を作る・全計画の学習・担当者の編集。所有者はエディタの apiOwnerTask。2026-10-06 村井さん）
   assert.equal(vm.runInContext(`[typeof viewSettings, typeof viewRecords, typeof membersView, typeof namesView, typeof settingsBizView, typeof auditView, typeof logDetail, typeof healthView,
     typeof hlAuditCard, typeof hlHousekeepingCard, typeof hlYearCard, typeof ycClose, typeof pfPoolCard, typeof pfCreateCard, typeof pfLoadCandidates, typeof mkCreate, typeof goSet, typeof goRec, typeof NAV_ADMIN].join()`, ui),

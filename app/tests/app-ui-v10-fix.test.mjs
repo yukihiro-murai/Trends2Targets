@@ -68,47 +68,16 @@ const visible = (html) => html.replace(/<[^>]*>/g, ' ');
       // 狭い PC の画面: 幅の決まっていない列（理由・補足）に 200px を残す。決まった列だけの表は、決まった列の合計
       const inw = Number(table[1]);
       assert.equal(inw, Math.max(canPlan ? 880 : 720, fixed + (cols.includes(0) ? 200 : 0)), what + ': --inw');
-      // 跡の (i) は、理由・補足・案件名のマスの中（その列の見出しは変わらない）
-      const col = ths.indexOf(HIST_AT[kind]);
-      const cells = [...html.matchAll(/<tr>((?:<td[^>]*>[\s\S]*?<\/td>)+)<\/tr>/g)].map((m) => [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>(?=<td|$)/g)].map((c) => c[1]));
-      assert.ok(cells.length >= 1, what);
-      cells.forEach((tds) => {
-        assert.match(tds[col], /^<span class="incell">[\s\S]*<span class="tip" tabindex="0" role="img" aria-label="変わった跡/, what + ': (i) は ' + HIST_AT[kind] + ' のマスの中');
-        tds.forEach((td, i) => { if (i !== col) assert.doesNotMatch(td, /変わった跡/, what + ': ほかのマスには出さない'); });
-      });
-      if (!canPlan) assert.match(html, /<span class="incell"><span class="ell">[^<]*<\/span><span class="tip"/, what + ': 見る人は文字（… で切る）と (i)');
+      // 2026-10-16 村井さん: 変わった跡の (i) は出さない（意味が分からない）
+      assert.doesNotMatch(html, /変わった跡|incell|tipsp/, what + ': 跡を出さない');
+      assert.doesNotMatch(html, /fcInputDel|fcInputAdd|>外す<|>行を追加</, what + ': 外す・行を追加は無い');
     }
   }
-  // 跡の無い行（足した行）は (i) と同じ幅の空きで、欄の幅をそろえる
-  draw(view(true), 'devspot');
-  run(`fcInputAdd('devspot')`);
-  const added = run(`fcInputCard(S.fc.view, 'devspot')`);
-  assert.match(added, /aria-label="案件名"><span class="tipsp"><\/span><\/span>/, '足した行は空き');
-  // 跡がどの行にも無ければ、包みを付けない
-  const noLog = Object.assign(view(true), { inputLog: null });
-  assert.doesNotMatch(draw(noLog, 'product'), /incell|tipsp/);
   // CSS: 狭い PC の画面の最小の幅・マスの中の並び
   assert.ok(css.includes('@media (min-width:761px) and (max-width:1279px){.tbl.scroll.fc-in{width:max(100%,var(--inw,880px))}}'), '1280px 未満は --inw まで広げて横に送る');
   assert.ok(css.includes('.incell{display:flex;align-items:center;gap:var(--s1);min-width:0}'));
   assert.ok(css.includes('@media (min-width:761px){.incell > .inp.cell{min-width:0}}'), 'PC は欄を縮める（スマホは 1 マスの最小の幅のまま）');
   assert.ok(css.indexOf('.tbl.scroll.edit{width:max(100%,880px)}') < css.indexOf('.tbl.scroll.fc-in{width:max(100%,var(--inw'), '狭い PC の画面の決まりは、書く表の決まりの後ろ');
-}
-
-// ==== 2. 変わった跡: BASELINE には、した人を書かない ====
-{
-  const e = { n: 3, hist: [
-    { change: 'CHANGE', action: 'INPUT.SAVE', at: '2026-10-09T09:00:00+09:00', by: 'planner@bigm2y.com', before: { step: '+5%' }, after: { step: '+8%' }, conf: '高い' },
-    { change: 'BASELINE', action: 'BASELINE', at: '2026-10-08T10:00:00+09:00', by: 'member@bigm2y.com', after: { step: '+5%' }, conf: '' },
-  ] };
-  const t = run('fcInLogTip(__e)', { __e: e });
-  const lines = t.split('\n');
-  assert.equal(lines[0], '変わった跡');
-  assert.match(lines[1], /^2026\/10\/09 09:00 変えた（入力の保存）・planner$/, 'ほかの跡は、した人を書く');
-  assert.equal(lines[3], '2026/10/08 10:00 記録を始めたときの姿', '記録を始めたときの姿には、した人を書かない（たまたま最初に開いた人の名前を出さない）');
-  assert.doesNotMatch(t, /member|SYSTEM/);
-  assert.equal(lines[4], 'ほか 1 件');
-  // 仕組みの印で書かれた BASELINE でも同じ
-  assert.equal(run('fcInLogTip(__e)', { __e: { n: 1, hist: [{ change: 'BASELINE', action: 'BASELINE', at: '2026-10-08T10:00:00+09:00', by: 'SYSTEM:V10_BACKFILL', after: {} }] } }), '変わった跡\n2026/10/08 10:00 記録を始めたときの姿');
 }
 
 // ==== 3. 測る専用の計画 ====

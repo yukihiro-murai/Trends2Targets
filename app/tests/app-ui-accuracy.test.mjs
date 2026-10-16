@@ -127,7 +127,7 @@ const text = (html) => unesc(String(html).replace(/<[^>]*>/g, ' '));
   const bias = run(`S.cv['an.bias'] = 'table'; anBiasCard(__p)`, { __p: plans });
   assert.match(bias, /<td class="num">\+60\.0%<\/td><td data-tip="比べた月がまだ 1 か月（強気・弱気は 3 か月から言います）">まだ<\/td>/);
   assert.match(bias, /<td class="num">-8\.0%<\/td><td>弱気<\/td>/);
-  assert.ok(tips(bias).some((t) => t.startsWith('予測の中心の合計 ÷ 実績の合計 − 1（新しい月ほど重く）')));
+  assert.ok(tips(bias).some((t) => t.startsWith('プラス = 強気')));
   for (const h of [one, three, h2, h3, c1, c2, mape, bias]) assert.doesNotMatch(h, /undefined|NaN/);
 }
 

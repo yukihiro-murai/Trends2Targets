@@ -89,6 +89,10 @@ const ui = vm.createContext({ document: { getElementById: el, querySelector: () 
   google: { script: { get run() { return makeRunner(); } } } });
 vm.runInContext(js, ui);
 const run = (code, vars) => { Object.assign(ui, vars || {}); return vm.runInContext(code, ui); };
+// 2026-10-16: 画面から「外す」「行を追加」を外した（行は値をすべて消すと保存で消え、最後の空の行に打つと足せる）。
+// 保存の組み方（fromRow）を確かめるため、前の操作と同じ形の道具をテストの中だけで使う
+run(`function fcInputDel(i, kind){ kind = kind || S.fc.inputKind; fcDraft(kind).splice(i, 1); S.fc.inputDirty[kind] = true; }
+function fcInputAdd(kind){ kind = kind || S.fc.inputKind; fcDraft(kind).push({}); S.fc.inputDirty[kind] = true; }`);
 flush();   // 起動のときのホームの読み込み
 timers.length = 0;
 const grid = () => run(`S.fc.inputKind = 'product'; viewForecastAll()`);

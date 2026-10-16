@@ -339,7 +339,7 @@ let run3;
   assert.ok(rows.every((r) => r.name.length <= 8), '名前は 8 字まで');
   assert.equal(rows[1].tip, '製品・メーカー全体・見解の効き\n今回: 製品 +300 円・全体 -50 円', '人の入力の種類ごとの内訳はカーソルで');
   assert.equal(rows[1].numTip, '今回 250 円・前回 0 円');
-  assert.match(table[0], /<th data-tip="予測の中心（月の合計）を[^"]*">内訳<\/th><th class="num" data-tip="前回の予測からの変化（月の合計）">前回から（月の合計）<\/th>/);
+  assert.match(table[0], /<th data-tip="予測の中心を[^"]*">内訳<\/th><th class="num" data-tip="前回の予測からの変化（月の合計）">前回から（月の合計）<\/th>/);
   assert.match(table[0], /<colgroup><col><col style="width:160px"><\/colgroup>/, '数の列は 1 マス');
   // 前の回に層ごとの効きが無い・層ごとの効きが無いサーバー: 表を出さない（ほかは今までどおり）
   for (const l of [{ latest: lay({ final: 1 }), prev: null }, null, undefined]) {

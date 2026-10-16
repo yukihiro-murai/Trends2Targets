@@ -569,19 +569,16 @@ let readmeTask;
   vm.runInContext(`S.view='forecast'; S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ui);
   const html = fcSection(vm.runInContext(`viewForecastAll()`, ui), 'review');
   assert.doesNotMatch(html, /fcRun\('REVIEW\.GENERATE'\)/);
-  assert.match(html, /data-tip="AI の見直し案を作る\n見直し案を作る操作は、学びの仕組みを直すまで止めています（2026\/10\/07 所有者の決定）。"><button class="btn btn-ghost" disabled aria-disabled="true">見直し案を作る<\/button>/);
-  assert.match(html, /fcRun\('EVAL\.REPORT'\)/);
-  // 補正を学び直す（B-5）も、旗を 0 にした（D2）ので押せないボタンにする（動かしても補正は変わらない）
-  assert.doesNotMatch(html, /fcRun\('LEARN\.MONTHLY'\)/);
-  assert.match(html, /data-tip="実績から補正を学び直す\n自動の学びを止めています（\d{4}\/\d{2}\/\d{2} 所有者が設定）。今は動かしても補正は変わりません。"><button class="btn btn-ghost" disabled aria-disabled="true">補正を学び直す<\/button>/);
+  // 2026-10-16: 振り返りの更新（当たり具合を計算・外れの原因を整理・補正を学び直す・見直し案を作る）は予測準備に置かない
+  assert.doesNotMatch(html, /振り返りの更新|fcRun\('EVAL\.|fcRun\('LEARN\./);
   // 反映済みの見直し案の札: 止めている間は「見直し案を作る」を案内せず、止めている理由を出す（止めていなければ、今までどおり案内する）
   ui.__q = { title: '', period: '', reviewId: 'R-1', applied: true, logRecent: [],
     proposals: [{ row: 8, pid: 'P1', target: 'ai_weight_override', current: '0.002', proposed: '0.001', conf: '中', rationale: '', impact: '', decision: '承認', rollback: '' }] };
   const chip = () => /<span class="chip ok" data-tip="([^"]*)">反映済み<\/span>/.exec(vm.runInContext('fcRvProposals(__q)', ui))[1];
-  assert.equal(chip(), 'この見直し案は反映済みです。見直し案を作る操作は、学びの仕組みを直すまで止めています（2026/10/07 所有者の決定）。');
+  assert.equal(chip(), 'この見直し案は反映済みです');
   ui.__v2 = Object.assign({}, view, { actions: view.actions.map((x) => Object.assign({}, x, { paused: '' })) });
   vm.runInContext('S.fc.view = __v2', ui);
-  assert.equal(chip(), 'この見直し案は反映済みです。新しい案は「見直し案を作る」で作ります');
+  assert.equal(chip(), 'この見直し案は反映済みです');
   // 予測の注記: 四半期レビューを反映した後の案内（次回の C-1）も、止めている間は出さない。ほかの文・「なし」以外のチューニングはそのまま
   const out = { output: { policyLines: ['適用中の四半期チューニング: FY2026-Q1 / ・ai_weight_override: 既定 / 次回の四半期レビューは3か月後に C-1 を実行してください。 / 補正の警告'],
     engineNote: '経過月は実績…\n適用中の四半期チューニング: なし（全項目既定値） / 3か月以上の実績確定後に C-1 を実行してください。' } };
@@ -752,7 +749,7 @@ function seedReviewPlan(e, name, withHistory) {
   ui.__q = view.boot.quarterly;
   vm.runInContext(`S.fc.view={ can: { plan: true, approve: true, admin: true }, actions: [] };`, ui);
   const html = vm.runInContext('fcRvProposals(__q)', ui);
-  assert.match(html, /<span class="chip off" data-tip="締まっていない月から作られた案なので、所有者が取り下げました（2026-10-07 の決定）。反映しません">取り下げ<\/span>/);
+  assert.match(html, /<span class="chip off" data-tip="所有者が取り下げた案。反映しません">取り下げ<\/span>/);
   assert.doesNotMatch(html, /fcDec\(|fcRvGo\(|未反映/, '判断と反映の操作は出さない');
   assert.equal((html.match(/<span class="chip st off">取り下げ<\/span>/g) || []).length, 2, '案ごとの判断も取り下げ');
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext(`lrDecision({ status: '取り下げ', decidedAt: '' }, '')`, ui))), ['取り下げ', 'off', '所有者が取り下げました。反映しません']);

@@ -241,13 +241,9 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   vm.runInContext(`S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ua);
   const q = vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ua);
   assert.match(q, /fcRvGo\(/, '承認者には「承認して反映」（判断の保存 → 見直しを反映）を出す');
-  assert.match(q, /fcRun\('EVAL.INSIGHTS'\)/, '策定の実行も出る（承認者は策定担当の役割を含む）');
-  // 見直し案を作る（C-1）は止めている（2026-10-07 所有者の決定）: 押せないボタンにして、理由はカーソルで出す
-  assert.doesNotMatch(q, /fcRun\('REVIEW.GENERATE'\)/, '見直し案を作る操作は押せない');
-  assert.match(q, /data-tip="AI の見直し案を作る\n見直し案を作る操作は、学びの仕組みを直すまで止めています（2026\/10\/07 所有者の決定）。"><button class="btn btn-ghost" disabled aria-disabled="true">見直し案を作る<\/button>/);
+  assert.doesNotMatch(q, /fcRun\('(EVAL|LEARN|REVIEW)\./, '振り返りの更新は置かない（2026-10-16）');
   assert.match(q, /fcDec\(/, '承認の選択は出す');
   const ev = vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ua);
-  assert.match(ev, /fcRun\('EVAL.REPORT'\)/, '策定の実行は出る');
   assert.doesNotMatch(ev, /IMPORT.ACTUALS/, '管理者だけの取り込みは出さない');
   assert.doesNotMatch(vm.runInContext(`viewForecastAll()`, ua), /IMPORT.SALES|fc_people/, '管理者だけの操作は出さない');
   assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'input')`, ua), /fcInput\(|fcSaveInput/, '入力の保存は出る');

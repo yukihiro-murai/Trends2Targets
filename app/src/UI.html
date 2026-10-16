@@ -480,6 +480,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .fcsec .card.caution,.fcsec .card.alert,.fcsec .card.soft{margin:var(--s5) 0 0}
 .fcsec > .card-head + .card.caution,.fcsec > .card-head + .card.alert,.fcsec > .card-head + .card.soft{margin-top:0}
 .fcsec .card h2{font-size:var(--fs-b)}
+.fc-runbar{margin-top:var(--s6)}.fc-runbar .fc-runbtn,.fc-runbar .act{display:block;width:100%}
+.btn.btn-run{width:100%;height:56px;font-size:var(--fs-h3);border-radius:var(--radius)}   /* 予測を実行: 画面のいちばん下に横幅いっぱい */
+.ver-submit{display:flex;gap:var(--s3);align-items:center;margin-top:var(--s4)}.ver-submit .inp{flex:1;min-width:0}
+.fc-insave{display:inline-flex;align-items:center;gap:var(--s2);margin-left:auto}   /* 入力のカードの保存は見出しの右（表の右端とそろう） */
 .fcsec .card h2::before{height:14px;background:var(--primary-line)}
 .fcsec .card:not(.caution):not(.alert):not(.soft) > .card-foot{margin:var(--s5) 0 0;padding:var(--s4) 0 0;border-radius:0}
 .fcsec .kpis{margin:0}
@@ -1418,8 +1422,9 @@ function chEmpty(msg){ return '<p class="note chempty">' + esc(msg || 'データ
 function chSafe(f){ try { return f(); } catch (e) { if (window.console) console.error('chart', e); return chEmpty('グラフを描けませんでした'); } }
 /** グラフの幅（今の画面のカードの中の幅。スマホは狭く）。opts.w で決めてもよい */
 function chW(){
-  var m = $('main'), mobile = (window.innerWidth || 1280) <= 760, w = m && m.clientWidth ? m.clientWidth : 0;
-  return w ? Math.max(260, Math.min(1200, Math.round(w - (mobile ? 74 : 138)))) : 720;
+  // 描く前で本文の幅がまだ測れないときは、画面の幅から（メニューの幅を引く）。720 に縮めて描かない（2026-10-16 村井さん「縮こまった描写は禁止」）
+  var vw = window.innerWidth || 1280, mobile = vw <= 760, m = $('main'), w = m && m.clientWidth ? m.clientWidth : vw - (mobile ? 0 : 220);
+  return Math.max(260, Math.min(1600, Math.round(w - (mobile ? 74 : 138))));
 }
 function chR(v){ return Math.round(v * 10) / 10; }
 function chSvg(w, h, label, body){
@@ -2116,7 +2121,7 @@ function homeSkyCard(plans){
       + '<span class="ch">' + (CHAR_SVG[s.key] || '') + '</span><span class="ct">' + names.length + '</span>'
       + '<span class="mk">' + names.map(function(n){ return '<span>' + esc(n) + '</span>'; }).join('') + '</span></div>';
   }).join('');
-  return '<div class="card"><div class="card-head"><h2>見通しの空模様' + tip('締まった月の実績と予測から推定した着地を予算と比べ、メーカーを 8 つの空模様に分けます。カーソルを合わせると、その空模様の決まりが出ます') + '</h2></div><div class="skys">' + tiles + '</div></div>';
+  return '<div class="card"><div class="card-head"><h2>見通しの空模様' + tip('着地の推定を予算と比べた 8 つの空模様') + '</h2></div><div class="skys">' + tiles + '</div></div>';
 }
 
 // ---- 学びの進み（精度の天気・承認待ちの見直し案。apiAiLearning は学びの画面と同じ読み込み S.lr.ai。失敗はこのカードだけ） ----
@@ -2127,7 +2132,7 @@ function homeToLearn(){ go('learning'); setTimeout(function(){ var el = $('lr-tu
 /** 承認待ちの見直し案の印（書類と確かめの印。精度の天気の絵と同じ 64 の枠に置き、2 つの箱の文字の頭をそろえる） */
 var HM_PEND_ICON = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><rect x="15" y="10" width="30" height="40" rx="5" fill="#E5F6FD"/><path d="M22 21h16M22 29h16M22 37h9"/><circle cx="45" cy="45" r="10" fill="#fff"/><path d="M45 40v5.5l3.5 2"/></svg>';
 function homeLearnCard(h, plans){
-  var head = '<div class="card-head"><h2>学びの進み' + tip('予測の当たり方（精度の天気）と、承認を待っている AI の見直し案です。見直し案は、承認して反映するまで予測に効きません') + '</h2></div>';
+  var head = '<div class="card-head"><h2>学びの進み' + tip('当たり方と、承認待ちの見直し案') + '</h2></div>';
   var d = S.lr.ai, x = S.ld.lrAi;
   if (!d) {
     if (x && x.error) return '<div class="card">' + head + '<div class="hm-wait" role="alert"><span class="hm-yomi">' + YOMI_POSE.discover + '</span><span class="err-text">読み込めませんでした</span><span class="note">' + esc(x.error) + '</span>'
@@ -2362,7 +2367,7 @@ function viewMakers(){
   var h = mkHead('予測一覧');
   if (h.wait) return h.wait;
   if (!h.rows.length) return h.head + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここに並びます。');
-  return h.head + '<div class="card"><div class="card-head"><h2>見通し' + tip('メーカーごとの年間の売上の見通しです。帯 = 10 回に 8 回はこの中に入る幅・縦の線 = 中心・丸 = 着地の推定（締まった月の実績＋残りの月）。全メーカーで同じ目盛り（左端が 0 円）です。名前を押すと予測結果を開きます') + '</h2>'
+  return h.head + '<div class="card"><div class="card-head"><h2>見通し' + tip('年間の売上の見通し（全メーカー同じ目盛り）。名前で予測結果へ') + '</h2>'
     + '<span class="mkb-keys" aria-hidden="true"><span><i class="k-band"></i>80% の幅</span><span><i class="k-mid"></i>中心</span><span><i class="k-dot"></i>着地の推定</span></span></div>'
     + '<div class="tblwrap">' + mkForecastTable(h.rows) + '</div></div>';
 }
@@ -2376,7 +2381,8 @@ function viewBudgets(){
   var both = bud.filter(function(p){ return p.pendingNo && p.officialNo; }).length;
   var stTip = { official: '公式版が承認されたメーカー', pending: '出した版を承認者が確認しているメーカー' + (both ? '\nうち ' + both + ' は前の版が承認済みです（ホームの「承認済み」にも数えます）' : ''),
     draft: '予測はあるが、公式版をまだ出していないメーカー', none: 'まだ予測がないメーカー' };
-  var summary = ['official', 'pending', 'draft', 'none'].map(function(st){ return '<span class="chip ' + MK_STATES[st][1] + '" data-tip="' + esc(stTip[st]) + '">' + MK_STATES[st][0] + ' ' + count(st) + '</span>'; }).join('')
+  // 札は進む順（未着手 → 承認済み。2026-10-16 村井さん）
+  var summary = ['none', 'draft', 'pending', 'official'].map(function(st){ return '<span class="chip ' + MK_STATES[st][1] + '" data-tip="' + esc(stTip[st]) + '">' + MK_STATES[st][0] + ' ' + count(st) + '</span>'; }).join('')
     + (nM ? '<span class="chip off" data-tip="' + esc(MEASURE_TIP) + '">測る専用 ' + nM + '</span>' : '');
   return h.head + '<div class="card"><div class="card-head"><h2>予算と予実' + tip('FY' + h.fy + ' の計画があるメーカーの、空模様・予算策定の状態・年間予算・暫定実績・着地の推定です。予実の棒は、着地の推定 ÷ 年間予算（縦の線が 100%）。名前を押すと予算策定を開きます') + '</h2>'
     + '<span class="mk-sum">' + summary + '</span></div><div class="tblwrap">' + mkTable(rows) + '</div></div>';
@@ -2409,8 +2415,8 @@ function mkForecastTable(rows){
   var body = rows.map(function(p){
     return '<tr><td class="wrap">' + planLink(p, 'forecast') + (planMeasure(p) ? ' ' + measureChip(true) : '') + '</td>' + band(p) + '<td class="num">' + yen(p.p50) + '</td>' + chg(p) + acc(p) + '</tr>';
   }).join('');
-  return '<table class="tbl mk mkf"><colgroup><col style="width:24%"><col><col style="width:16%"><col style="width:12%"><col style="width:12%"></colgroup>'
-    + '<thead><tr><th>メーカー</th><th class="mkb-th" data-tip="年間の売上。帯 = 80% の幅・縦の線 = 中心・丸 = 着地の推定（全メーカーで同じ目盛り。左端が 0 円）">年間の見通し' + scale + '</th>' + qTh('p50') + '<th class="num" data-tip="前回の予測の中心からの変化">前回から</th><th class="num" data-tip="締まった月の、予測と実績の外れ幅">外れ幅</th></tr></thead><tbody>'
+  return '<table class="tbl mk mkf"><colgroup><col style="width:18%"><col><col style="width:13%"><col style="width:9%"><col style="width:9%"></colgroup>'
+    + '<thead><tr><th>メーカー</th><th class="mkb-th">年間の見通し' + scale + '</th>' + qTh('p50') + '<th class="num" data-tip="前回の予測の中心からの変化">前回から</th><th class="num" data-tip="締まった月の、予測と実績の外れ幅">外れ幅</th></tr></thead><tbody>'
     + body + '</tbody></table>';
 }
 /** 確率の短い表し方（1% 未満・99% 超はそう書く。年度が締まって着地にぶれが無いときは、決まった値なのでそのまま） */
@@ -2458,7 +2464,7 @@ function mkTable(rows){
   // 列の幅: カードの幅いっぱいに割り振る（名前 24%・空模様 16%・ステータス 15%・金額 15% ずつ）。左に寄せて右を空けない（2026-10-13 村井さん「左に寄りすぎ。バランスを」）。
   // 「開く」の列は置かない（名前を押すと開く）
   return '<table class="tbl mk"><colgroup><col style="width:24%"><col style="width:16%"><col style="width:15%"><col style="width:15%"><col style="width:15%"><col style="width:15%"></colgroup>'
-    + '<thead><tr><th>メーカー</th><th data-tip="締まった月の実績と予測から推定した着地を、予算と比べた見通しです">空模様</th><th data-tip="未着手 = まだ予測がない・策定中 = 予測はあるが公式版をまだ出していない・承認待ち = 出した版を承認者が確認中・承認済み = 公式版が承認された">ステータス</th><th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">年間予算</th><th class="num" data-tip="締まった月（月末から 5 日たってから取り込んだ月）の実績の合計">暫定実績</th><th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th></tr></thead><tbody>'
+    + '<thead><tr><th>メーカー</th><th data-tip="締まった月の実績と予測から推定した着地を、予算と比べた見通しです">空模様</th><th data-tip="未着手 → 策定中 → 承認待ち → 承認済み">ステータス</th><th class="num" data-tip="承認済みの公式版の最終予算（無ければ今の予算）">年間予算</th><th class="num" data-tip="締まった月（月末から 5 日たってから取り込んだ月）の実績の合計">暫定実績</th><th class="num" data-tip="締まった月の実績と、残りの月の予測から推定した年度の着地">着地の推定</th></tr></thead><tbody>'
     + body + foot + rest + '</tbody></table>';
 }
 // ==== END REGION: MAKERS ====
@@ -2484,6 +2490,8 @@ var FC_SEC_VIEW = { input: 'prep', review: 'prep', forecast: 'forecast', basis: 
 function fcView(v){ v = v === undefined ? S.view : v; return !!FC_VIEWS[v]; }
 function fcSecsOf(v){ return FC_SECS.filter(function(s){ return FC_VIEWS[v].indexOf(s[0]) >= 0; }).sort(function(a, b){ return FC_VIEWS[v].indexOf(a[0]) - FC_VIEWS[v].indexOf(b[0]); }); }
 var INPUT_KINDS = [['product','製品'],['client','メーカー全体'],['opinions','個人見解'],['devspot','スポット案件']];
+/** 入力のカードの見出し（2026-10-16 村井さん: 何を入れるかが分かる名前） */
+var INPUT_TITLE = { product: '製品の動向', client: 'メーカーの動向', opinions: '担当者の洞察', devspot: '新製品やスポット開発の予定' };
 /**
  * 予測を開く: 計画の一覧と、選んである計画の中身（根拠・振り返り・公式版も）を同時に読む（一覧を待たない）。一覧は 10 分・古いの印まで読み直さない（LD_KEEP）。
  * メーカーが決まっていなければ、見ている年度の最初のメーカーを開く（一覧がまだ無ければ、読めてから）
@@ -2751,9 +2759,10 @@ function viewForecast(){
       if (window.console) console.error('forecast section', e);
       inner = '<div class="card alert"><p class="err-text">ここを表示できませんでした</p><p class="note">' + esc((e && e.message) || e) + '</p><p class="note mt4">この文を管理者に伝えてください。ほかの所は使えます。</p></div>';
     }
-    // 予測を実行は、予測準備の入力の最後（入れて → 実行する）
-    return fcSec(s, inner + (s[0] === 'input' && fcRunBtn() ? '<div class="card-foot fc-runfoot">' + fcRunBtn() + '</div>' : ''), '');
+    return fcSec(s, inner, '');
   }).join('');
+  // 予測を実行は、予測準備のいちばん下に横幅いっぱい（入れて・見直して → 実行する。2026-10-16 村井さん）
+  if (S.view === 'prep' && fcRunBtn()) html += '<div class="fc-runbar">' + fcRunBtn() + '</div>';
   if (f.jump) setTimeout(fcJump, 0);
   if (!f.preFy || f.preFy !== f.planId) { f.preFy = f.planId; fcPrefetchFy(); }
   return html;
@@ -2792,7 +2801,7 @@ function fcSec(s, inner, right){
 /** 予測を実行のボタン（「予測と予算」の見出しの右。1 マス。予算策定担当だけ） */
 function fcRunBtn(){
   if (!fcCan('plan')) return '';
-  return '<span class="fc-runbtn">' + actBtn('<button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="fcForecastRun()">予測を実行</button>', 'データ本体の内容で予測を計算し、結果を残します（4〜6 分ほど）') + '</span>';
+  return '<span class="fc-runbtn">' + actBtn('<button class="btn btn-run" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="fcForecastRun()">予測を実行</button>', '4〜6 分ほどかかります') + '</span>';
 }
 /** 画面の中の区切りへ送る（ほかの画面から開いた・処理の後など）。区切りが描けていなければ、描けたときに送る */
 function fcJump(){
@@ -2889,8 +2898,8 @@ function fcMarkDirty(onclick){
   var btn = document.querySelector('[onclick="' + onclick + '"]');
   if (!btn) return;
   btn.disabled = fcBusy();
-  var foot = btn.closest ? btn.closest('.card-foot') : null;
-  if (foot && !foot.querySelector('.chip.warn')) foot.insertAdjacentHTML('beforeend', '<span class="chip warn">未保存</span>');
+  var foot = btn.closest ? btn.closest('.card-foot,.fc-insave') : null;
+  if (foot && !foot.querySelector('.chip.warn')) foot.insertAdjacentHTML(foot.className === 'fc-insave' ? 'afterbegin' : 'beforeend', '<span class="chip warn">未保存</span>');
 }
 /** 日付（2026-09-28T11:00:00+0900・Date の文字列のどちらでも）→ 2026/09/28（time: 時刻も） */
 function fcDate(s, time){
@@ -2982,10 +2991,11 @@ function fcMonthlyTab(d, v, mode){
     // 年度合計の行: 本番の計画は上の数字の箱と同じ値（旧来の計算の年度合計はカーソルで）
     + '<tr class="total"><td>年度合計</td>' + (showBud ? tot('p50') + bud(sec.annual, true) : tot('p10') + tot('p50') + tot('p90')) + '</tr>'
     + '</tbody></table>';
-  var foot = canBudget && (S.cv[cv] === 'table' || dirty);
-  html += '<div class="card"><div class="card-head"><h2>' + (showBud ? '月ごとの予算' : '月ごとの見通し') + tip('単位: 円。帯は 下振れ〜上振れ（10 回に 8 回はこの中に入る見込み）。' + (showBud ? '最終予算 = 採用予測 + 上乗せ（保存すると計算し直します）。' : '') + fcAnnualHeadTip(lv)) + '</h2></div>'
+  // 確率で決める・保存は見出しの右（表の下に浮かせない。2026-10-16 村井さん）
+  var ctl = canBudget ? '<span class="fc-insave">' + (dirty ? '<span class="chip warn">未保存</span>' : '') + (closed ? '' : fcProbSel(d)) + actBtn(fcSaveBtn('保存', 'fcSaveBudget()', dirty && !S.fc.budProb), '最終予算を計算し直します') + '</span>' : '';
+  html += '<div class="card"><div class="card-head"><h2>' + (showBud ? '月ごとの予算' : '月ごとの見通し') + tip('帯 = 80% の幅' + (showBud ? '・最終予算 = 採用予測 + 上乗せ' : '') + '\n' + fcAnnualHeadTip(lv)) + '</h2>' + ctl + '</div>'
     + chartOrTable(cv, chart, table)
-    + (foot ? '<div class="card-foot">' + (closed ? '' : fcProbSel(d)) + actBtn(fcSaveBtn('予算を保存', 'fcSaveBudget()', dirty && !S.fc.budProb), '採用予測と上乗せを保存し、最終予算を計算し直します') + (dirty ? '<span class="chip warn">未保存</span>' : '') + '</div>' : '') + '</div>';
+    + '</div>';
   return html;
 }
 /** 予算策定の 4 つ目の箱: この予算に届く見込み（締まった年度は届いたかどうか）。前提はカーソル */
@@ -3024,7 +3034,7 @@ function fcBudgetGauge(ka, final, sh){
   var scale = '<div class="bg-row bg-scale" aria-hidden="true"><div class="bg-lab"></div><div class="bg-track">' + ticks.map(function(k2){ return '<span style="left:' + x(k2) + '%">' + yenShort(k2) + '</span>'; }).join('') + '</div></div>';
   var keys = '<span class="mkb-keys" aria-hidden="true"><span><i class="k-band"></i>80% の幅</span><span><i class="k-mid"></i>中心</span>' + (isNum(lo4) ? '<span><i class="k-band tri"></i>手法の幅</span><span><i class="k-dot mix"></i>三角測量</span>' : '') + (isNum(final) ? '<span><i class="k-bud"></i>最終予算</span>' : '') + '</span>';
   var where = !isNum(final) ? '' : final > ka.p90 ? '上振れより上' : final > ka.p50 ? '中心と上振れの間' : final >= ka.p10 ? '下振れと中心の間' : '下振れより下';
-  return '<div class="card"><div class="card-head"><h2>予算の位置' + tip('年度の見通し（帯 = 10 回に 8 回はこの中）と、4 つの手法の幅の上に、最終予算を点線で重ねます。' + (where ? '\n今の最終予算は「' + where + '」です' : '')) + '</h2>' + keys + '</div>'
+  return '<div class="card"><div class="card-head"><h2>予算の位置' + tip((where ? '最終予算は「' + where + '」' : '見通しと手法の幅に最終予算を重ねたもの')) + '</h2>' + keys + '</div>'
     + '<div class="bgauge">' + html + scale + '</div></div>';
 }
 /** 最終予算の箱の説明に足す、予算に届く見込み（見える所には出さない。2026-10-13 村井さん「細かいテキストは不要」） */
@@ -3372,7 +3382,7 @@ function fcBasisTab(d, v){
   ms.forEach(function(m){ (m.sources || []).forEach(function(s){ var k = s.type || s.label; if (!agg[k]) { agg[k] = { label: fcSrcLabel(s), sum: 0, n: 0 }; order.push(k); } if (isNum(s.step)) { agg[k].sum += s.step; agg[k].n++; } }); });
   // 押した向きは棒の左右と符号で見せ、色は 1 色（色は予算との関係だけに使う）
   var push = order.map(function(k){ var x = agg[k], avg = x.n ? x.sum / x.n : null; return { label: x.label, value: avg, n: x.n, tone: 'main', tip: x.label + '\n押した月の平均 ' + pct1(avg) + '（' + x.n + ' か月）' }; });
-  if (hasRun && push.length) html += '<div class="card"><div class="card-head"><h2>予測を押したもの' + tip('入力と AI が、予測の中心をどちらへ・どれだけ押したか（押した月の平均）。プラスは押し上げ、マイナスは押し下げ') + '</h2></div>'
+  if (hasRun && push.length) html += '<div class="card"><div class="card-head"><h2>予測を押したもの' + tip('入力と AI が中心を押した向きと大きさ（月の平均）') + '</h2></div>'
     + chartOrTable('fcPush', chartBars(push, { fmt: pct1, diverging: true, label: '予測を押したもの（月の平均）' }),
       '<table class="tbl"><colgroup><col><col style="width:152px"><col style="width:128px"></colgroup><thead><tr><th>押したもの</th><th class="num">月の平均</th><th class="num">月の数</th></tr></thead><tbody>'
         + push.map(function(x){ return '<tr><td>' + esc(x.label) + '</td><td class="num">' + pct1(x.value) + '</td><td class="num">' + x.n + ' か月</td></tr>'; }).join('') + '</tbody></table>') + '</div>';
@@ -3414,7 +3424,7 @@ function fcBasisTab(d, v){
   var vx = r.vertex && r.vertex.rationale ? r.vertex : null;
   if (research.length || vx) {
     var asOf = research.length ? research[0].asOf : '';
-    html += '<div class="card"><div class="card-head"><h2>市場の調査' + tip('市場・競合・販路・DX の動きを AI が調べた結果です。週に 1 回、自動で調べ直します') + '</h2></div>'
+    html += '<div class="card"><div class="card-head"><h2>市場の調査' + tip('AI が週 1 回調べる市場・競合・販路・DX') + '</h2></div>'
       + (research.length ? '<div class="tblwrap"><table class="tbl scroll"><colgroup><col style="width:104px"><col style="width:96px"><col style="width:112px"><col style="width:88px"><col style="width:112px"><col></colgroup><thead><tr><th>話題</th><th data-tip="出来事 = 起きたこと・比較 = 前年やほかとの比べ">種類</th><th data-tip="AI が見た動きの向き（↑ 上向き・↓ 下向き・→ 横ばい）">向き</th><th class="num" data-tip="予測への押しの強さ（−100〜+100。プラスは押し上げ・マイナスは押し下げ）">点数</th><th class="num" data-tip="AI がこの見立てをどれだけ確かだと見ているか">確からしさ</th><th>根拠</th></tr></thead><tbody>'
         + research.map(function(x){ var sc = isNum(x.score) ? x.score : x.impact, hz = /^(\d+)M$/i.exec(String(x.horizon || ''));
           return '<tr><td>' + esc(fcTopic(x.topic)) + '</td><td>' + esc(fcRowType(x.rowType) || '-') + '</td><td>' + esc(fcDir(x.direction)) + '</td>'
@@ -3483,7 +3493,7 @@ function fcTriTab(d, v){
     return '<tr' + cls + '><td data-tip="' + esc(z[2]) + '">' + esc(z[1]) + '</td>' + band + '<td class="num">' + (isNum(val) ? yenShort(val) + '円' : '-') + '</td><td class="num"' + (wt ? ' data-tip="' + esc(how) + '"' : '') + '>' + wt + '</td>' + a + '</tr>';
   };
   var keysHtml = '<span class="mkb-keys" aria-hidden="true"><span><i class="k-dot"></i>手法</span><span><i class="k-dot mix"></i>三角測量</span><span><i class="k-mid"></i>本線</span>' + (isNum(bud) ? '<span><i class="k-bud"></i>最終予算</span>' : '') + '</span>';
-  html += '<div class="card"><div class="card-head"><h2>年間の比べ' + tip('手法ごとの 12 か月の合計を、同じ目盛りに並べます。点線は今の最終予算です。外れ幅は、このメーカーで年度の初めに戻って予測し直したときの当たり方（太字がいちばん当たった手法）') + '</h2>' + keysHtml + '</div>'
+  html += '<div class="card"><div class="card-head"><h2>年間の比べ' + tip('手法ごとの年間。点線 = 最終予算・太字 = いちばん当たった手法') + '</h2>' + keysHtml + '</div>'
     + '<div class="tblwrap"><table class="tbl mk tri-tbl"><colgroup><col style="width:160px"><col><col style="width:112px"><col style="width:80px"><col style="width:96px"></colgroup>'
     + '<thead><tr><th>手法</th><th class="mkb-th">年間' + scale + '</th><th class="num">12 か月</th><th class="num" data-tip="' + esc(how) + '">重み</th><th class="num" data-tip="このメーカーの物差しの外れ幅（小さいほど当たっている）">外れ幅</th></tr></thead><tbody>'
     + triRows().map(row).join('') + '</tbody></table></div></div>';
@@ -3496,7 +3506,7 @@ function fcTriTab(d, v){
     var cols = triRows().filter(function(z){ return z[0] !== 'LAST_YEAR'; });
     var table = '<table class="tbl wide"><thead><tr><th>月</th>' + cols.map(function(z){ return '<th class="num" data-tip="' + esc(z[2]) + '">' + esc(z[1]) + '</th>'; }).join('') + '</tr></thead><tbody>'
       + ms.map(function(m){ return '<tr><td>' + esc(m.ym) + (m.actual ? ' <span class="chip off fc-act" data-tip="実績の確定した月です">実績</span>' : '') + '</td>' + cols.map(function(z){ return '<td class="num">' + yen(m.v[z[0]]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>';
-    html += '<div class="card"><div class="card-head"><h2>月ごとの見通し' + tip('帯 = 4 つの手法（線形回帰・直近重視の回帰・季節の中央値・シミュレーション）の幅。線 = 本線の予測と三角測量') + '</h2></div>' + chartOrTable('fcTriM', chart, table) + '</div>';
+    html += '<div class="card"><div class="card-head"><h2>月ごとの見通し' + tip('帯 = 4 つの手法の幅') + '</h2></div>' + chartOrTable('fcTriM', chart, table) + '</div>';
   }
   return html;
 }
@@ -3541,7 +3551,7 @@ function fcLayerTable(L){
   if (!rows.length) return '';
   var types = function(o){ return FC_LAYER_TYPES.filter(function(t){ return Math.abs((o.byType || {})[t[0]] || 0) >= 0.5; }).map(function(t){ return t[1] + ' ' + sg(o.byType[t[0]]) + ' 円'; }).join('・'); };
   return '<div class="mt12"><table class="tbl fc-layers"><colgroup><col><col style="width:160px"></colgroup><thead><tr>'
-    + '<th data-tip="予測の中心（月の合計）を、過去の売上・スポット案件・人の入力・AI・補正に分けた目安です（記録した値から割合で分け、合わない分は「そのほか」）">内訳</th>'
+    + '<th data-tip="予測の中心を、もとごとに分けた目安">内訳</th>'
     + '<th class="num" data-tip="前回の予測からの変化（月の合計）">前回から（月の合計）</th></tr></thead><tbody>'
     + rows.map(function(x){ var d = v(a, x[0]) - v(b, x[0]), ty = x[0] === 'human' ? types(a) : '';
       return '<tr><td data-tip="' + esc(x[2] + (ty ? '\n今回: ' + ty : '')) + '">' + esc(x[1]) + '</td><td class="num" data-tip="' + esc('今回 ' + yenU(v(a, x[0])) + '・前回 ' + yenU(v(b, x[0]))) + '">' + sg(Math.abs(d) < 0.5 ? 0 : d) + '</td></tr>'; }).join('')
@@ -3555,10 +3565,13 @@ function fcInputTab(d, v){ return INPUT_KINDS.map(function(k){ return fcInputCar
 function fcInputCard(v, kind){
   var boot = v.boot, canPlan = fcCan('plan'), q = '\'' + kind + '\'';
   var rows = fcDraft(kind);
+  // 行を足すボタンは置かず、いつも最後に空の行を 1 つ（打てば次の空の行が出る。値をすべて消した行は保存で消える。2026-10-16 村井さん）
+  var blank = function(x){ return !x || !Object.keys(x).some(function(k){ return k.charAt(0) !== '_' && String(x[k] == null ? '' : x[k]).trim() !== ''; }); };
+  // 空の行は画面だけに出す（入力中の行には、打ったときに足す: fcInput・fcInputType）
+  if (canPlan && !(v.plan && v.plan.frozen) && (!rows.length || !blank(rows[rows.length - 1]))) rows = rows.concat([{}]);
   // 自信（製品とメーカー全体の行だけ）: 動かせる人と、記録の自信が送られてきた人に出す。跡の列は、記録が送られてきた行があるときだけ
   var logs = (v.inputLog && v.inputLog.rows && v.inputLog.rows[kind]) || [];
   var showConf = !!FC_CONF_KINDS[kind] && (canPlan || logs.some(function(e){ return e && e.conf; }));
-  var showHist = rows.some(function(r){ return fcInLogTip(fcInLog(kind, r)); });
   // 自信の列は 96px（高い・ふつう・低い が入る幅）。変わった跡の (i) は、理由・補足・案件名のマスの中の右に置く（列を足さない）。
   // 製品の列は 1 マス（160px）: 1280px の画面で、製品の表を枠からはみ出さずに、理由の欄に 6 字ほどを残す
   var conf = showConf ? [['selfConf','自信','selfconf',96]] : [];
@@ -3567,20 +3580,13 @@ function fcInputCard(v, kind){
     client: [['person','担当者','people',128],['ym','対象月','month',112],['step','増減率','step',96]].concat(conf, [['reason','理由','text']]),
     opinions: [['person','担当者','people',128],['ym','対象月','month',112],['step','増減率','step',96],['conf','確度','conf',96],['note','補足','text']],
     devspot: [['person','担当者','people',128],['ym','対象月','month',112],['project','案件名','text'],['amount','金額（円）','money',YEN_COL],['conf','確度','conf',96]] }[kind];
-  var histAt = { product: 'reason', client: 'reason', opinions: 'note', devspot: 'project' }[kind];
   // 狭い PC の画面（1280px 未満。表は枠の中で横に送る）では、理由・補足の欄に 200px を残す。1280px からは枠に入れる（.tbl.fc-in の --inw）
-  var fixedW = cols.reduce(function(n, c){ return n + (c[3] || 0); }, 0) + (canPlan ? 152 : 0);
+  var fixedW = cols.reduce(function(n, c){ return n + (c[3] || 0); }, 0);
   var inw = Math.max(canPlan ? 880 : 720, fixedW + (cols.some(function(c){ return !c[3]; }) ? 200 : 0));
   var opts = function(list, cur){ return [''].concat(list || []).map(function(o){ var val = typeof o === 'string' ? o : o.value, lab = typeof o === 'string' ? o : o.label;
     return '<option value="' + esc(val) + '"' + (String(cur) === String(val) ? ' selected' : '') + '>' + (val === '' ? '—' : esc(lab)) + '</option>'; }).join(''); };   // 空は「—」（開いた一覧に空の行を出さない）
   var withCur = function(list, val){ list = list || []; return list.indexOf(val) < 0 && val ? list.concat([val]) : list; };
-  // 変わった跡の (i)（跡の無い行は同じ幅の空き。欄の幅をそろえる）
-  var histHtml = function(c, r, inner, plain){
-    if (!showHist || c[0] !== histAt) return inner;
-    var t = fcInLogTip(fcInLog(kind, r));
-    return '<span class="incell">' + (plain ? '<span class="ell">' + inner + '</span>' : inner) + (t ? tip(t) : '<span class="tipsp"></span>') + '</span>';
-  };
-  var cellHtml = function(c, r, i){ return histHtml(c, r, cellIn(c, r, i), !canPlan); };
+  var cellHtml = function(c, r, i){ return cellIn(c, r, i); };
   var cellIn = function(c, r, i){
     var val = r[c[0]] === null || r[c[0]] === undefined ? '' : r[c[0]], on = 'onchange="fcInput(' + i + ',\'' + c[0] + '\',this.value,' + q + ')" aria-label="' + esc(c[1]) + '"';
     var typed = 'oninput="fcInputType(' + i + ',\'' + c[0] + '\',this.value,' + q + ')" aria-label="' + esc(c[1]) + '"';   // 文字・数の欄は打つたびに控える
@@ -3596,16 +3602,15 @@ function fcInputCard(v, kind){
     var num = c[2] === 'conf';
     return '<input class="inp cell' + (num ? ' num' : '') + '" type="' + (num ? 'number' : 'text') + '"' + (num ? ' min="0" max="1" step="0.1"' : '') + ' value="' + esc(val) + '" ' + typed + '>';
   };
-  var html = '<div class="card fc-inkind" id="fc-in-' + kind + '"><h2>' + esc((INPUT_KINDS.filter(function(k){ return k[0] === kind; })[0] || ['', ''])[1]) + 'の入力' + (canPlan ? '' : tip('入力は予算策定担当ができます。')) + '</h2><div class="tblwrap"><table class="tbl scroll fc-in' + (canPlan ? ' edit' : '') + '" style="--inw:' + inw + 'px"><colgroup>' + cols.map(function(c){ return '<col' + (c[3] ? ' style="width:' + c[3] + 'px"' : '') + '>'; }).join('') + (canPlan ? '<col style="width:152px">' : '') + '</colgroup>'
-    + '<thead><tr>' + cols.map(function(c){ return '<th' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + (c[2] === 'selfconf' ? ' data-tip="' + esc(FC_CONF_TIP) + '"' : '') + '>' + c[1] + '</th>'; }).join('') + (canPlan ? '<th></th>' : '') + '</tr></thead><tbody>'
-    + (rows.length ? rows.map(function(r, i){ return '<tr>' + cols.map(function(c){ return '<td' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + '>' + cellHtml(c, r, i) + '</td>'; }).join('')
-      + (canPlan ? '<td><button class="btn btn-ghost btn-sm" onclick="fcInputDel(' + i + ',' + q + ')" data-tip="この行を入力から外します（保存するまで反映されません）">外す</button></td>' : '') + '</tr>'; }).join('')
-      : '<tr><td colspan="' + (cols.length + (canPlan ? 1 : 0)) + '" class="empty">まだ入力がありません。' + (canPlan ? '「行を追加」で登録できます。' : '') + '</td></tr>')
-    + '</tbody></table></div>'
-    + (canPlan ? '<div class="card-foot">' + actBtn(fcSaveBtn('入力を保存', 'fcSaveInput(' + q + ')', S.fc.inputDirty[kind]), '保存すると、この種類の入力をすべて書き換えます。必須の項目が空の行は予測では使いません')
-      + actBtn('<button class="btn btn-ghost" onclick="fcInputAdd(' + q + ')">行を追加</button>', '表の下に空の行を足します（保存するまで反映されません）')
-      + (S.fc.inputDirty[kind] ? '<span class="chip warn">未保存</span>' : '') + '</div>' : '')
-    + '</div>';
+  // 見出しの右に保存（行ごとの「外す」・「行を追加」は置かない。2026-10-16 村井さん）
+  var dirty = S.fc.inputDirty[kind];
+  var html = '<div class="card fc-inkind" id="fc-in-' + kind + '"><div class="card-head"><h2>' + esc(INPUT_TITLE[kind]) + (canPlan ? '' : tip('入力は予算策定担当ができます')) + '</h2>'
+    + (canPlan ? '<span class="fc-insave">' + (dirty ? '<span class="chip warn">未保存</span>' : '') + actBtn(fcSaveBtn('保存', 'fcSaveInput(' + q + ')', dirty), '空にした行は消えます') + '</span>' : '') + '</div>'
+    + '<div class="tblwrap"><table class="tbl scroll fc-in' + (canPlan ? ' edit' : '') + '" style="--inw:' + inw + 'px"><colgroup>' + cols.map(function(c){ return '<col' + (c[3] ? ' style="width:' + c[3] + 'px"' : '') + '>'; }).join('') + '</colgroup>'
+    + '<thead><tr>' + cols.map(function(c){ return '<th' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + (c[2] === 'selfconf' ? ' data-tip="' + esc(FC_CONF_TIP) + '"' : '') + '>' + c[1] + '</th>'; }).join('') + '</tr></thead><tbody>'
+    + (rows.length ? rows.map(function(r, i){ return '<tr>' + cols.map(function(c){ return '<td' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + '>' + cellHtml(c, r, i) + '</td>'; }).join('') + '</tr>'; }).join('')
+      : '<tr><td colspan="' + cols.length + '" class="empty">まだ入力がありません</td></tr>')
+    + '</tbody></table></div></div>';
   return html;
 }
 /**
@@ -3640,20 +3645,21 @@ function fcDraftOk(kind, rows){
   return !!pid && rows.planId === pid && (!f.planId || f.planId === pid) && rows.src === fcInputSrc(kind);
 }
 /** 入力の欄（選ぶ欄）を変えた。kind: 入力の種類（無ければ S.fc.inputKind） */
-function fcInput(i, k, val, kind){ kind = kind || S.fc.inputKind; fcDraft(kind)[i][k] = val; if (!S.fc.inputDirty[kind]) { S.fc.inputDirty[kind] = true; render(); } }
+function fcInput(i, k, val, kind){ kind = kind || S.fc.inputKind; var dr = fcDraft(kind), added = !dr[i]; if (added) dr[i] = {}; dr[i][k] = val; if (!S.fc.inputDirty[kind] || added) { S.fc.inputDirty[kind] = true; render(); } }   // 空の行に入れたら、次の空の行を出す
 /**
  * 文字・数の欄（理由・補足・案件名・確度・金額）は、打つたびに入力中の値へ控える（読み込みや処理の終わりで描き直しても、打ちかけの文字を消さない）。
  * 描き直すと打っている欄から外れるので、描き直さずに、その種類のカードの保存のボタンと未保存の印だけを付ける（人の記入の欄と同じ）
  */
 function fcInputType(i, k, val, kind){
   kind = kind || S.fc.inputKind;
-  fcDraft(kind)[i][k] = val;
+  var dr = fcDraft(kind), added = !dr[i];
+  if (added) dr[i] = {};   // 最後の空の行に打った（画面だけの行を、入力中の行に足す）
+  dr[i][k] = val;
+  if (added) { S.fc.inputDirty[kind] = true; render(); return; }   // 次の空の行を出す（打っている欄とカーソルの位置は描き直しの後に戻る）
   if (S.fc.inputDirty[kind]) return;
   S.fc.inputDirty[kind] = true;
   fcMarkDirty("fcSaveInput('" + kind + "')");
 }
-function fcInputAdd(kind){ kind = kind || S.fc.inputKind; fcDraft(kind).push({}); S.fc.inputDirty[kind] = true; render(); }
-function fcInputDel(i, kind){ kind = kind || S.fc.inputKind; fcDraft(kind).splice(i, 1); S.fc.inputDirty[kind] = true; render(); }
 /**
  * 保存で送る行: 画面だけの印（_lk・_conf0。_ で始まる）は送らない。開いたときの行から来た行には、その行が読んだ行の何番目だったか（fromRow: 0 から。
  * 計画の画面の boot.input のその種類の順）を付ける。足した行と、値をすべて空にした行（旧来の保存が書かない行）には付けない。
@@ -3694,33 +3700,6 @@ function fcInLog(kind, r){
   var l = S.fc.view && S.fc.view.inputLog, list = l && l.rows && l.rows[kind];
   return list && r && typeof r._lk === 'number' ? list[r._lk] || null : null;
 }
-var FC_INLOG_CHANGE = { ADD: '足した', CHANGE: '変えた', REMOVE: '外した', CONF: '自信を変えた', BASELINE: '記録を始めたときの姿' };
-var FC_INLOG_ACT = { 'PLAN.CREATE': '計画を作る', 'FORECAST.RUN': '予測', 'BASELINE': '' };
-var FC_INLOG_FIELD = [['person','担当者'],['product','製品'],['ym','対象月'],['step','増減率'],['reason','理由'],['conf','確度'],['note','補足'],['project','案件名'],['amount','金額']];
-function fcInLogVal(k, v){
-  if (v === null || v === undefined || v === '') return '—';
-  if (k === 'ym') return String(v).replace('-', '/');
-  return k === 'amount' && isNum(v) ? yenU(v) : String(v);
-}
-/** 行の変わった跡（カーソルで出す。新しい順・5 件まで）。自信は、その前の跡から変わったときだけ書く。記録を始めたときの姿（BASELINE）は仕組みが書いた行なので、した人を書かない */
-function fcInLogTip(e){
-  if (!e || !e.hist || !e.hist.length) return '';
-  var str = function(v){ return v === null || v === undefined ? '' : String(v); };
-  var lines = ['変わった跡'];
-  e.hist.forEach(function(h, j){
-    var act = h.action ? (FC_ACTION_SHORT[h.action] || FC_ACTION_FULL[h.action] || FC_INLOG_ACT[h.action] || '') : '';
-    var more = [], prev = e.hist[j + 1];
-    if (h.change === 'CHANGE' && h.before && h.after) FC_INLOG_FIELD.forEach(function(f){
-      if ((f[0] in h.before || f[0] in h.after) && str(h.before[f[0]]) !== str(h.after[f[0]])) more.push(f[1] + ' ' + fcInLogVal(f[0], h.before[f[0]]) + ' → ' + fcInLogVal(f[0], h.after[f[0]]));
-    });
-    if (h.change !== 'REMOVE' && h.conf && (!prev || str(prev.conf) !== str(h.conf))) more.push('自信 ' + h.conf);
-    if (h.change === 'CONF' && !h.conf) more.push('自信 —');
-    if (h.reason) more.push('保存の理由 ' + h.reason);
-    lines.push(fcDate(h.at, true) + ' ' + (FC_INLOG_CHANGE[h.change] || '') + (act ? '（' + act + '）' : '') + (h.by && h.change !== 'BASELINE' ? '・' + fcWho(h.by) : '') + (more.length ? '\n  ' + more.join('、') : ''));
-  });
-  if (e.n > e.hist.length) lines.push('ほか ' + (e.n - e.hist.length) + ' 件');
-  return lines.join('\n');
-}
 
 // ---- 振り返り（検証と四半期の見直しをまとめた: 精度の天気 → 精度の推移 → 人の記入 → AI の見直し案 → 更新。2026-10-06 村井さん） ----
 function fcLoadLearning(){ if (S.fc.planId) fcFetch(S.fc.planId, ['learn']); }
@@ -3732,36 +3711,22 @@ function fcReviewTab(d, v){
   // 当たり具合は別に読む（読み込み中・失敗はその場所だけ。人の記入と見直し案は先に出す）
   if (!acc) html += slot('fcLearn', '当たり具合を読み込んでいます', 'fcLoadLearning()') || loading('当たり具合を読み込んでいます');
   // 何も無いときは、「まだありません」を重ねず、よみの案内 1 枚と更新の操作だけ（2026-10-06 村井さん）。見直し案を作る操作を止めている間は、見直し案が出るとは言わない
-  var genPaused = fcPaused('REVIEW.GENERATE');
   // 締め済みの年度は、当たり具合を計算し直さない（ずっと出ない。「まだ」とは言わない）。動かせない人には「計算されると出ます」
   var frozen = !!(v.plan && v.plan.frozen), FROZEN_NOTE = '（締め済みの年度は、当たり具合を計算し直しません）。';
-  var accHow = canPlan ? '「当たり具合を計算」で出ます。' : '当たり具合が計算されると出ます。';
   // 実績と比べた月の数（サーバーの scoredMonths。売上が 0 円の月も数える。無いサーバーでは今までどおり）。比べた月があるのに外れ幅の月が無い = どの月も売上が 0 円で、外れ幅を % にできない
   var scored = acc && isNum(lr.scoredMonths) ? lr.scoredMonths : null, zeroOnly = !!acc && !hasAcc && scored > 0;
   var noAccLine = zeroOnly ? '比べた ' + scored + ' か月は、どれも売上が 0 円のため、外れ幅を % で出せません。'
-    : frozen ? '実績と比べた月はありません' + FROZEN_NOTE : 'まだ実績と比べた月がありません。' + accHow;
-  if (acc && !hasAcc && !zeroOnly && !ins.length && !props.length) html += guide('explain', frozen ? '振り返りの記録はありません' + FROZEN_NOTE : canPlan
-    ? 'まだ振り返りの記録がありません。月の実績が締まったら、下の「振り返りの更新」を左から順に実行してください。当たり具合・外れの原因' + (genPaused ? '' : '・AI の見直し案') + 'がここに出ます。'
-    : 'まだ振り返りの記録がありません。月の実績が締まって当たり具合が計算されると、ここに出ます。');
+    : frozen ? '実績と比べた月はありません' + FROZEN_NOTE : 'まだ実績と比べた月がありません。';
+  if (acc && !hasAcc && !zeroOnly && !ins.length && !props.length) html += guide('explain', frozen ? '振り返りの記録はありません' + FROZEN_NOTE : 'まだ振り返りの記録がありません。月の実績が締まると、ここに出ます。');
   // 人の記入・見直し案はあるのに、比べた月がまだ無い（または売上が 0 円の月だけ）: 精度の天気の場所に 1 行だけ（案内 1 枚とは重ねない）
-  else if (acc && !hasAcc) html += '<div class="card"><div class="card-head"><h2>精度の天気</h2></div><p class="note">' + esc(noAccLine) + '</p></div>';
+  else if (acc && !hasAcc) html += '<div class="card"><div class="card-head"><h2>AI 補正</h2></div><p class="note">' + esc(noAccLine) + '</p></div>';
   if (hasAcc) html += fcRvWeather(acc) + fcRvTrend(acc);
   if (ins.length) html += fcRvNotes(ins, canPlan);
   // 当たり具合は出ているのに人の記入が無い（当たり具合を計算した後、外れの原因を整理の前）: 人の記入の場所に 1 行だけ。
   // 締め済みの年度・外れの原因を整理を止めている間は言わない。動かせない人には「整理されると出ます」
   else if (hasAcc && !frozen && !fcPaused('EVAL.INSIGHTS')) html += '<div class="card"><div class="card-head"><h2>人の記入</h2></div><p class="note">'
-    + esc(canPlan ? '外れた月の記入は「' + actShort('EVAL.INSIGHTS') + '」で出ます。' : '外れた月の記入は、' + RUN_DONE['EVAL.INSIGHTS'] + 'ると出ます。') + '</p></div>';
+    + esc('外れた月の記入は、' + RUN_DONE['EVAL.INSIGHTS'] + 'ると出ます。') + '</p></div>';
   if (props.length) html += fcRvProposals(q);
-  var items = [
-    ['IMPORT.ACTUALS', 'ZAC の実績を取り込み直します。締まった月として数えるのは、月末から 5 日たってから取り込んだ月だけです。', 'admin', fcSourceNote()],
-    ['EVAL.REPORT', '予測と実績を比べて、月ごとの当たり具合を計算し直します。'],
-    ['EVAL.INSIGHTS', '外れた月の原因の見立てを作り直します。'],
-    ['LEARN.MONTHLY', '実績から補正の係数を学び直します（次の予測に反映）。'],
-    ['REVIEW.GENERATE', '前の四半期の結果から、AI が設定の見直し案を作ります。']];
-  var acts = fcActions(items);
-  // 止めている操作（押せないボタン）は、順に実行する説明でもそう言う
-  var stopped = items.filter(function(it){ return fcCan(it[2] || 'plan') && fcPaused(it[0]); }).map(function(it){ return '「' + actShort(it[0]) + '」'; });
-  if (acts) html += '<div class="card"><div class="card-head"><h2>振り返りの更新' + tip('左から順に実行します' + (stopped.length ? '。' + stopped.join('と') + 'は、今は止めています' : '')) + '</h2></div>' + acts + '</div>';
   return html;
 }
 /**
@@ -3776,7 +3741,7 @@ function fcRvWeather(a){
   var nameTip = few && key === 'mikakunin' ? accFewRule(a.n) : accRule(key) + (rough ? '\n見通しの幅に収まった割合が 80% より低く、荒れています（外れ幅 ' + pct0(a.mape) + '）' : '');
   var leanTip = !isNum(b) ? '' : few ? accFewSay(a.n) + 'です。強気・弱気は ' + ACC_MIN_MONTHS + ' か月から言います（今は ' + pct1(b) + '）\n' + ACC_LEAN_HOW
     : (Math.abs(b) < 0.03 ? '予測と実績はほぼ釣り合っています。' : b > 0 ? '予測が実績より高め（強気）です。' : '予測が実績より低め（弱気）です。') + '\n' + ACC_LEAN_HOW + '。新しい月ほど重く数えています';
-  return '<div class="card"><div class="card-head"><h2>精度の天気' + tip('この計画の外れ幅（予測の中心と実績の差の合計 ÷ 実績の合計）から決めた天気です。\n快晴 10% 未満・晴れのち曇り 15% 未満・曇り 20% 未満・雨 30% 未満・台風 30% 以上。\n見通しの幅に収まった割合が 80% より低いとき（荒れている）も台風です。\n比べた月が ' + ACC_MIN_MONTHS + ' か月より少ないうちは、天気を決めません（霧）') + '</h2></div>'
+  return '<div class="card"><div class="card-head"><h2>AI 補正' + tip('この計画の外れ幅から決めた天気です（快晴 10% 未満〜台風）') + '</h2></div>'
     + '<div class="fc-wx"><span class="fc-wxch" role="img" aria-label="' + esc(skyName(key)) + '">' + (CHAR_SVG[key] || '') + '</span><div class="fc-wxnm" data-tip="' + esc(nameTip) + '">' + esc(skyName(key)) + '</div>'
     + '<div class="fc-stats">' + stat('外れ幅', pct0(a.mape), few ? a.n + ' か月' : '', '月の予測（中心）と実績の差の合計 ÷ 実績の合計（' + a.n + ' か月）' + (few ? '\n' + accFewSay(a.n) + 'なので、天気はまだ決めません' : '') + (a.trend ? '\n直近 ' + pct0(a.trend.recent) + '（その前 ' + pct0(a.trend.before) + '）' : ''))
     + stat('幅に収まった割合', isNum(cov) ? Math.round(cov * 100) + '%' : '-', '目安 80%', '実績が 下振れ〜上振れ の幅に入った月の割合（' + (a.coverageN || 0) + ' か月）。4 か月以上比べて、80% より偶然では説明しにくいほど低いときは、幅が狭すぎます')
@@ -3792,7 +3757,7 @@ function fcRvTrend(a){
     + ms.slice().reverse().map(function(m){ return '<tr><td>' + esc(m.month) + '</td><td class="num">' + yen(m.p10) + '</td><td class="num">' + yen(m.p50) + '</td><td class="num">' + yen(m.p90) + '</td><td class="num">' + yen(m.actual) + '</td>'
       + '<td class="num">' + (m.leak ? '<span class="chip off" data-tip="締まった後に予測した月なので数えていません">除く</span>' : pct1(m.err)) + '</td><td>'
       + (m.leak ? '' : m.inside === null || m.inside === undefined ? '-' : m.inside ? '<span class="chip ok">入った</span>' : '<span class="chip warn">外れた</span>') + '</td></tr>'; }).join('') + '</tbody></table>';
-  return '<div class="card"><div class="card-head"><h2>精度の推移' + tip('外れ = 予測の中心 ÷ 実績 − 1。プラスは予測が実績より高かった月（強気）、マイナスは低かった月（弱気）' + (a.leaks ? '\n締まった後に予測した ' + a.leaks + ' か月は数えていません' : '')) + '</h2></div>'
+  return '<div class="card"><div class="card-head"><h2>精度の推移' + tip('外れ = 中心 ÷ 実績 − 1' + (a.leaks ? '\n締まった後に予測した ' + a.leaks + ' か月は数えていません' : '')) + '</h2></div>'
     + chartOrTable('fcAcc', chart, table) + '</div>';
 }
 /** 人の記入（外れた月の原因の仮説・対応・担当・状態。状態と対応は、保存する値はそのままで、ふつうの言葉で見せる） */
@@ -3833,7 +3798,8 @@ function fcRvNotes(ins, canPlan){
   var cols = canPlan ? [96, 0, 160, 0, 112, 128] : [96, 0, 160, 0].concat(who ? [112] : []).concat([112]);
   var head = '<th data-tip="月にカーソルを合わせると、当たり具合の計算から出た見立てが出ます">月</th><th>原因の仮説</th><th data-tip="外れに対して決めた対応。（自動）は計算が付けたものです">対応</th><th>次に反映すること</th>' + (canPlan || who ? '<th>担当</th>' : '') + '<th>状態</th>';
   var feeds = fcPaused('REVIEW.GENERATE') ? '次の予測' : '次の予測と AI の見直し案';   // 見直し案を作る操作を止めている間は、見直し案の材料とは言わない
-  return '<div class="card"><div class="card-head"><h2>人の記入' + tip('外れた月の原因の仮説・対応・担当を書きます。' + feeds + 'の材料になります。同じ月の行は 1 つにまとめています（人が書いた行を出します）') + '</h2></div><div class="tblwrap"><table class="tbl scroll fc-notes' + (canPlan ? ' edit' : '') + '"><colgroup>'
+  return '<div class="card"><div class="card-head"><h2>人の記入' + tip('外れた月の原因と対応。' + feeds + 'の材料') + '</h2>'
+    + (canPlan ? '<span class="fc-insave">' + (dirty ? '<span class="chip warn">未保存</span>' : '') + actBtn(fcSaveBtn('保存', 'fcSaveIns()', dirty), feeds + 'の材料になります') + '</span>' : '') + '</div><div class="tblwrap"><table class="tbl scroll fc-notes' + (canPlan ? ' edit' : '') + '"><colgroup>'
     + cols.map(function(x){ return x ? '<col style="width:' + x + 'px">' : '<col>'; }).join('') + '</colgroup>'
     + '<thead><tr>' + head + '</tr></thead><tbody>'
     + rows.map(function(o){ var r = o.r;
@@ -3841,7 +3807,7 @@ function fcRvNotes(ins, canPlan){
       return '<tr><td' + (mt ? ' data-tip="' + esc(mt) + '"' : '') + '>' + esc(r.month) + '</td>'
       + (canPlan ? '<td>' + txt(r, 'hypothesis', '原因の仮説') + '</td><td' + (r.actionType === 'update' && !fcInsHuman(r) ? ' data-tip="自動で付いた対応です"' : '') + '>' + sel(r, 'actionType', ['', '前提を更新', '入力を修正', '様子見', 'エスカレーション'], '対応') + '</td><td>' + txt(r, 'reflection', '次に反映すること') + '</td><td>' + txt(r, 'owner', '担当') + '</td><td>' + sel(r, 'status', ['', 'open', 'in_progress', 'done'], '状態') + '</td>'
         : clamp(r.hypothesis) + '<td>' + esc(fcInsAct(r)) + '</td>' + clamp(r.reflection) + (who ? '<td>' + esc(r.owner || '-') + '</td>' : '') + '<td>' + esc(fcInsLabel('status', r.status)) + '</td>') + '</tr>'; }).join('')
-    + '</tbody></table></div>' + (canPlan ? '<div class="card-foot">' + actBtn(fcSaveBtn('記入を保存', 'fcSaveIns()', dirty), '原因の仮説・対応・担当・状態を保存します。' + feeds + 'の材料になります') + (dirty ? '<span class="chip warn">未保存</span>' : '') + '</div>' : '') + '</div>';
+    + '</tbody></table></div></div>';
 }
 function fcIns(row, k, val){ var x = S.fc.ins; x[row] = x[row] || {}; x[row][k] = val; fcMarkDirty('fcSaveIns()'); }
 function fcSaveIns(){
@@ -3870,21 +3836,22 @@ function fcRvProposals(q){
       + '<td class="num">' + esc(p.conf || '-') + '</td>' + clamp(why) + clamp(p.impact) + '<td>' + cell + '</td></tr>'; }).join('');
   var busyNow = fcBusy();
   // 反映済みの札: 見直し案を作る操作を止めている間（2026-10-07 所有者の決定）は、そのボタンを案内せず、止めている理由を出す
-  var genPaused = fcPaused('REVIEW.GENERATE');
-  var appliedTip = 'この見直し案は反映済みです。' + (genPaused ? genPaused : '新しい案は「見直し案を作る」で作ります');
+  var appliedTip = 'この見直し案は反映済みです';
   // 自動の学びの旗が 0 の間は、承認して反映しても判断を記録するだけで、設定（補正・信頼度・AI の効き）は変わらない（旧来の C-3 が書かない。
   // ボタンは押せるまま・名前もそのまま（振り返りの手順・通知・判断の履歴と同じ名前）で、説明の 1 行目から記録だけと言う）
   var off = fcLearnInfo(S.fc.view).autoUpdate === false, offNote = off ? '自動の学びを止めている間は、判断を記録するだけで、' + FC_OFF_KEEP : '';
   var goTip = off ? '判断を記録します（3〜6 分ほど）。判断を選んでいない案は承認になります\n自動の学びを止めている間は、' + FC_OFF_KEEP
     : '判断を保存してから、承認した案を設定に反映します（3〜6 分ほど）。判断を選んでいない案は承認になります';
-  return '<div class="card"><div class="card-head"><h2>AI の見直し案' + tip('AI が前の四半期の結果から作った、設定の見直し案です。承認して反映した案だけが、次の予測から効きます' + (hist ? '\nこれまでの見直し:\n' + hist : '')) + '</h2>'
+  return '<div class="card"><div class="card-head"><h2>AI の見直し案' + tip('承認して反映した案だけ、次の予測から効きます' + (hist ? '\nこれまでの見直し:\n' + hist : '')) + '</h2>'
     + (applied ? '<span class="chip ok" data-tip="' + esc(appliedTip) + '">反映済み</span>'
-      : withdrawn ? '<span class="chip off" data-tip="締まっていない月から作られた案なので、所有者が取り下げました（2026-10-07 の決定）。反映しません">取り下げ</span>'
-      : '<span class="chip warn" data-tip="' + esc(offNote || '承認者が判断して反映すると、次の予測から効きます') + '">未反映</span>') + '</div>'
+      : withdrawn ? '<span class="chip off" data-tip="所有者が取り下げた案。反映しません">取り下げ</span>'
+      : '<span class="chip warn" data-tip="' + esc(offNote || '承認者が判断して反映すると、次の予測から効きます') + '">未反映</span>')
+    // 承認して反映は、判断を選ぶ表のすぐ上の見出しの右（2026-10-16 村井さん「適切な位置に」）
+    + (edit ? actBtn('<button class="btn" ' + (busyNow ? 'disabled ' : '') + 'onclick="fcRvGo()">承認して反映</button>', goTip) : '') + '</div>'
     + '<div class="tblwrap"><table class="tbl scroll fc-props' + (edit ? ' edit' : '') + '"><colgroup><col style="width:176px"><col style="width:96px"><col style="width:96px"><col style="width:72px"><col><col style="width:184px"><col style="width:152px"></colgroup>'
     + '<thead><tr><th>対象</th><th class="num" data-tip="今の設定">今</th><th class="num" data-tip="AI の案">案</th><th class="num" data-tip="AI がこの案をどれだけ確かだと見ているか">確度</th><th>理由</th><th data-tip="この案を効かせたときの、予測への影響の見込み">効かせたら</th>'
     + '<th data-tip="' + (edit ? '承認・却下・保留を選びます。選ばなかった案は承認として扱います' : withdrawn ? '取り下げた案です。反映しません' : canApprove ? 'この見直し案は反映済みです' : '承認は承認者ができます') + '">判断</th></tr></thead><tbody>' + body + '</tbody></table></div>'
-    + (edit ? '<div class="card-foot">' + actBtn('<button class="btn" ' + (busyNow ? 'disabled ' : '') + 'onclick="fcRvGo()">承認して反映</button>', goTip) + '</div>' : '') + '</div>';
+    + '</div>';
 }
 function fcDec(row, val){ S.fc.dec[row] = val; }
 /** 承認して反映: 判断の無い案は承認にし、確かめてから判断を保存（PLAN.EDIT）。保存が終わったら続けて反映（PLAN.RUN）を始める */
@@ -4049,12 +4016,13 @@ function fcVersionTab(d, v){
           [qName('p50') + '（年度）', verCurMid(cur), base && verMid(base), [curTip ? '今: ' + curTip.split('\n').join('・') : '', base && verMidTip(base) ? '公式版: ' + verMidTip(base).split('\n').join('・') : '', cross].filter(Boolean).join('\n'), cross]]
           .map(function(x){ return '<tr><td' + (x[3] ? ' data-tip="' + esc(x[3]) + '"' : '') + '>' + x[0] + '</td><td class="num">' + yen(x[1]) + '</td><td class="num">' + (base ? yen(x[2]) : '-') + '</td><td class="num"' + (base && x[4] ? ' data-tip="' + esc('今 − 公式版\n' + x[4]) + '"' : '') + '>' + (base ? verDiff(x[1], x[2]) : '-') + '</td></tr>'; }).join('')
         + '</tbody></table></div>' : '<p class="note">予測がまだありません。予測を実行してから出してください。</p>')
-      + '<div class="field mt12"><label for="ver_submit_note">メモ（何を見直したか）</label><input class="inp lg" id="ver_submit_note"></div>'
-      + '<div class="card-foot">' + actBtn('<button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="verSubmit()">公式版として出す</button>', '今の数字のまま残し、承認者の確認を待ちます' + (pend ? '。承認待ちの v' + pend.no + ' は取り下げになります' : '')) + '</div></div>';
+      // メモと出すボタンは 1 行に（押しやすく、縦を食わない。2026-10-16 村井さん）
+      + '<div class="ver-submit"><input class="inp" id="ver_submit_note" aria-label="メモ（何を見直したか）" placeholder="メモ（何を見直したか）">'
+      + actBtn('<button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="verSubmit()">公式版として出す</button>', '承認者の確認を待ちます' + (pend ? '（承認待ちの v' + pend.no + ' は取り下げ）' : '')) + '</div></div>';
   }
   // 版の一覧
   html += '<div class="card"><h2>版の一覧</h2>' + (r.versions.length ? '<div class="tblwrap"><table class="tbl fc-vers"><colgroup><col style="width:56px"><col style="width:136px"><col style="width:128px"><col style="width:128px"><col style="width:112px"><col style="width:112px"><col><col style="width:152px"></colgroup>'
-    + '<thead><tr><th>版</th><th>状態</th><th class="num" data-tip="最終予算の年度合計。金額にカーソルを合わせると、出したときにこの最終予算に届く見込み（前の版には無い）">最終予算</th>' + qTh('p50') + '<th>出した人</th><th>判断した人</th><th class="colmin" style="--colmin:64px">メモ</th><th></th></tr></thead><tbody>'
+    + '<thead><tr><th>版</th><th>状態</th><th class="num" data-tip="最終予算の年度合計">最終予算</th>' + qTh('p50') + '<th>出した人</th><th>判断した人</th><th class="colmin" style="--colmin:64px">メモ</th><th></th></tr></thead><tbody>'
     + r.versions.map(function(x){ return '<tr><td>v' + x.no + '</td><td>' + verChip(x.state, true) + '</td><td class="num"' + verReachAttr(x) + '>' + yen(x.budget.final) + '</td><td class="num"' + (verMidTip(x) ? ' data-tip="' + esc(verMidTip(x)) + '"' : '') + '>' + yen(verMid(x)) + '</td><td>' + verWho(x.submittedBy, x.submittedAt) + '</td><td>' + verWho(x.decidedBy, x.decidedAt) + '</td>'
       + '<td class="clamp" data-tip="' + esc([x.note, x.decisionNote].filter(Boolean).join(' / ')) + '"><span>' + esc([x.note, x.decisionNote].filter(Boolean).join(' / ')) + '</span></td>'
       + '<td><button class="btn btn-ghost btn-sm" data-tip="この版と今の数字を、月ごとに比べます" onclick="S.fc.verCmp=\'' + esc(x.versionId) + '\';render()">今と比べる</button></td></tr>'; }).join('')
@@ -4134,7 +4102,7 @@ function viewAnalysis(){
  */
 function anMechanics(){
   var a = S.lr.ai, p = S.lr.people;
-  var head = '<div class="lr-sec" id="an-mech"><h2>予測の仕組み' + tip('予測を直す仕組み（補正・重み・効き係数）が、実績から何を学んだかと、外れ方の構造です。全部の年度の計画から見ています') + '</h2></div>';
+  var head = '<div class="lr-sec" id="an-mech"><h2>予測の仕組み' + tip('補正・重み・効き係数が実績から学んだこと') + '</h2></div>';
   if (!a && !p) return head + skelPage('lrAi', '予測の仕組みを読み込んでいます', "lrLoad('ai')", [['', 400]], 'wait-lr');
   var html = '';
   if (a) {
@@ -4466,7 +4434,7 @@ function anProbCard(plans){
   if (!use.length) return '';
   use.sort(anByRatio);
   var rows = use.map(function(p){ return { label: p.clientName, value: p.pAbove, text: anProbP(p), tone: tone(p.ratio), tip: p.clientName + '\n予算を超える確率 ' + anProbP(p) + '\n着地の推定は予算の ' + anPct(p.ratio) }; });
-  var tbl = anTable(['', 152, 152], '<th>メーカー</th><th class="num" data-tip="着地が予算を超える確率（99% より上・1% 未満は「99% 超」「1% 未満」と書きます）">予算を超える確率</th><th class="num" data-tip="着地の推定 ÷ 予算">予算比</th>',
+  var tbl = anTable(['', 152, 152], '<th>メーカー</th><th class="num" data-tip="着地が予算を超える確率">予算を超える確率</th><th class="num" data-tip="着地の推定 ÷ 予算">予算比</th>',
     use.map(function(p){ return '<tr>' + anNameTd(p) + '<td class="num">' + anProbP(p) + '</td><td class="num">' + anPct(p.ratio) + '</td></tr>'; }).join(''));
   return anCard('予算を超える確率', '着地が予算を超える確率です（着地の推定とそのぶれから計算）。点線は 50%。着地の推定 ÷ 予算の大きい順',
     anCot('an.prob', chartBars(rows, { min: 0, max: 1, ref: 0.5, fmt: anPct, label: '予算を超える確率' }), tbl) + anOut(out));
@@ -4481,7 +4449,7 @@ function anMapeCard(plans){
   var wKey = function(p){ return accWeather(accFew(p.accuracy.n) ? null : p.accuracy.mape, accRough(p.accuracy)); };
   var wTip = function(p){ var k = wKey(p); return skyName(k) + '：' + (k === 'mikakunin' && accFew(p.accuracy.n) ? accFewRule(p.accuracy.n) : accRule(k)) + (accRough(p.accuracy) ? '（見通しの幅に収まった割合 ' + anPct(p.accuracy.coverage) + '）' : ''); };
   var rows = use.map(function(p){ var a = p.accuracy; return { label: p.clientName, value: a.mape, text: anPct1(a.mape), tone: 'main', tip: p.clientName + '\n外れ幅 ' + anPct1(a.mape) + '（精度の天気: ' + skyName(wKey(p)) + '）\n比べた月 ' + (a.n || 0) + ' か月' }; });
-  var tbl = anTable(['', 152, 176, 152], '<th>メーカー</th><th class="num" data-tip="締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計">外れ幅</th><th data-tip="外れ幅が 10% 未満 快晴・15% 未満 晴れのち曇り・20% 未満 曇り・30% 未満 雨・それ以上か、見通しの幅の外れが多い（荒れている）と台風。比べた月が 3 か月より少ないうちは霧">精度の天気</th><th class="num" data-tip="実績と比べられた月の数">比べた月</th>',
+  var tbl = anTable(['', 152, 176, 152], '<th>メーカー</th><th class="num" data-tip="締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計">外れ幅</th><th data-tip="外れ幅 10% 未満 快晴〜30% 以上・荒れ 台風。3 か月未満は霧">精度の天気</th><th class="num" data-tip="実績と比べられた月の数">比べた月</th>',
     use.map(function(p){ var a = p.accuracy, k = wKey(p); return '<tr>' + anNameTd(p) + '<td class="num">' + anPct1(a.mape) + '</td><td data-tip="' + esc(wTip(p)) + '"><span class="anwx">' + skyChar(k, 24) + esc(skyName(k)) + '</span></td><td class="num">' + (a.n || 0) + ' か月</td></tr>'; }).join(''));
   // 横の長さは 30%（台風の目安）までいつも入れる（1 社だけ・小さい値だけでも、大きな外れに見えないように）。とても大きい値は端まで（文字は正しい値）
   var mx = Math.max(0.3, Math.min(1, use[0].accuracy.mape));
@@ -4499,7 +4467,7 @@ function anBiasCard(plans){
   var leanTip = function(a){ var v = a.bias; return accFew(a.n) ? accFewSay(a.n) + '（強気・弱気は ' + ACC_MIN_MONTHS + ' か月から言います）' : Math.abs(v) < 0.03 ? '予測と実績はほぼ釣り合っています' : v > 0 ? '強気: 予測が実績より高め' : '弱気: 予測が実績より低め'; };
   var rows = use.map(function(p){ var a = p.accuracy; return { label: p.clientName, value: a.bias, tone: Math.abs(a.bias) < 0.03 || accFew(a.n) ? 'neutral' : a.bias > 0 ? 'warm' : 'cool',
     tip: p.clientName + '\n読みのクセ ' + pct1(a.bias) + '（' + leanTip(a) + '）\n' + (a.n || 0) + ' か月の予測の合計 ÷ 実績の合計 − 1（新しい月ほど重く）' }; });
-  var tbl = anTable(['', 152, 152, 152], '<th>メーカー</th><th class="num" data-tip="予測の中心の合計 ÷ 実績の合計 − 1（新しい月ほど重く）。プラスは強気（予測が実績より高め）、マイナスは弱気（予測が実績より低め）">読みのクセ</th><th data-tip="強気 = 予測が実績より高め・弱気 = 低め（±3% 未満はほぼ釣り合い。比べた月が 3 か月より少ないうちは「まだ」）">向き</th><th class="num" data-tip="実績と比べられた月の数">比べた月</th>',
+  var tbl = anTable(['', 152, 152, 152], '<th>メーカー</th><th class="num" data-tip="プラス = 強気（予測が高め）・マイナス = 弱気">読みのクセ</th><th data-tip="強気 = 予測が高め・弱気 = 低め">向き</th><th class="num" data-tip="実績と比べられた月の数">比べた月</th>',
     use.map(function(p){ var a = p.accuracy; return '<tr>' + anNameTd(p) + '<td class="num">' + pct1(a.bias) + '</td><td' + (accFew(a.n) ? ' data-tip="' + esc(leanTip(a)) + '"' : '') + '>' + lean(a) + '</td><td class="num">' + (a.n || 0) + ' か月</td></tr>'; }).join(''));
   // 0 の左右にいつも少し場所を取る（片側だけでも向きが分かる）。値が 0 の両側に 10% 以上あるときは chartBars に任せ、片側だけ・小さいときだけ ±10% まで広げる。
   // 0 の線の左に「← 弱気」・右に「強気 →」（chartBars が上に書く）
@@ -4631,10 +4599,10 @@ function anBacktestCard(d){
       + '<td class="num" data-tip="' + esc((m.makers || 0) + ' 社') + '">' + (m.n || 0) + ' 点</td></tr>';
   }).join('');
   // 列は 152・112 の格子。95% の幅は値の下の行に（.anbt。説明はカーソルで）
-  var tbl = anTable(['', 152, 152, 152, 112, 112], '<th>方法</th><th class="num" data-tip="予測の中心と実績の差の割合の平均（メーカーごとに平均してから）。小さいほどよく当たっています">外れ幅</th>'
+  var tbl = anTable(['', 152, 152, 152, 112, 112], '<th>方法</th><th class="num" data-tip="小さいほど当たっている">外れ幅</th>'
     + '<th class="num" data-tip="プラスは予測が実績より高め、マイナスは低め">偏り</th><th class="num" data-tip="' + esc('実績が見通しの幅（' + qName('p10') + '〜' + qName('p90') + '）に入った割合（統計だけと本番だけ）') + '">帯に入る</th>'
-    + '<th class="num" data-tip="予測した時点から、その月まで何か月先か。統計だけと 4/1 の単純な方法は 1〜12 か月先、本番と前年同月 × 伸びは各月の前の予測なので多くは 1 か月先">何か月先</th>'
-    + '<th class="num" data-tip="数えた点（前の 48 か月の売上がそろい、実績が締まった月）。95% の幅は、同じ計画の月どうしはつながっているので、メーカーごとに平均してから出します">点</th>', rows, 'anbt');
+    + '<th class="num" data-tip="予測した時点から何か月先の月か">何か月先</th>'
+    + '<th class="num" data-tip="数えた月の数（95% の幅はメーカーごとに平均して出す）">点</th>', rows, 'anbt');
   var cmp = (b.compare || []).filter(function(c){ return AN_BT[c.method]; });
   var vsName = function(c){ return AN_BT[c.vs] ? AN_BT[c.vs][0] : '単純な方法'; };
   var noBand = function(c){ return c.verdict === 'wait' || c.verdict === 'oneMaker'; };
@@ -4686,10 +4654,10 @@ function anMethodsCard(d){
       + (si < 0 ? anBtCell(b.mape, b.mapeLo, b.mapeHi, anPct1, '外れ幅（年度の初め 4/1 に戻って 1〜12 か月先を予測し直したもの。' + (b.n || 0) + ' 点）', b.makers) : '<td class="num" data-tip="人の入力・AI は過去に戻って作り直せないので、本番の記録だけで比べます">-</td>')
       + '</tr>';
   }).join('');
-  var tbl = anTable(['', 152, 152, 112, 112, 152], '<th>予測</th><th class="num" data-tip="各月が始まる前の最後の予測と実績の差の割合（メーカーごとに平均してから）。小さいほどよく当たっています">外れ幅</th>'
-    + '<th class="num" data-tip="プラスは予測が実績より高め、マイナスは低め">偏り</th><th class="ctr" data-tip="線形回帰（何も足さない素の予測）より外れが小さければ「良い」、大きければ「悪い」。95% の幅が 0 をまたげば「差なし」">線形回帰より</th>'
+  var tbl = anTable(['', 152, 152, 112, 112, 152], '<th>予測</th><th class="num" data-tip="小さいほど当たっている">外れ幅</th>'
+    + '<th class="num" data-tip="プラスは予測が実績より高め、マイナスは低め">偏り</th><th class="ctr" data-tip="素の線形回帰と比べた外れの差">線形回帰より</th>'
     + '<th class="ctr" data-tip="1 つ前の段より外れが小さくなったか（足したものが効いたか）">前の段より</th>'
-    + '<th class="num" data-tip="年度の初め（4/1）に戻って、統計だけで予測し直したときの外れ幅（物差し）。作ったその日から過去の分で比べられます">4/1 に戻って</th>', rows, 'anbt anmt');
+    + '<th class="num" data-tip="年度の初めに戻って予測し直したときの外れ幅">4/1 に戻って</th>', rows, 'anbt anmt');
   var f = live.FINAL && live.FINAL.vsLinear, L = m.live;
   var say = !L.ready ? 'まだ判断できません（実績の締まった月 ' + (L.points || 0) + ' 点・' + (L.makers || 0) + ' 社。' + (m.minPoints || 30) + ' 点・' + (m.minMakers || 2) + ' 社から比べます）'
     : !f || f.verdict === 'wait' || f.verdict === 'oneMaker' ? 'まだ判断できません'
@@ -5048,7 +5016,7 @@ function lrBoardTiles(p, a){
   tiles.push({ key: 'trend', title: '業界の動向', state: aiBad ? 'warn' : an ? 'ok' : 'wait',
     head: aiBad ? aiBad.title : an ? 'AI の調べは当たっています' : 'まだ調べの当たりがありません',
     visual: lrMeter(an ? ah / an : null, 1, an ? ae / an : null, an ? Math.round(ah / an * 100) + '%' : '-', !aiBad && !!an)
-      + (isNum(cite) ? '<div class="lr-sub meta" data-tip="いちばん新しい調査で、出典が見つからなかった話題の割合（予測には効かせていません）">出典なし ' + Math.round(cite * 100) + '%</div>' : ''),
+      + (isNum(cite) ? '<div class="lr-sub meta" data-tip="出典の無い話題の割合（予測に効かせない）">出典なし ' + Math.round(cite * 100) + '%</div>' : ''),
     line: aiBad ? aiBad.act : an ? '' : 'AI の調べの向きと実績がそろうと出ます',
     tip: 'AI の調べが押した向きの当たり ' + ah + ' / ' + an + ' 回（縦の線 = いつも同じ向きと言った場合 ' + (an ? Math.round(ae / an * 100) + '%' : '-') + '）' + (aiBad ? '\n' + aiBad.say : '') });
   return tiles;
@@ -5056,7 +5024,7 @@ function lrBoardTiles(p, a){
 function lrBoard(p, a){
   var wait = !a && ldBusy('lrAi');
   var tiles = lrBoardTiles(p, a);
-  return '<div class="card lr-board-card"><div class="card-head"><h2>持ち帰ること' + tip('実績と予測の当たり方から、人が次に持ち帰ることを 4 つに分けて出しています。数字は傾向で、原因を決めつけるものではありません。根拠はタイルにカーソルを合わせると出ます') + '</h2></div>'
+  return '<div class="card lr-board-card"><div class="card-head"><h2>持ち帰ること' + tip('当たり方から、次に持ち帰ること。根拠はタイルのカーソルで') + '</h2></div>'
     + '<div class="lr-board">' + tiles.map(function(t){
       var st = LR_BOARD_STATE[wait && (t.key === 'trend') ? 'wait' : t.state];
       return '<div class="lr-tile ' + st[1] + '" tabindex="0" data-tip="' + esc(t.tip) + '"><div class="lr-tile-h"><span class="lr-tile-ic">' + LR_BOARD_ICON[t.key] + '</span><span class="lr-tile-t">' + esc(t.title) + '</span><span class="chip st ' + st[1] + '">' + st[0] + '</span></div>'
@@ -5209,8 +5177,8 @@ function lrScoreCard(d, full){
     ['基準', 'num', LR_C1, 'いつも同じ向きと言った場合に当たる割合（同じ計画で、実績がその向きに外れた月の割合）'],
     ['80% の幅', 'num', LR_C1, '10 回に 8 回はこの間に入る見込み（カーソルで今の見立て）。左の端が基準より上なら、いつも同じ向きと言うよりも当たっています']].concat(full ? [['今の重み', 'num', LR_C1, '予測に効かせている重み（1.00 = 変えていない）']] : []),
     sc.map(function(r){ return [{ h: esc(label(r)) + mark(r), tip: tipOf(r) }, r.hit + ' / ' + r.n, lrPct(lrBase(r)), { h: lrPct(r.ci80[0]) + '〜' + lrPct(r.ci80[1]), tip: '今の見立て ' + lrPct(r.postMean) }].concat(full ? [wTxt(r)] : []); }));
-  var right = (d.detail === 'partial' ? '<span class="chip" tabindex="0" data-tip="担当のメーカーの計画の当たりは人や話題ごと、ほかのメーカーの計画の当たりは情報源の種類ごとにまとめて出しています">一部は種類ごと</span>'
-    : full ? '' : '<span class="chip" tabindex="0" data-tip="閲覧の人には、情報源の種類ごとにまとめて出しています。人や話題ごとの当たりは、予算策定担当以上の人に出します">種類ごと</span>')
+  var right = (d.detail === 'partial' ? '<span class="chip" tabindex="0" data-tip="担当外のメーカーは情報源の種類ごと">一部は種類ごと</span>'
+    : full ? '' : '<span class="chip" tabindex="0" data-tip="情報源の種類ごと（人ごとは予算策定担当から）">種類ごと</span>')
     + lrMore('当たり = 押した向き（上げる・下げる）が、過去の売上だけの予測から見た実績の動きと同じだった月。基準 = 押した月ごとに、その向きへ実績が外れた月の割合'
       + '（同じ計画の比べられた月から。月が少なければ全計画の割合に寄せる）の平均。過去の売上だけの予測が低めなら、いつも上げると言うだけで半分より多く当たるので、半々ではなく基準と比べます。'
       + '確かさはベータ分布の事後分布（事前分布の中心は、基準に全計画から作った見立ての上乗せを足した所。無ければ基準）で、点は平均、線は 10%〜90% 点です');

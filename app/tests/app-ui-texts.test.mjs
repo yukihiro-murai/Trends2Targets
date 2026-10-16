@@ -106,20 +106,9 @@ const OWNER_NOTE = 'owner-approved 2026-10-07 09:30: 自動の学びを止める
 
 // ==== 1. 補正を学び直す: 旗が 0 なら押せないボタン（見直し案を作ると同じ形・同じ幅のボタン） ====
 {
+  // 2026-10-16: 振り返りの更新（当たり具合を計算・補正を学び直す・見直し案を作る…）は予測準備に置かない
   const off = review(planView({ learning: { autoUpdate: false, biasFactor: 1, note: OWNER_NOTE } }));
-  assert.doesNotMatch(off, /fcRun\('LEARN\.MONTHLY'\)/);
-  assert.match(off, /<span class="act" data-tip="実績から補正を学び直す\n自動の学びを止めています（2026\/10\/07 所有者が設定）。今は動かしても補正は変わりません。"><button class="btn btn-ghost" disabled aria-disabled="true">補正を学び直す<\/button><\/span>/);
-  assert.doesNotMatch(off, /所有者の決定）。今は動かしても/, '日付の後ろは「所有者が設定」（setCalibration が動いた日）');
-  assert.match(off, /<span class="act" data-tip="AI の見直し案を作る\n[^"]*"><button class="btn btn-ghost" disabled aria-disabled="true">見直し案を作る<\/button><\/span>/, '見直し案を作ると同じ形');
-  assert.match(off, /fcRun\('EVAL\.REPORT'\)/, 'ほかの実行は押せる');
-  // 所有者が書いたのでなければ、日付と「所有者が設定」は言わない
-  const off2 = review(planView({ learning: { autoUpdate: false, biasFactor: 1, note: 'auto-learned' } }));
-  assert.match(off2, /data-tip="実績から補正を学び直す\n自動の学びを止めています。今は動かしても補正は変わりません。"><button class="btn btn-ghost" disabled/);
-  // 旗が 1・学びの中身が無い（古い控え）なら、今までどおり押せる
-  for (const learning of [{ autoUpdate: true, biasFactor: 0.9, note: OWNER_NOTE }, undefined]) {
-    const on = review(planView({ learning }));
-    assert.match(on, /<span class="act" data-tip="実績から補正を学び直す（次の予測に効く）\n実績から補正の係数を学び直します（次の予測に反映）。"><button class="btn btn-ghost" onclick="fcRun\('LEARN\.MONTHLY'\)">補正を学び直す<\/button>/);
-  }
+  assert.doesNotMatch(off, /振り返りの更新|fcRun\('(LEARN|EVAL|REVIEW)\./);
   // サーバーが止めた理由があれば、それを出す（旗より先）
   const v = planView({ learning: { autoUpdate: false, note: OWNER_NOTE } });
   v.actions.filter((a) => a.action === 'LEARN.MONTHLY')[0].paused = 'B-5 は止めています。';
@@ -131,25 +120,17 @@ const OWNER_NOTE = 'owner-approved 2026-10-07 09:30: 自動の学びを止める
 // ==== 2. 振り返り: 見直し案を作るを止めている間の言葉 ====
 {
   const insights = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hypothesis: '', actionType: 'update', reflection: '', owner: '', status: 'open' }];
-  // 止めている（旗は 1）: 案内は見直し案が出るとは言わない・更新の説明で、止めているのは見直し案を作るだけと言う
   const p = review(planView());
-  assert.match(p, /まだ振り返りの記録がありません。月の実績が締まったら、下の「振り返りの更新」を左から順に実行してください。当たり具合・外れの原因がここに出ます。/);
-  assert.doesNotMatch(p, /AI の見直し案がここに出ます/);
-  assert.equal(tipOf(p, '振り返りの更新'), '左から順に実行します。「見直し案を作る」は、今は止めています');
-  // 旗も 0: 止めている 2 つを並べる
-  assert.equal(tipOf(review(planView({ learning: { autoUpdate: false, note: OWNER_NOTE } })), '振り返りの更新'), '左から順に実行します。「補正を学び直す」と「見直し案を作る」は、今は止めています');
-  // 止めていない: 今までどおり
-  const u = review(planView({ paused: false }));
-  assert.match(u, /当たり具合・外れの原因・AI の見直し案がここに出ます。/);
-  assert.equal(tipOf(u, '振り返りの更新'), '左から順に実行します');
+  assert.match(p, /まだ振り返りの記録がありません。月の実績が締まると、ここに出ます。/);
+  assert.doesNotMatch(p, /振り返りの更新/);
   // 人の記入の説明・保存の説明
   const n = review(planView({ insights }));
-  assert.match(tipOf(n, '人の記入'), /^外れた月の原因の仮説・対応・担当を書きます。次の予測の材料になります。/);
-  assert.match(n, /data-tip="原因の仮説・対応・担当・状態を保存します。次の予測の材料になります"/);
+  assert.equal(tipOf(n, '人の記入'), '外れた月の原因と対応。次の予測の材料');
+  assert.match(n, /data-tip="次の予測の材料になります"><button class="btn" disabled onclick="fcSaveIns\(\)">保存</, '保存は見出しの右');
   assert.doesNotMatch(n, /見直し案の材料/);
   const n2 = review(planView({ paused: false, insights }));
-  assert.match(tipOf(n2, '人の記入'), /次の予測と AI の見直し案の材料になります。/);
-  assert.match(n2, /data-tip="原因の仮説・対応・担当・状態を保存します。次の予測と AI の見直し案の材料になります"/);
+  assert.equal(tipOf(n2, '人の記入'), '外れた月の原因と対応。次の予測と AI の見直し案の材料');
+  assert.match(n2, /data-tip="次の予測と AI の見直し案の材料になります"/);
   // 承認待ちの見直し案は、止めている間も承認して反映できる（ボタンを消さない）
   const props = [{ row: 8, pid: 'P1', target: 'ai_weight_override', current: '0.0008', proposed: '0.0004', conf: '中', rationale: '', impact: '', decision: '', rollback: '' }];
   const a = review(planView({ proposals: props }));
@@ -425,24 +406,24 @@ const anGuide = (plans, fy = '2026') => (/<span class="(?:t )?anmiss">([\s\S]*?)
 {
   const insights = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hypothesis: '', actionType: 'update', reflection: '', owner: '', status: 'open' }];
   const props = [{ row: 8, pid: 'P1', target: 'ai_weight_override', current: '0.0008', proposed: '0.0004', conf: '中', rationale: '', impact: '', decision: '', rollback: '' }];
-  const NOTE = (s) => '<div class="card"><div class="card-head"><h2>精度の天気</h2></div><p class="note">まだ実績と比べた月がありません。' + s + '</p></div>';
+  const NOTE = (s) => '<div class="card"><div class="card-head"><h2>AI 補正</h2></div><p class="note">まだ実績と比べた月がありません。' + s + '</p></div>';
   const a = review(planView({ insights }));
-  assert.ok(a.includes(NOTE('「当たり具合を計算」で出ます。')), a.slice(0, 300));
-  assert.ok(a.indexOf(NOTE('')) < 0 && a.indexOf('<h2>精度の天気</h2>') < a.indexOf('<h2>人の記入'), '人の記入より先（精度の天気の場所）');
+  assert.ok(a.includes(NOTE('')), a.slice(0, 300));
+  assert.ok(a.indexOf('<h2>AI 補正</h2>') < a.indexOf('<h2>人の記入'), '人の記入より先（AI 補正の場所）');
   assert.doesNotMatch(a, /まだ振り返りの記録がありません/, '案内 1 枚とは重ねない');
-  assert.ok(review(planView({ proposals: props, can: false })).includes(NOTE('当たり具合が計算されると出ます。')), '動かせない人');
+  assert.ok(review(planView({ proposals: props, can: false })).includes(NOTE('')), '動かせない人');
   const fz = review(planView({ insights, can: false, frozen: true }));
   assert.ok(fz.includes('<p class="note">実績と比べた月はありません（締め済みの年度は、当たり具合を計算し直しません）。</p>'), '締め済みの年度は「まだ」と言わない');
   assert.doesNotMatch(fz, /まだ実績と比べた月/);
   // 何も無いときは案内 1 枚だけ（1 行は出さない）。締め済みなら案内も「計算されると」とは言わない
-  assert.doesNotMatch(review(planView()), /<h2>精度の天気<\/h2>/);
+  assert.doesNotMatch(review(planView()), /<h2>AI 補正<\/h2>/);
   const f = review(planView({ can: false, frozen: true }));
   assert.match(f, /<div class="bubble">振り返りの記録はありません（締め済みの年度は、当たり具合を計算し直しません）。<\/div>/);
   assert.doesNotMatch(f, /計算されると|まだ振り返りの記録/);
   // 比べた月があれば 1 行は出さない（精度の天気のカード）
   const withAcc = run(`S.fc.learn = { planId: 'P1', accuracy: { months: [{ month: '2026/04', p10: 1, p50: 2, p90: 3, actual: 2, err: 0, inside: true }], mape: 0.05, n: 1, coverage: 1, coverageN: 1 } }; fcReviewTab(S.fc.data, S.fc.view)`);
   assert.doesNotMatch(withAcc, /まだ実績と比べた月がありません/);
-  assert.match(withAcc, /精度の天気[\s\S]*精度の推移/);
+  assert.match(withAcc, /AI 補正[\s\S]*精度の推移/);
 }
 
 // ==== 13・17. 承認して反映: 自動の学びを止めている間は、判断を記録するだけ（ボタンは押せる・名前はそのまま） ====
@@ -519,24 +500,24 @@ const reviewL = (v, learn) => run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.dat
 const ACC1 = { months: [{ month: '2026/04', p10: 1, p50: 2, p90: 3, actual: 2, err: 0, inside: true }], mape: 0.05, n: 1, coverage: 1, coverageN: 1 };
 const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hypothesis: '', actionType: 'update', reflection: '', owner: '', status: 'open' }];
 {
-  const ZERO = '<div class="card"><div class="card-head"><h2>精度の天気</h2></div><p class="note">比べた 2 か月は、どれも売上が 0 円のため、外れ幅を % で出せません。</p></div>';
+  const ZERO = '<div class="card"><div class="card-head"><h2>AI 補正</h2></div><p class="note">比べた 2 か月は、どれも売上が 0 円のため、外れ幅を % で出せません。</p></div>';
   // 人の記入・見直し案が無くても、案内 1 枚（「まだ振り返りの記録がありません」）ではなく、精度の天気の場所に 1 行
   const z = reviewL(planView(), { scoredMonths: 2 });
   assert.ok(z.includes(ZERO), z.slice(0, 400));
   assert.doesNotMatch(z, /まだ振り返りの記録|まだ実績と比べた月/);
-  assert.doesNotMatch(z.slice(0, z.indexOf('<h2>振り返りの更新')), /で出ます|を動かすと|計算されると/, '動かし方は言わない');
+  assert.doesNotMatch(z, /で出ます|を動かすと|計算されると/, '動かし方は言わない');
   assert.ok(reviewL(planView({ insights: INS1 }), { scoredMonths: 2 }).includes(ZERO), '人の記入があっても同じ 1 行');
   for (const o of [{ can: false }, { can: false, frozen: true }]) assert.ok(reviewL(planView(o), { scoredMonths: 2 }).includes(ZERO), '動かせない人・締め済みの年度も同じ: ' + JSON.stringify(o));
   // scoredMonths = 0・無い: 今までどおり（まだ比べた月が無い）
   for (const scoredMonths of [0, undefined]) {
-    assert.match(reviewL(planView(), { scoredMonths }), /<div class="bubble">まだ振り返りの記録がありません。月の実績が締まったら、/);
-    assert.ok(reviewL(planView({ insights: INS1 }), { scoredMonths }).includes('<p class="note">まだ実績と比べた月がありません。「当たり具合を計算」で出ます。</p>'));
-    assert.ok(reviewL(planView({ insights: INS1, can: false }), { scoredMonths }).includes('<p class="note">まだ実績と比べた月がありません。当たり具合が計算されると出ます。</p>'));
+    assert.match(reviewL(planView(), { scoredMonths }), /<div class="bubble">まだ振り返りの記録がありません。月の実績が締まると、/);
+    assert.ok(reviewL(planView({ insights: INS1 }), { scoredMonths }).includes('<p class="note">まだ実績と比べた月がありません。</p>'));
+    assert.ok(reviewL(planView({ insights: INS1, can: false }), { scoredMonths }).includes('<p class="note">まだ実績と比べた月がありません。</p>'));
     assert.ok(reviewL(planView({ insights: INS1, can: false, frozen: true }), { scoredMonths }).includes('<p class="note">実績と比べた月はありません（締め済みの年度は、当たり具合を計算し直しません）。</p>'));
   }
   // 外れ幅の月があれば、scoredMonths があっても精度の天気のカード
   const w = reviewL(planView({ insights: INS1 }), { accuracy: ACC1, scoredMonths: 3 });
-  assert.match(w, /精度の天気<span[\s\S]*精度の推移/);
+  assert.match(w, /AI 補正<span[\s\S]*精度の推移/);
   assert.doesNotMatch(w, /売上が 0 円/);
 }
 
@@ -545,8 +526,8 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   // (a) 振り返り: 当たり具合は出ていて人の記入が無い → 人の記入の場所に 1 行（精度の推移の後）
   const LINE = (t) => '<div class="card"><div class="card-head"><h2>人の記入</h2></div><p class="note">' + t + '</p></div>';
   const a = reviewL(planView(), { accuracy: ACC1, scoredMonths: 1 });
-  assert.ok(a.includes(LINE('外れた月の記入は「外れの原因を整理」で出ます。')), a.slice(0, 300));
-  assert.ok(a.indexOf('<h2>精度の推移') < a.indexOf('<h2>人の記入</h2>') && a.indexOf('<h2>人の記入</h2>') < a.indexOf('<h2>振り返りの更新'), '精度の推移と更新の間');
+  assert.ok(a.includes(LINE('外れた月の記入は、外れの原因が整理されると出ます。')), a.slice(0, 300));
+  assert.ok(a.indexOf('<h2>精度の推移') < a.indexOf('<h2>人の記入</h2>') && a.indexOf('<h2>振り返りの更新') < 0, '精度の推移の後（更新は無い）');
   assert.ok(reviewL(planView({ can: false }), { accuracy: ACC1 }).includes(LINE('外れた月の記入は、外れの原因が整理されると出ます。')), '動かせない人');
   assert.doesNotMatch(reviewL(planView({ can: false, frozen: true }), { accuracy: ACC1 }), /<h2>人の記入/, '締め済みの年度は言わない');
   const ins = reviewL(planView({ insights: INS1 }), { accuracy: ACC1 });
@@ -862,7 +843,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   };
   // (a) 見出しの説明: 年度合計の 3 つ（下振れ・中心・上振れ）が月の合計ではない
   const base = tab({ aligned: aligned(), reach: reach() });
-  assert.match(tipOf(base, '月ごとの見通し'), /。年度合計（下振れ・中心・上振れ）は月の合計ではなく、年度で計算した値です$/);
+  assert.match(tipOf(base, '月ごとの見通し'), /\n年度合計（下振れ・中心・上振れ）は月の合計ではなく、年度で計算した値です$/);
   assert.doesNotMatch(uiHtml, /年度合計の下振れ〜上振れは/);
   // (b) 年度の見込みの試し: 「この計画の年度合計」・金額は円まで。aligned.k が無い（前のサーバー）・0 なら幅も
   for (const al of [aligned(), aligned({ k: 0 })]) {

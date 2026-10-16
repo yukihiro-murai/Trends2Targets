@@ -139,7 +139,7 @@ reachOn();
   assert.equal(chosen(h), '', '初めは何も選んでいない（初期値は中心）');
   assert.deepEqual(sel[1].split('\n'), ['届く見込みで採用予測を決めます（80% なら 10 回に 8 回は届く額）', '採用予測 = 約束、上乗せ = 挑戦（上乗せはそのまま）',
     '月への割り振りは過去の平均の形です（過去の売上が 2 年分そろわなければ予測の月の形）', '保存するまで、予算は変わりません']);
-  assert.match(h, /<div class="card-foot"><span class="act" data-tip="[^"]*"><select class="inp sm" id="fcProb"[\s\S]*?<\/select><\/span><span class="act" data-tip="[^"]*"><button class="btn" disabled onclick="fcSaveBudget\(\)">予算を保存<\/button><\/span><\/div>/, '保存のボタンの左。入力が無ければ保存は押せない');
+  assert.match(h, /<span class="fc-insave"><span class="act" data-tip="[^"]*"><select class="inp sm" id="fcProb"[\s\S]*?<\/select><\/span><span class="act" data-tip="[^"]*"><button class="btn" disabled onclick="fcSaveBudget\(\)">保存<\/button><\/span><\/span>/, '保存のボタンの左。入力が無ければ保存は押せない');
   assert.ok(css.includes('.inp.sm{width:var(--w-inp-sm)}') && /--w-inp-sm:var\(--col\)/.test(css) && /--col:160px/.test(css), '選ぶ欄は 1 マス（160px）');
   assert.equal(draftLine(h), null, '下書きが無ければ下書きの 1 行を出さない');
   assert.doesNotMatch(visible(h), CODES);
@@ -151,7 +151,7 @@ reachOn();
     const n = card();
     assert.equal(selectOf(n), null, why + ': 出さない');
     assert.doesNotMatch(n, /試し|届く見込み/, why);
-    assert.match(n, /<div class="card-foot"><span class="act" data-tip="[^"]*"><button class="btn" disabled onclick="fcSaveBudget\(\)">予算を保存<\/button><\/span><\/div>/, why);
+    assert.match(n, /<span class="fc-insave"><span class="act" data-tip="[^"]*"><button class="btn" disabled onclick="fcSaveBudget\(\)">保存<\/button><\/span><\/span>/, why);
   }
   run('delete S.fc.data.shadow');
   assert.doesNotMatch(selectOf(card())[2], /disabled/, 'shadow を返さない前のサーバーは出す（選べないわけはサーバーの答えで知らせる）');
@@ -337,7 +337,7 @@ reachOn();
   assert.equal(selectOf(closedD), null, '予測の記録の側の締めの印でも出さない');
   const chart = with_('', `S.cv.fcBudgetM = 'chart';`);
   run(`S.cv.fcMonthly = S.cv.fcBudgetM = 'table'`);
-  assert.equal(selectOf(chart), null, 'グラフで見ていて入力も無いときは、下の欄ごと出さない（今までどおり）');
+  assert.notEqual(selectOf(chart), null, '確率で決める・保存は見出しの右なので、グラフで見ていても出す（2026-10-16）');
   assert.doesNotMatch(chart, /予算の下書き/, 'グラフでも出さない');
   run('delete S.fc.view.boot.budgetDraft');
 }
