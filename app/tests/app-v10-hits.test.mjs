@@ -560,13 +560,16 @@ const learn = (env, planId) => env.table('LEARNING_LOG').filter((r) => planId ==
   assert.match(r1, /<h2>調査ごとの当たり<span class="tip"/);
   assert.ok(r1.indexOf('2026/06/10') < r1.indexOf('2026/03/15'), '新しい調査から');
   // 人の学びに当たりの記録だけがあるときも、カードを出す（案内に置き換えない）
-  const only = run('lrPeopleView(__d)', { __d: { detail: 'summary', lessons: [], openActions: [], causes: [], scoreboard: [], decisions: [], uplift: [], summary: {}, hits: { people: [], hidden: 3, quarters: 1 } } });
-  assert.match(only, /人ごとの当たり/);
+  // 2026-10-16: 人ごとの当たり・調査ごとの当たりは、分析の「予測の仕組み」（anMechanics。学びと同じ読み込み）
+  run('S.lr.people = __d; S.lr.ai = null', { __d: { detail: 'summary', lessons: [], openActions: [], causes: [], scoreboard: [], decisions: [], uplift: [], summary: {}, hits: { people: [], hidden: 3, quarters: 1 } } });
+  assert.match(run('anMechanics()'), /人ごとの当たり/);
   // 学びの画面に渡る中身（本物の応答）で描いても空の値が出ない
   run('S.lr.people = __p; S.lr.ai = __a', { __p: people, __a: ai });
   const page = run('viewLearning()');
   assert.doesNotMatch(page, /undefined|NaN/);
-  assert.ok(page.indexOf('人ごとの当たり') < page.indexOf('id="lr-tune"') && page.indexOf('id="lr-tune"') < page.indexOf('調査ごとの当たり'), '人ごとの当たりは人に返す学び、調査ごとの当たりは AI が直す学び');
+  const mech = run('anMechanics()');
+  assert.ok(mech.indexOf('調査ごとの当たり') > 0 && mech.indexOf('人ごとの当たり') > 0 && !/undefined|NaN/.test(mech), '人ごとの当たり・調査ごとの当たりは分析の予測の仕組み');
+  assert.ok(page.indexOf('人ごとの当たり') < 0 && page.indexOf('調査ごとの当たり') < 0, '当たりの統計は学びに出さない');
 }
 
 console.log('app-v10-hits: ok');

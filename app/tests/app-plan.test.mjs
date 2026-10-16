@@ -419,7 +419,10 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   ui.__lp = env.call('apiPeopleLearning()'); ui.__la = env.call('apiAiLearning()');
   // タブにせず 1 カラム: 前提と情報の見直し（人に返す学び）→ 補正と重みの調整（AI が直す学び）。タブは無い
   const lrHtml = vm.runInContext(`S.view = 'learning'; S.lr.people = __lp; S.lr.ai = __la; viewLearning()`, ui);
-  assert.match(lrHtml, /<h1>学び<\/h1><div class="lr-sec" id="lr-human"><h2>前提と情報の見直し[\s\S]*<div class="lr-sec" id="lr-tune"><h2>補正と重みの調整/);
+  // 2026-10-16: 学びは人が持ち帰ることだけ（持ち帰ること・大きく外れた月・当たりの確かさ・承認待ち）。補正と重みの統計は分析の「予測の仕組み」
+  assert.match(lrHtml, /^<h1>学び<\/h1>[\s\S]*<h2>持ち帰ること/);
+  assert.doesNotMatch(lrHtml, /id="lr-tune"|補正と重みの調整/);
+  assert.match(vm.runInContext(`S.view = 'analysis'; anMechanics()`, ui), /id="an-mech"><h2>予測の仕組み/);
   assert.doesNotMatch(lrHtml, /role="tablist">[^]*?人の学び|lrTab\(/, 'タブ（人の学び・AI の学び）は無い');
   for (const v of ['analysis', 'learning']) assert.ok(!/undefined|NaN/.test(vm.runInContext(`S.view = '${v}'; ${v === 'analysis' ? 'viewAnalysis()' : 'viewLearning()'}`, ui)), v);
   vm.runInContext(`S.view = 'forecast'`, ui);

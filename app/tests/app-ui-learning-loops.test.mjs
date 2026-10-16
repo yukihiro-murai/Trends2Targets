@@ -46,11 +46,10 @@ const item = (p, a, k) => run('lrReviewItems(__p, __a).filter(function(x){ retur
   assert.doesNotMatch(wait, /role="tablist"|lrTab\(/, 'タブは無い');
   assert.equal(typeof run('typeof lrTab'), 'string');
   assert.equal(run('typeof lrTab'), 'undefined', 'タブの切り替えの関数は無い');
-  assert.match(wait, /^<h1>学び<\/h1><div class="lr-sec" id="lr-human"><h2>前提と情報の見直し<span class="tip"[^>]*data-tip="ダブルループ学習: [^"]*"/, '区切りの見出しはふつうの言葉。学びの型はカーソルで');
-  assert.match(wait, /<div class="lr-sec" id="lr-tune"><h2>補正と重みの調整<span class="tip"[^>]*data-tip="シングルループ学習: [^"]*"/);
-  assert.equal((wait.match(/data-pose="observe"/g) || []).length, 2, 'どちらの区切りも、その場所によみの観測中');
-  assert.equal((wait.match(/観測中…/g) || []).length, 2);
-  assert.ok(wait.indexOf('人の学びを読み込んでいます') < wait.indexOf('id="lr-tune"') && wait.indexOf('id="lr-tune"') < wait.indexOf('AI の学びを読み込んでいます'));
+  // 2026-10-16: 学びは人が持ち帰ることだけ。区切りは無く、読み込み中は観測中が 1 つ
+  assert.match(wait, /^<h1>学び<\/h1>/);
+  assert.doesNotMatch(wait, /id="lr-human"|id="lr-tune"/);
+  assert.equal((wait.match(/data-pose="observe"/g) || []).length, 1);
 
   // 人の学びだけ届いた: 人の区切りは中身、AI の区切りは観測中。見直すことのカードは、AI の分をよみの観測中で待つ
   const people = { detail: 'full', summary: { months: 4, misses: 4, withNotes: 0, missesWithNotes: 0, scoredMonths: 10 }, noPreMonth: 0,
@@ -60,10 +59,9 @@ const item = (p, a, k) => run('lrReviewItems(__p, __a).filter(function(x){ retur
   const half = run('viewLearning()');
   // 2026-10-16: 「次の予測で見直すこと」の文の並びを、4 枚のタイルの「持ち帰ること」に（村井さん「文字で殴らず図で」）
   assert.match(half, /<h2>持ち帰ること/);
-  assert.ok(half.indexOf('持ち帰ること') < half.indexOf('外れの向きと対応'), '持ち帰ることは区切りの先頭');
+  assert.ok(half.indexOf('持ち帰ること') > 0 && half.indexOf('外れの向きと対応') < 0, '持ち帰ることが先頭。外れの向きは分析へ');
   assert.deepEqual([...half.matchAll(/<span class="lr-tile-t">([^<]*)/g)].map((m) => m[1]), ['足りない考え方', '顧客に聞くこと', '予算の考え方', '業界の動向'], '4 枚のタイル');
   assert.match(half, /<span class="lr-tile-t">業界の動向<\/span><span class="chip st off">判断前<\/span>/, 'AI の学びを読み込んでいる間、業界の動向は判断前');
-  assert.match(half, /id="lr-tune"[\s\S]*AI の学びを読み込んでいます/);
 
   // 両方届いた: カードの置き場所（人に返す学び → AI が直す学び）
   const ai = { detail: 'full', curves: [], shrinkage: { plans: [] }, timeline: [{ ym: '2026/04', n: 1, mape: 0.1, rolling3: 0.1, coverage: 1, coverageN: 1 }], calibration: [],
@@ -73,8 +71,11 @@ const item = (p, a, k) => run('lrReviewItems(__p, __a).filter(function(x){ retur
   const page = run('viewLearning()');
   assert.doesNotMatch(page, /undefined|NaN|lr-qwait/);
   const at = (s) => page.indexOf(s);
-  assert.ok(at('持ち帰ること') < at('外れの向きと対応') && at('外れの向きと対応') < at('id="lr-tune"'), '人の学びのカードは前の区切り');
-  assert.ok(at('id="lr-tune"') < at('承認待ちの見直し案') && at('承認待ちの見直し案') < at('外れ幅と幅の当たり'), 'AI の学びのカードは後の区切り');
+  assert.ok(at('持ち帰ること') < at('承認待ちの見直し案'), '持ち帰ること → 承認待ち');
+  assert.ok(at('外れの向きと対応') < 0 && at('外れ幅と幅の当たり') < 0 && at('id="lr-tune"') < 0, '仕組みの統計は学びに出さない');
+  const mech = run('anMechanics()');
+  assert.match(mech, /外れの向きと対応/);
+  assert.match(mech, /外れ幅と幅の当たり/);
   // ホームの学びの進みは、同じ読み込みを使う（形を変えていない）
   assert.equal(run('LR_KEY.ai'), 'lrAi');
 }

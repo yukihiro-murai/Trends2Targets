@@ -286,9 +286,8 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
   assert.match(lp, /まだ実績と比べた月がありません。/);
   assert.doesNotMatch(lp, /今の決まり/, '中の言葉（今の決まり）は出さない');
   assert.doesNotMatch(lp, /大きく外れた月はありません/);
-  const la = clean(run(`S.lr.ai = __ai; viewLearning()`, { __ai: ai }), '学びの画面（AI の学びの区切り）');
-  assert.match(la, /<div class="bubble">まだ実績と比べた月がありません。各計画の振り返りで「当たり具合を計算」を動かすと、外れ幅がここに出ます。<\/div>/);
-  assert.match(la, /<span class="nm">霧<\/span><span class="v">比べる実績なし<\/span>/);
+  const la = clean(run(`S.lr.ai = __ai; viewLearning()`, { __ai: ai }), '学びの画面');
+  assert.doesNotMatch(la, /id="lr-tune"|補正と重みの調整/, 'AI が直す仕組みの統計は分析へ（2026-10-16）');
   assert.match(lp, /締まった月のうち のべ 3 か月は、その月が始まる前の予測が無いので比べていません/, '月が始まる前の予測が無い月の数（本物の中身）');
 }
 

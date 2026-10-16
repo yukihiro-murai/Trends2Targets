@@ -4028,7 +4028,7 @@ function fcStepsTab(d, v){
 // 数字はサーバーの値をそのまま使う（空模様も計算し直さない。合計の分布の曲線だけ、サーバーの中心と幅から描く）
 S.an = { fy: '', data: null, view: 'chart' };
 /** 分析を開く: 中身が無い・10 分より古いときだけ読む（サーバーも日ごとに控える） */
-function anEnter(){ if (ldNeed('an', !!S.an.data)) anLoad(); }
+function anEnter(){ if (ldNeed('an', !!S.an.data)) anLoad(); lrNeed('ai'); lrNeed('people'); }   // 予測の仕組みは学びと同じ読み込み
 function anLoad(){
   var fy = S.an.fy;
   load('an', function(ok, fail){ call('apiCrossMaker', [{ fy: fy }], ok, fail); }, null, function(r){ if (String(S.an.fy || '') === String(fy || '')) { S.an.data = r; S.an.fy = String(r.fy); anLoadPlans(r); } });
@@ -4055,7 +4055,24 @@ function viewAnalysis(){
     + fys.map(function(f){ return '<option value="' + esc(f) + '"' + (String(f) === String(a.fy) ? ' selected' : '') + '>FY' + esc(f) + '</option>'; }).join('') + '</select>' : '';
   var html = '<div class="page-head"><h1>分析</h1>' + sel + '</div>';
   if (!d) return html + skelPage('an', a.fy ? 'FY' + a.fy + ' を分析しています' : '分析を読み込んでいます', 'anLoad()', [['', 288], ['', 380], ['', 380]], 'wait-an');
-  return html + anOverview(d);
+  return html + anOverview(d) + anMechanics();
+}
+/**
+ * 予測の仕組み（2026-10-16 村井さん: 分析は抽象的で高い水準の統計と構造。学びから補正と重みの統計を移した）: 効き係数・重みの学び・偏りの縮め・
+ * 外れ幅の推移・補正の履歴・外れの向きと対応・上乗せの当たり・調査ごとの当たり・判断の履歴。どの年度の計画も含めた全体（学びと同じ読み込み）
+ */
+function anMechanics(){
+  var a = S.lr.ai, p = S.lr.people;
+  var head = '<div class="lr-sec" id="an-mech"><h2>予測の仕組み' + tip('予測を直す仕組み（補正・重み・効き係数）が、実績から何を学んだかと、外れ方の構造です。全部の年度の計画から見ています') + '</h2></div>';
+  if (!a && !p) return head + skelPage('lrAi', '予測の仕組みを読み込んでいます', "lrLoad('ai')", [['', 400]], 'wait-lr');
+  var html = '';
+  if (a) {
+    var curves = (a.curves || []).filter(function(c){ return c && c.prior && (c.quarters || []).length; });
+    html += lrEffectsCard(a.effects) + lrCurveCard(curves) + lrShrinkCard(a.shrinkage || {}) + lrTimeCard(a.timeline || [], a.persistence) + lrCalCard(a.calibration || [], a.health || []) + lrResearchCard(a.research);
+  }
+  if (p) { var full = p.detail === 'full' || p.detail === 'partial'; html += lrCauseCard(p) + lrHitCard(p.hits) + lrUpliftCard(p) + lrDecisionCard(p, full); }
+  // 読み込めても、まだ比べた実績が無ければ 1 行だけ（区切りごと消さない）
+  return head + (html || '<div class="card"><div class="note">まだ実績と比べた月がありません</div></div>');
 }
 
 // ---- 分析の小さな道具（an で始まる名前。ほかの区切りの関数は CORE・CHARTS だけを使う） ----
@@ -4706,11 +4723,11 @@ function lrSec(id, title, tipText){ return '<div class="lr-sec" id="' + id + '">
 var LR_SEC_HUMAN = 'ダブルループ学習: 補正の数字を直すだけでは足りない外れを、人に返します。何の情報を早く集めるべきだったか、何を根拠に置くべきかなど、前提そのものを見直すための材料です';
 var LR_SEC_TUNE = 'シングルループ学習: 前提はそのままで、外れ方から AI が補正や重みの数字を直します。見直し案は、承認して反映するまで予測に効きません';
 function viewLearning(){
+  // 学び（2026-10-16 村井さん: 人が持ち帰るべきことを端的に・図で）: よみ（数だけ）→ 持ち帰ること → 大きく外れた月 → 当たりの確かさ → 承認待ちの見直し案。
+  // 補正と重み（AI が直す仕組み）の統計は分析の「予測の仕組み」へ移した
   var p = S.lr.people, a = S.lr.ai;
-  var html = '<h1>学び</h1>' + lrSec('lr-human', '前提と情報の見直し', LR_SEC_HUMAN, '人に返す学び');
-  html += p ? lrPeopleView(p, lrBoard(p, a)) : skelPage('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')", [['', 244], ['', 620]], 'wait-lr');
-  html += lrSec('lr-tune', '補正と重みの調整', LR_SEC_TUNE, 'AI が直す学び');
-  html += a ? lrAiView(a) : skelPage('lrAi', 'AI の学びを読み込んでいます', "lrLoad('ai')", [['', 244], ['', 400]], 'wait-lr');
+  var html = '<h1>学び</h1>';
+  html += p ? lrPeopleView(p, lrBoard(p, a), a) : skelPage('lrPeople', '人の学びを読み込んでいます', "lrLoad('people')", [['', 244], ['', 400]], 'wait-lr');
   return html;
 }
 
@@ -4990,13 +5007,14 @@ function lrReviewCard(p, a){
     body, '');
 }
 /** 人の学び。review = 「次の予測で見直すこと」のカード（よみの話の次に置く。ほかの画面と同じく、よみが先頭） */
-function lrPeopleView(d, review){
+function lrPeopleView(d, review, ai){
   review = review || '';
+  var pend = ai && (ai.pending || []).length ? lrPendingCard(ai.pending) : '';   // 承認待ちの見直し案（人が決めること）
   var full = d.detail === 'full' || d.detail === 'partial';   // 人ごとの中身がある（partial は担当のメーカーの計画だけ。行ごとに lrNamed で決める）
   // 何も無いときは、よみの案内 1 つだけ（空の注記を並べない）。中身の無いカードは出さない
   if (!((d.lessons || []).length || (d.openActions || []).length || (d.causes || []).length || (d.scoreboard || []).length || (d.decisions || []).length || (d.uplift || []).length || lrHitAny(d.hits)))
-    return guide('guide', '実績が締まって、' + runWhen(['EVAL.REPORT', 'EVAL.INSIGHTS']) + '、大きく外れた月の振り返りと、読みの当たりがここに並びます。') + review;
-  return lrPeopleHero(d) + review + lrLessonCard(d, full) + lrCauseCard(d) + lrScoreCard(d, full) + lrHitCard(d.hits) + lrDecisionCard(d, full) + lrUpliftCard(d);
+    return guide('guide', '実績が締まって、' + runWhen(['EVAL.REPORT', 'EVAL.INSIGHTS']) + '、大きく外れた月の振り返りと、読みの当たりがここに並びます。') + review + pend;
+  return lrPeopleHero(d) + review + pend + lrLessonCard(d, full) + lrScoreCard(d, full);
 }
 /**
  * よみのまとめ（数だけ。メーカーの名前は出さない）。外れた月の振り返りが無いときは「外れた月はありません」とは言わず、何がまだかと動かし方を言う:
