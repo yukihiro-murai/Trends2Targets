@@ -383,6 +383,17 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .mkb-wrap{position:relative;height:20px}
 .mkband{display:block;width:100%;height:20px}
 .mkb-axis{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.mkb-grid{stroke:var(--line);stroke-width:1;stroke-dasharray:2 2;vector-effect:non-scaling-stroke}
+.mkb-th{vertical-align:bottom}
+.mkb-scale{position:relative;height:16px;margin-top:4px;font-size:var(--fs-s);font-weight:400;color:var(--muted)}
+.mkb-scale span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+.mkb-scale span:first-child{transform:none}.mkb-scale span:last-child{transform:translateX(-100%)}
+.mkb-keys{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:var(--fs-s);color:var(--muted)}
+.mkb-keys span{display:inline-flex;align-items:center;gap:6px}
+.mkb-keys i{display:inline-block;flex:none}
+.k-band{width:20px;height:10px;border-radius:2px;background:var(--primary-soft);border:1px solid var(--primary-line)}
+.k-mid{width:3px;height:14px;background:var(--navy)}
+.k-dot{width:10px;height:10px;border-radius:50%;background:var(--card);border:2px solid var(--primary)}
 .mkb-band{fill:var(--primary-soft);stroke:var(--primary-line);stroke-width:1;vector-effect:non-scaling-stroke}
 .mkb-mid{fill:var(--navy)}
 .mkr{position:relative;height:6px;margin-top:4px;border-radius:3px;background:var(--gray)}
@@ -2323,7 +2334,8 @@ function viewMakers(){
   var h = mkHead('予測一覧');
   if (h.wait) return h.wait;
   if (!h.rows.length) return h.head + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここに並びます。');
-  return h.head + '<div class="card"><div class="card-head"><h2>見通し' + tip('メーカーごとの年度の見通しです。帯 = 下振れ〜上振れ（10 回に 8 回はこの中）・縦の線 = 中心・点 = 着地の推定（締まった月の実績＋残りの月）。全メーカーで同じ目盛りです。名前を押すと予測結果を開きます') + '</h2></div>'
+  return h.head + '<div class="card"><div class="card-head"><h2>見通し' + tip('メーカーごとの年間の売上の見通しです。帯 = 10 回に 8 回はこの中に入る幅・縦の線 = 中心・丸 = 着地の推定（締まった月の実績＋残りの月）。全メーカーで同じ目盛り（左端が 0 円）です。名前を押すと予測結果を開きます') + '</h2>'
+    + '<span class="mkb-keys" aria-hidden="true"><span><i class="k-band"></i>80% の幅</span><span><i class="k-mid"></i>中心</span><span><i class="k-dot"></i>着地の推定</span></span></div>'
     + '<div class="tblwrap">' + mkForecastTable(h.rows) + '</div></div>';
 }
 function viewBudgets(){
@@ -2343,14 +2355,18 @@ function viewBudgets(){
 }
 /** 予測一覧の表: メーカー・見通しの帯・中心・前回から・外れ幅 */
 function mkForecastTable(rows){
-  var hi = rows.reduce(function(m, p){ return Math.max(m, isNum(p.p90) ? p.p90 : 0, isNum(p.landing) ? p.landing : 0); }, 0) || 1;
+  var top = rows.reduce(function(m, p){ return Math.max(m, isNum(p.p90) ? p.p90 : 0, isNum(p.landing) ? p.landing : 0); }, 0) || 1;
+  // 目盛りの右端は切りのよい額（1・2・2.5・5 × 10 のべき）。左端は 0 円、真ん中にも目盛り
+  var e = Math.pow(10, Math.floor(Math.log(top) / Math.LN10)), f = top / e;
+  var hi = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
   var x = function(v){ return Math.max(0, Math.min(100, v / hi * 100)); };
+  var scale = '<div class="mkb-scale" aria-hidden="true"><span style="left:0">0</span><span style="left:50%">' + yenShort(hi / 2) + '</span><span style="left:100%">' + yenShort(hi) + '</span></div>';
   var band = function(p){
     if (!isNum(p.p50)) return '<td><span class="chip off" data-tip="まだ予測がありません（予測準備で実行します）">予測なし</span></td>';
     var t = [qName('p10') + ' ' + yenShort(p.p10) + '円', qName('p50') + ' ' + yenShort(p.p50) + '円', qName('p90') + ' ' + yenShort(p.p90) + '円'];
     if (isNum(p.landing)) t.push('着地の推定 ' + yenShort(p.landing) + '円');
     var svg = '<svg class="mkband" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">'
-      + '<line x1="0" y1="10" x2="100" y2="10" class="mkb-axis"/>'
+      + '<line x1="0" y1="10" x2="100" y2="10" class="mkb-axis"/><line x1="50" y1="3" x2="50" y2="17" class="mkb-grid"/><line x1="100" y1="3" x2="100" y2="17" class="mkb-grid"/>'
       + (isNum(p.p10) && isNum(p.p90) ? '<rect x="' + x(p.p10) + '" y="5" width="' + Math.max(0.6, x(p.p90) - x(p.p10)) + '" height="10" rx="2" class="mkb-band"/>' : '')
       + '<rect x="' + (x(p.p50) - 0.5) + '" y="2" width="1" height="16" class="mkb-mid"/></svg>'
       + (isNum(p.landing) ? '<span class="mkb-dot" style="left:' + x(p.landing) + '%"></span>' : '');
@@ -2366,7 +2382,7 @@ function mkForecastTable(rows){
     return '<tr><td class="wrap">' + planLink(p, 'forecast') + (planMeasure(p) ? ' ' + measureChip(true) : '') + '</td>' + band(p) + '<td class="num">' + yen(p.p50) + '</td>' + chg(p) + acc(p) + '</tr>';
   }).join('');
   return '<table class="tbl mk mkf"><colgroup><col style="width:24%"><col><col style="width:16%"><col style="width:12%"><col style="width:12%"></colgroup>'
-    + '<thead><tr><th>メーカー</th><th data-tip="帯 = 下振れ〜上振れ・縦の線 = 中心・点 = 着地の推定（全メーカーで同じ目盛り）">見通し</th>' + qTh('p50') + '<th class="num" data-tip="前回の予測の中心からの変化">前回から</th><th class="num" data-tip="締まった月の、予測と実績の外れ幅">外れ幅</th></tr></thead><tbody>'
+    + '<thead><tr><th>メーカー</th><th class="mkb-th" data-tip="年間の売上。帯 = 80% の幅・縦の線 = 中心・丸 = 着地の推定（全メーカーで同じ目盛り。左端が 0 円）">年間の見通し' + scale + '</th>' + qTh('p50') + '<th class="num" data-tip="前回の予測の中心からの変化">前回から</th><th class="num" data-tip="締まった月の、予測と実績の外れ幅">外れ幅</th></tr></thead><tbody>'
     + body + '</tbody></table>';
 }
 /** 確率の短い表し方（1% 未満・99% 超はそう書く。年度が締まって着地にぶれが無いときは、決まった値なのでそのまま） */
