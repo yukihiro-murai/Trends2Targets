@@ -276,8 +276,43 @@ function appBasisTriangulation_(planId, runId) {
       sums[k] = xs.length === 12 && xs.every(v => v !== null) ? xs.reduce((a, b) => a + b, 0) : null;
     });
     const n = v => appMethodsNum_(v);
+    // 三角測量の画面（2026-10-16）: 手法と段の 12 か月（年度の 4 月から）と年度の合計・このメーカーの物差しの外れ幅（予算策定の補助。読むだけ）
+    const keys = APP_METHODS_KEYS.concat(APP_METHODS_STAGES);
+    keys.forEach(k => {
+      if (sums[k] !== undefined) return;
+      const xs = rows.map(r => n(r[APP_METHODS_COLUMN[k]]));
+      sums[k] = xs.length === 12 && xs.every(v => v !== null) ? xs.reduce((a, b) => a + b, 0) : null;
+    });
+    const months = rows.slice().sort((x, y) => String(x.ym).localeCompare(String(y.ym)))
+      .map(r => { const v = {}; keys.forEach(k => { v[k] = n(r[APP_METHODS_COLUMN[k]]); }); return { ym: String(r.ym), actual: r.source === 'actual_closed', v: v }; });
     return { weights: { LINEAR: n(w.w_linear), RECENT: n(w.w_recent), ROBUST: n(w.w_robust), SIM: n(w.w_sim) }, basis: String(w.basis || ''),
-      points: n(w.evidence_points) || 0, makers: n(w.evidence_makers) || 0, own: n(w.own_points) || 0, sums: sums };
+      points: n(w.evidence_points) || 0, makers: n(w.evidence_makers) || 0, own: n(w.own_points) || 0, sums: sums, months: months, acc: appTriPlanAcc_(planId) };
+  } catch (e) {
+    return null;   // 表の版がそろう前
+  }
+}
+
+/**
+ * このメーカーの手法ごとの外れ幅（三角測量の画面。物差し = 年度の初めに戻って予測し直した、いちばん新しい回の数えた月）。
+ * 返り値 { fy, n, mape: { 手法: Σ|予測 − 実績| ÷ Σ実績 } }。物差しが無ければ null
+ */
+function appTriPlanAcc_(planId) {
+  try {
+    const plan = appReadTable_('PLANS').filter(p => p.plan_id === planId)[0];
+    if (!plan) return null;
+    const cut = Number(plan.fy) + '/04';
+    const rows = appReadPlanTable_('BACKTEST', planId).filter(r => String(r.cutoff_ym) === cut && String(r.calc_version) === APP_BACKTEST_CALC_VERSION);
+    const last = rows.reduce((b, r) => (!b || String(r.computed_at) > String(b.computed_at) || (String(r.computed_at) === String(b.computed_at) && r._row > b._row) ? r : b), null);
+    if (!last) return null;
+    const by = {}, yms = {};
+    rows.filter(r => r.bt_id === last.bt_id && r.counted && typeof r.actual === 'number' && r.actual > 0 && typeof r.p50 === 'number').forEach(r => {
+      if (APP_METHODS_KEYS.indexOf(r.method) < 0) return;
+      const o = by[r.method] = by[r.method] || { e: 0, a: 0 };
+      o.e += Math.abs(r.p50 - r.actual); o.a += r.actual; yms[r.target_ym] = 1;
+    });
+    const mape = {};
+    Object.keys(by).forEach(k => { mape[k] = by[k].a > 0 ? by[k].e / by[k].a : null; });
+    return { fy: String(plan.fy), n: Object.keys(yms).length, mape: mape };
   } catch (e) {
     return null;   // 表の版がそろう前
   }

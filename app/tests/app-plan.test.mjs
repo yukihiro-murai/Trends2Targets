@@ -271,8 +271,8 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   // 計画の画面は 3 つ（予測準備・予測結果・予算策定。2026-10-16）: つなげて全部の区切りを確かめる
   const page = vm.runInContext(`viewForecastAll()`, ui);
   assert.ok(!/ここを表示できませんでした/.test(page), '区切りをすべて描ける: ' + (page.match(/<p class="note">([^<]*)/) || [])[1]);
-  for (const tab of ['forecast', 'basis', 'input', 'review', 'version', 'steps']) assert.ok(fcSection(page, tab), tab + ' の区切りがある');
-  assert.match(fcSection(page, 'steps'), /予算の保存[\s\S]*予算と予測/, '最近の操作に変わったもの（シートの名前ではなく、ふつうの名前）が出る');
+  for (const tab of ['forecast', 'basis', 'input', 'review', 'version', 'tri']) assert.ok(fcSection(page, tab), tab + ' の区切りがある');
+  assert.equal(fcSection(page, 'steps'), '', '進みの区切りは無い（2026-10-16 村井さん: 予測準備は入力だけ）');
   // 旧来の計算が確認を求めたら、確認の窓（ブラウザが黙って「やめる」にすることがある）ではなく、画面の中のカードで聞く
   vm.runInContext(`S.fc.jump = 'review'; toast = function(){}; JOB_DONE['FORECAST.RUN_CALC']({ needConfirm: { key: 'extreme', title: '極端な入力', message: '増減率 +80%' } }, { planId: S.fc.planId, confirms: [] })`, ui);
   const cf = vm.runInContext(`viewForecast()`, ui);
@@ -374,7 +374,8 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   ui.__basis = env.call('apiForecastBasis(__in)', { __in: { planId } });
   const basisHtml = vm.runInContext(`S.fc.basis = __basis; fcSection(viewForecastAll(), 'basis')`, ui);
   // 中身のある部分だけを出す（補正・市場の調査・前回からの変化は、記録があるときだけ。「まだありません」を重ねない。2026-10-06）
-  assert.match(basisHtml, /過去の売上だけ[\s\S]*月ごとの内訳/);
+  assert.match(basisHtml, /過去の売上だけ[\s\S]*予測を押したもの/);
+  assert.doesNotMatch(basisHtml, /月ごとの内訳|予測の土台/, '月ごとの内訳・予測の土台は予測結果に出さない（土台は三角測量の画面）');
   assert.ok((basisHtml.match(/まだ/g) || []).length <= 1, '根拠のタブに「まだ」を重ねない');
   assert.ok(!/undefined|NaN/.test(basisHtml), '根拠のタブに undefined や NaN を出さない');
   // 公式版のタブ（版がまだ無いとき・出したとき）
@@ -407,7 +408,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.doesNotMatch(pick, /メーカーを選ぶ/);
   assert.match(pick, /<h1>予測準備<\/h1><span class="fc-sels" data-near="1"><select[^>]*id="fc_fy"[\s\S]*FY2026[\s\S]*<select[^>]*id="fc_mk"[^>]*>[\s\S]*>テスト製薬<\/option>/);
   // メニュー: ホーム・メーカー・予測・分析・学び（使える人は全員同じ。2026-10-06 村井さん）
-  assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(NAV.map(function(n){ return n[1]; }))`, ui)), ['ホーム', '予測一覧', '予算一覧', '予測準備', '予測結果', '予算策定', '分析', '学び']);
+  assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(NAV.map(function(n){ return n[1]; }))`, ui)), ['ホーム', '予測一覧', '予算一覧', '予測準備', '予測結果', '三角測量', '予算策定', '分析', '学び']);
   assert.equal(vm.runInContext(`go('settings'); S.view`, ui), 'home', '無い画面へは移らない');
   // 分析（apiCrossMaker）: 年度は題の横。画面の中のタブは無く、1 カラムで縦に（要点のよみ → … → 話題ごとの向き。2026-10-13）
   ui.__an = env.call('apiCrossMaker(__in)', { __in: {} });
@@ -433,9 +434,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
     document.getElementById = g; return JSON.stringify([h, hit]); })()`, ui));
   assert.match(askRes[0], /role="dialog"[\s\S]*締めますか？[\s\S]*>締める<[\s\S]*>やめる</);
   assert.equal(askRes[1], 10, 'やめる では実行しない・はい で 1 回だけ実行');
-  // 進みは実行する順（A → B → C・番号順）に並べる
-  const stepsHtml = vm.runInContext(`var __kv = S.fc.view; S.fc.view = JSON.parse(JSON.stringify(__kv)); S.fc.view.boot.steps = [{ menu: 'A-2', label: 'a2', status: 'not_run' }, { menu: 'B-1', label: 'b1', status: 'not_run' }, { menu: 'A-9', label: 'a9', status: 'not_run' }, { menu: 'A-4', label: 'a4', status: 'not_run' }]; var __st = fcStepsTab(S.fc.data, S.fc.view); S.fc.view = __kv; __st`, ui);
-  assert.match(stepsHtml, />a2<[\s\S]*>a4<[\s\S]*>a9<[\s\S]*>b1</);
+  assert.equal(vm.runInContext(`typeof fcStepsTab`, ui), 'undefined', '進みの区切りは無い');
   // 振り返りの記録（検証・見直し案）が何も無いときは「まだありません」を重ねない（案内 1 枚 + 更新の操作）
   const evalEmpty = vm.runInContext(`var __kv2 = [S.fc.view, S.fc.learn]; S.fc.view = JSON.parse(JSON.stringify(__kv2[0])); S.fc.view.boot.eval = {}; S.fc.view.boot.quarterly = {}; S.fc.learn = { planId: S.fc.planId, accuracy: { months: [] }, shadow: null }; var __ev = fcReviewTab(S.fc.data, S.fc.view); S.fc.view = __kv2[0]; S.fc.learn = __kv2[1]; __ev`, ui);
   assert.equal((evalEmpty.match(/まだ/g) || []).length, 1, evalEmpty.slice(0, 400));

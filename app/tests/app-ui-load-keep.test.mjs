@@ -105,8 +105,8 @@ assert.equal(run('S.fc.jump'), 'basis', '根拠の区切りへ送る（描けた
   const page = run('viewForecastAll()');
   assert.doesNotMatch(page, /観測中…/, '読めた中身をすぐ出す（「観測中…」を出さない）');
   assert.doesNotMatch(page, /role="tablist"[^>]*>\s*<button class="tab/, '画面の中のタブは無い');
-  const ids = [...page.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]);
-  assert.deepEqual(ids, ['input', 'steps', 'forecast', 'basis', 'review', 'budget', 'version'], '区切りは画面ごとに上から（予測準備・予測結果・予算策定）');
+  const ids = [...page.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(ids, ['input', 'review', 'forecast', 'basis', 'tri', 'budget', 'version'], '区切りは画面ごとに上から（予測準備・予測結果・三角測量・予算策定）');
 }
 assert.deepEqual(callsOf(`go('home'); go('makers'); go('forecast')`).filter((f) => f !== 'apiAiLearning'), [], 'ホーム・メーカー・予測（計画の一覧・根拠・振り返り・公式版）を行き来しても読み直さない');
 assert.deepEqual(callsOf(`openPlan('${X}', 'review')`), [], '同じ計画を開き直しても読み直さない');

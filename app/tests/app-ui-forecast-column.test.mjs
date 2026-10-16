@@ -81,7 +81,7 @@ run(`go('forecast')`);
 {
   // 一覧を読むまでも、区切りのカード（見出しと灰色の帯）を出しておく（読めたら同じ場所に中身が入る。2026-10-13 村井さん）
   const w = page();
-  assert.deepEqual([...w.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'steps', 'forecast', 'basis', 'review', 'budget', 'version'], '読み込み中も区切り（予測準備・予測結果・予算策定の 3 つの画面）');
+  assert.deepEqual([...w.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'review', 'forecast', 'basis', 'tri', 'budget', 'version'], '読み込み中も区切り（予測準備・予測結果・三角測量・予算策定の 4 つの画面）');
   assert.match(w, /class="skel" role="status"/, '中身の場所は灰色の帯');
   assert.doesNotMatch(w, /観測中…/, 'よみの待ちのカードは出さない（中身と大きさが違い、読めたときに画面が動くため）');
 }
@@ -97,11 +97,13 @@ const mk = /<select class="inp sm" id="fc_mk" aria-label="メーカー"[^>]*>([\
 assert.ok(mk, 'メーカーのプルダウン（1 マス: .inp.sm）');
 assert.deepEqual([...mk[1].matchAll(/>([^<]*)<\/option>/g)].map((m) => m[1]), byName, 'その年度のメーカーだけを名前の順に、名前だけ（年度や印を付けない）');
 assert.equal(run(`viewTitle(${JSON.stringify(head(h))})`).includes('<span class="vnear"><span class="fc-sels"'), true, '題の横の道具の位置（ホーム・メーカー一覧と同じ .vnear）');
-assert.deepEqual([...h.matchAll(/<section class="card fcsec" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'steps', 'forecast', 'basis', 'review', 'budget', 'version']);
-assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]), ['入力', '進み', '予測', '根拠', '振り返り', '予算', '公式版'], 'どの区切りも同じ形の見出し');
+assert.deepEqual([...h.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'review', 'forecast', 'basis', 'tri', 'budget', 'version']);
+// 中身がすぐ小見出しで始まる区切り（入力など）は、区切りの見出しを重ねない（2026-10-16 村井さん）
+assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]).filter((t) => t !== '振り返り'), ['予測', '根拠', '手法ごとの見通し', '予算', '公式版'], '見出しのある区切りは同じ形の見出し（振り返りは中身の読み込みしだい）');
+assert.match(h, /<section class="card fcsec nohead" id="fcs-input" aria-label="入力"><div class="card fc-inkind" id="fc-in-product"><h2>製品の入力/, '「入力」→「製品の入力」と重ねない');
 assert.doesNotMatch(h, /class="tabs"|onclick="fcTab\(|class="tabs sub"><button/, 'タブ・目次は無い（グラフ / 表で見る の切り替えだけ）');
 assert.deepEqual([...fcSection(h, 'input').matchAll(/<div class="card fc-inkind" id="fc-in-(\w+)"><h2>([^<]*)</g)].map((m) => [m[1], m[2]]),
-  [['product', '製品の入力'], ['client', 'メーカー全体の入力'], ['opinions', '見解の入力'], ['devspot', 'スポット案件の入力']], '入力の 4 種類はカードを縦に');
+  [['product', '製品の入力'], ['client', 'メーカー全体の入力'], ['opinions', '個人見解の入力'], ['devspot', 'スポット案件の入力']], '入力の 4 種類はカードを縦に');
 assert.doesNotMatch(h, /全体の学びは『学び』で見られます|go\('learning'\)/, '画面の中に別の画面へのリンクを置かない');
 
 // ==== 3. 年度を選ぶ ====
@@ -113,7 +115,7 @@ run(`fcSetFy('${FY + 2}')`); flush();
 assert.equal(run('S.fc.planId'), '', '計画の無い年度は、メーカーを開かない');
 h = page();
 assert.match(h, new RegExp('FY' + (FY + 2) + ' の計画はまだありません'), 'よみの案内 1 枚');
-assert.equal((h.match(/class="card"/g) || []).length, 3, 'カードは画面ごとに案内の 1 枚だけ（予測準備・予測結果・予算策定）');
+assert.equal((h.match(/class="card"/g) || []).length, 4, 'カードは画面ごとに案内の 1 枚だけ（予測準備・予測結果・三角測量・予算策定）');
 assert.match(head(h), new RegExp('<option value="' + (FY + 2) + '" selected>'), '選んだ年度のまま');
 assert.doesNotMatch(head(h), /id="fc_mk"/, 'メーカーのプルダウンは出さない（選べるメーカーが無い）');
 run(`fcSetFy('${FY}')`); flush();
@@ -167,8 +169,8 @@ run('fcDropDrafts(); S.job = null');   // 保存の終わりは待たない（�
 
 // ==== 6. 1 つの区切りの表示で失敗しても、ほかの区切りは出す ====
 {
-  h = run(`var __st = fcStepsTab; fcStepsTab = function(){ throw new Error('テストの失敗'); }; var __h = viewForecastAll(); fcStepsTab = __st; __h`);
-  assert.match(fcSection(h, 'steps'), /ここを表示できませんでした[\s\S]*テストの失敗/);
+  h = run(`var __st = fcTriTab; fcTriTab = function(){ throw new Error('テストの失敗'); }; var __h = viewForecastAll(); fcTriTab = __st; __h`);
+  assert.match(fcSection(h, 'tri'), /ここを表示できませんでした[\s\S]*テストの失敗/);
   for (const k of ['forecast', 'basis', 'input', 'review', 'version']) assert.doesNotMatch(fcSection(h, k), /ここを表示できませんでした/, k + ' は出す');
 }
 

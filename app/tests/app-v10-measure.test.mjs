@@ -350,10 +350,9 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   const tabM = clean(run('fcBothTabs(__d, __v)', { __d: m.d, __v: m.v }), '予測と予算（測る専用）');
   assert.doesNotMatch(tabM, /fcBudget\(|fcSaveBudget\(\)|この予算に/, '予算の欄・保存・届く見込みを出さない');
   assert.match(run('fcRunBtn()'), /fcForecastRun\(\)/, '予測を実行は出す（物差しの点を作る。「予測と予算」の見出しの右）');
-  const stepsM = clean(run('fcStepsTab(__d, __v)', { __d: m.d, __v: m.v }), '進み（測る専用）');
-  assert.match(stepsM, /<span class="act" data-tip="市場・競合の動きを AI で調べる\n測る専用の計画なので、市場は調べません（費用のため）。"><button class="btn btn-ghost" disabled aria-disabled="true">市場を調べる<\/button><\/span>/);
-  assert.doesNotMatch(stepsM, /fcRun\('AI\.RESEARCH'\)/);
-  assert.match(stepsM, /fcRun\('SALES\.AGGREGATE'\)/, 'ほかの準備は押せる');
+  // 2026-10-16: 進み（準備のボタン）は予測準備から外した。三角測量の画面は測る専用でも出す（予算の点線は無し）
+  const stepsM = clean(run('fcTriTab(__d, __v)', { __d: m.d, __v: m.v }), '三角測量（測る専用）');
+  assert.doesNotMatch(stepsM, /k-bud|tri-bud/, '測る専用は最終予算の線を出さない');
   run('S.fc.ver = __r', { __r: env.call('apiVersionList(__in)', { __in: { planId: planM } }) });
   const verM = clean(run('fcVersionTab(S.fc.data, S.fc.view)'), '公式版（測る専用）');
   assert.match(verM, /測る専用の計画なので、公式版は出しません。/);
@@ -365,7 +364,6 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   const tabA = clean(run('fcBothTabs(__d, __v)', { __d: A.d, __v: A.v }), '予測と予算');
   assert.match(tabA, /fcBudget\(/);
   assert.match(tabA, /fcSaveBudget\(\)/);
-  assert.match(clean(run('fcStepsTab(__d, __v)', { __d: A.d, __v: A.v }), '進み'), /fcRun\('AI\.RESEARCH'\)/);
   run('S.fc.ver = __r', { __r: env.call('apiVersionList(__in)', { __in: { planId: planA } }) });
   assert.match(run('fcVersionTab(S.fc.data, S.fc.view)'), /verSubmit\(\)/);
   // 画面の名前は 8 字まで・中の印（MEASURE）を見せない

@@ -342,12 +342,12 @@ const redactedBasis = (full) => {
   assert.deepEqual(hasName(sum.review), [], '振り返りのタブに人の名前を出さない');
   assert.ok(!/的中率|当たった割合/.test(sum.review), '人ごとの的中率を出さない');
   assert.ok(!/（信頼度/.test(sum.basis) && !sum.basis.includes('鷹野'), '根拠のタブに人ごとの信頼度と名前を出さない（見解の一文は入力のまとめ）');
-  assert.deepEqual(chips(sum.basis), ['↑ 見解 +5.0%', '↓ 製品 -3.0%', '↑ 話題 +2.0%'], '押したものの札は種類ごとに出す（空の札を出さない）');
+  // 2026-10-16: 月ごとの内訳（押したものの札）は予測結果から外した（予測を押したもののグラフと同じ情報）
+  assert.deepEqual(chips(sum.basis), [], '月ごとの内訳の札は無い');
   // 予算策定担当には、これまでどおり名前と信頼度を出す
   const full = render(PLANNER_ALL, 'planner');
   assert.ok(full.review.includes('鷹野') && /当たった割合 67%/.test(full.review));
-  assert.ok(full.basis.includes('（信頼度 0.80）') && full.basis.includes('鷹野'));
-  assert.deepEqual(chips(full.basis), chips(sum.basis), '札そのものは同じ（内訳はカーソルの説明だけ）');
+  assert.deepEqual(chips(full.basis), [], '月ごとの内訳の札は無い');
 }
 
 // ==== 6. 操作した人のメール: その計画で予算策定担当以上でない人（閲覧の人・ほかのメーカーだけの担当）には返さない。画面は「-」で止まらない（2026-10-13） ====
@@ -414,13 +414,12 @@ const redactedBasis = (full) => {
   vm.runInContext(`S.view = 'forecast'; S.fc.plans = [{ planId: __v.plan.planId, clientName: 'x', fy: '2026' }]; S.fc.planId = __v.plan.planId; S.fc.view = __v; S.fc.data = __d; S.fc.basis = __b; S.fc.ver = __r;`, ui);
   const tabs = {};
   const page = vm.runInContext(`viewForecastAll()`, ui);
-  for (const tab of ['forecast', 'basis', 'version', 'steps']) { tabs[tab] = fcSection(page, tab); assert.ok(tabs[tab], tab + ' の区切りがある'); }
+  for (const tab of ['forecast', 'basis', 'version']) { tabs[tab] = fcSection(page, tab); assert.ok(tabs[tab], tab + ' の区切りがある'); }
   for (const [tab, html] of Object.entries(tabs)) {
     assert.ok(!/ここを表示できませんでした/.test(html), tab + ' タブを描ける');
     assert.ok(!/undefined|NaN/.test(html), tab + ' タブに undefined や NaN を出さない');
     assert.deepEqual(emails(html), [], tab + ' タブに人のメールを出さない');
   }
-  assert.match(tabs.steps, /この計画の最近の操作[\s\S]*<td>-<\/td>/, '最近の操作の「した人」は「-」');
   assert.match(tabs.version, /<td>-<\/td><td>-<\/td>/, '公式版の出した人・判断した人は「-」');
   assert.doesNotMatch(tabs.forecast, /最新 [^<]*・-/, '最新の予測の時刻の後ろに「・-」を付けない');
   assert.equal(vm.runInContext(`[fcWho(''), fcWho(null), fcWho('a.b@bigm2y.com')].join()`, ui), '-,-,a.b');

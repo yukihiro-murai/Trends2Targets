@@ -206,7 +206,7 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   ui.fcSection = fcSection;
   ui.__v = view; ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } }); ui.__learn = env.call('apiLearningView(__in)', { __in: { planId } });
   vm.runInContext(`S.view='forecast'; S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.learn=__learn; S.fc.ver=__ver; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ui);
-  for (const tab of ['forecast', 'input', 'review', 'version', 'steps']) {
+  for (const tab of ['forecast', 'input', 'review', 'version', 'tri']) {
     const html = vm.runInContext(`S.fc.inputKind='product'; fcSection(viewForecastAll(), '${tab}')`, ui);
     assert.doesNotMatch(html, WRITE_MARKS, `閲覧の人の ${tab} タブに書き込みの操作を出さない`);
     assert.ok(html, tab + ' の区切りがある');
@@ -216,13 +216,11 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'input')`, ui), /入力は予算策定担当ができます/);
   assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ui), /承認は承認者ができます/);
   assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'version')`, ui), /承認者が承認します/, '承認待ちを見せるが操作は出さない');
-  // 担当者は見るだけ（画面からは変えない。変えるのは所有者がエディタから。2026-10-06 村井さん）
-  assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'steps')`, ui), /担当者[\s\S]*変えるのは所有者です/);
   // 入力が空の画面でも同じ（読むだけ。操作は出さない）
   const empty = env.call('apiPlanView(__in)', { __in: { planId: planId2 } });
   ui.__v2 = empty; ui.__ver2 = env.call('apiVersionList(__in)', { __in: { planId: planId2 } });
   vm.runInContext(`S.fc.view=__v2; S.fc.ver=__ver2; S.fc.inputKind='devspot';`, ui);
-  for (const tab of ['forecast', 'input', 'review', 'version', 'steps']) {
+  for (const tab of ['forecast', 'input', 'review', 'version', 'tri']) {
     assert.doesNotMatch(vm.runInContext(`fcSection(viewForecastAll(), '${tab}')`, ui), WRITE_MARKS, `空の画面（${tab}）でも操作を出さない`);
   }
   // ホームの役割の札は 2026-10-06 に外した（情報利得がない。村井さん）
@@ -251,10 +249,7 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   const ev = vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ua);
   assert.match(ev, /fcRun\('EVAL.REPORT'\)/, '策定の実行は出る');
   assert.doesNotMatch(ev, /IMPORT.ACTUALS/, '管理者だけの取り込みは出さない');
-  const st = vm.runInContext(`fcSection(viewForecastAll(), 'steps')`, ua);
-  assert.match(st, /fcRun\('SALES.AGGREGATE'\)/, '策定の実行は出る');
-  assert.doesNotMatch(st, /IMPORT.SALES|fc_people/, '管理者だけの操作は出さない');
-  assert.match(st, /担当者[\s\S]*変えるのは所有者です/);
+  assert.doesNotMatch(vm.runInContext(`viewForecastAll()`, ua), /IMPORT.SALES|fc_people/, '管理者だけの操作は出さない');
   assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'input')`, ua), /fcInput\(|fcSaveInput/, '入力の保存は出る');
 }
 

@@ -162,6 +162,8 @@ const verTab = ({ shown, pending, official, versions }) => {
   assert.doesNotMatch(h, /undefined|NaN/);
   return h;
 };
+// 今の中心の説明（2026-10-16: 公式版の「今の中心」の箱は予算策定の上の箱と重なるので外した。説明は比べの表の中心の行に出す）
+const nowTip = (shown) => String(run(`verCurMidTip(__c)`, { __c: Object.assign({ annual: LEG, budget: { adopted: 121.2e6, uplift: 5e6, final: 126.2e6 }, monthly }, shown === undefined ? {} : { shown }) }) || '').split('\n').slice(1);
 const verRows = (h) => Object.fromEntries([...h.matchAll(/<tr><td>v(\d+)<\/td><td>[\s\S]*?<\/td><td class="num"(?: data-tip="[^"]*")?>[\s\S]*?<\/td><td class="num"( data-tip="([^"]*)")?>([^<]*)<\/td>/g)].map((m) => [m[1], [m[4], m[3] === undefined ? null : unesc(m[3])]]));
 // 差の欄の説明（diffTip）は、今と版の中心の計算のしかたが違うときだけ（2026-10-09。app-v11-fix2.test.mjs）
 const cmpRow = (h) => { const m = /<tr><td( data-tip="([^"]*)")?>中心（年度）<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td><td class="num"( data-tip="([^"]*)")?>([^<]*)<\/td><\/tr>/.exec(h);
@@ -174,8 +176,8 @@ const REACH = { final: 0.52, adopted: 0.71, center: 123.6e6, sd: 9e6, tau: 0.123
   // (a) 本番（今の中心 = current.shown）。公式版 v2 は出したときに画面に出していた中心 1 億 1,800 万（記録の年度合計の中心は 1 億 800 万）。v1 は shownCenter の無い前の版
   const v3 = ver(3, 'SUBMITTED', 110e6, 123.6e6, REACH), v2 = ver(2, 'APPROVED', 108e6, 118e6), v1 = ver(1, 'SUPERSEDED', 100e6);
   const h = verTab({ shown: { p50: 121.2e6, basis: 'monthsum', live: true }, pending: v3, official: v2, versions: [v3, v2, v1] });
-  assert.equal(kpiVal(h, '今の中心'), ys(121.2e6));
-  assert.deepEqual(kpiTip(h, '今の中心'), ['今の予測の中心（年度合計。予測と予算の画面と同じ）', yu(121.2e6), '年度合計の中心は月の合計です', '旧来の計算の年度合計の中心 110,000,000 円（記録に残しています）']);
+  assert.doesNotMatch(h, /<div class="k">今の(中心|最終予算)<\/div>/, '今の中心・最終予算の箱は出さない（予算策定の上と重なる）');
+  assert.deepEqual(nowTip({ p50: 121.2e6, basis: 'monthsum', live: true }), ['年度合計の中心は月の合計です', '旧来の計算の年度合計の中心 110,000,000 円（記録に残しています）']);
   assert.deepEqual(kpiTip(h, '公式版の中心'), ['出したときの予測の中心（承認済みの公式版・年度合計）', yu(118e6), '旧来の計算の年度合計の中心 108,000,000 円（記録に残しています）']);
   // 承認待ちのカード: 出したときに画面に出していた中心（同じカードの最終予算と同じく、出したときの値）
   const pl = pendLine(h);
@@ -206,7 +208,7 @@ const REACH = { final: 0.52, adopted: 0.71, center: 123.6e6, sd: 9e6, tau: 0.123
   // (b) 本番・締まった月あり（着地の推定）・承認待ちに shownCenter が無い: 承認待ちの中心は今の中心（記録の値はカーソル）
   const v2 = ver(2, 'SUBMITTED', 110e6), v1 = ver(1, 'APPROVED', 100e6);
   const h = verTab({ shown: { p50: 123.6e6, basis: 'landing', live: true }, pending: v2, official: v1, versions: [v2, v1] });
-  assert.deepEqual(kpiTip(h, '今の中心').slice(1), [yu(123.6e6), '年度合計（下振れ・中心・上振れ）は着地の推定（締まった月の実績＋残りの月）です', '旧来の計算の年度合計の中心 110,000,000 円（記録に残しています）']);
+  assert.deepEqual(nowTip({ p50: 123.6e6, basis: 'landing', live: true }), ['年度合計（下振れ・中心・上振れ）は着地の推定（締まった月の実績＋残りの月）です', '旧来の計算の年度合計の中心 110,000,000 円（記録に残しています）']);
   const pl = pendLine(h);
   assert.equal(visible(pl).trim(), '中心 123,600,000 円', '承認待ちの中心は予測と予算の画面と同じ');
   assert.deepEqual(tipsOf(pl)[0].split('\n'), ['今の予測の中心です（予測と予算の画面と同じ）', '年度合計（下振れ・中心・上振れ）は着地の推定（締まった月の実績＋残りの月）です',
@@ -221,8 +223,7 @@ const REACH = { final: 0.52, adopted: 0.71, center: 123.6e6, sd: 9e6, tau: 0.123
   // (c) 12 か月の実績（実績の合計）
   const v1 = ver(1, 'APPROVED', 100e6, 100e6);
   const h = verTab({ shown: { p50: 130e6, basis: 'actual', live: true }, pending: null, official: v1, versions: [v1] });
-  assert.deepEqual(kpiTip(h, '今の中心').slice(1), [yu(130e6), '年度合計の中心は実績の合計です', '旧来の計算の年度合計の中心 110,000,000 円（記録に残しています）']);
-  assert.ok(!kpiTip(h, '今の中心').join('\n').includes('上下に半々'));
+  assert.deepEqual(nowTip({ p50: 130e6, basis: 'actual', live: true }), ['年度合計の中心は実績の合計です', '旧来の計算の年度合計の中心 110,000,000 円（記録に残しています）']);
   assert.equal(kpiTip(h, '公式版の中心')[0], MID + '（承認済みの公式版・年度合計）', '出したときの中心が記録の年度合計と同じなら今までどおり');
   assert.deepEqual(verRows(h)['1'], ['100,000,000', null]);
 }
@@ -231,8 +232,7 @@ const REACH = { final: 0.52, adopted: 0.71, center: 123.6e6, sd: 9e6, tau: 0.123
   const v2 = ver(2, 'SUBMITTED', 110e6), v1 = ver(1, 'APPROVED', 100e6);
   for (const shown of [undefined, { p50: 121.2e6, basis: 'monthsum', live: false }]) {
     const h = verTab({ shown, pending: v2, official: v1, versions: [v2, v1] });
-    assert.equal(kpiVal(h, '今の中心'), ys(110e6));
-    assert.deepEqual(kpiTip(h, '今の中心'), [MID + '（今の予測・年度合計）', yu(110e6)]);
+    assert.deepEqual(nowTip(shown), [], '本番でなければ今の中心に説明を足さない');
     assert.equal(pendLine(h), '中心 110,000,000 円', '説明なし');
     assert.deepEqual(Object.values(cmpRow(h)), [null, '110,000,000', '100,000,000', '+10,000,000', null]);
     assert.deepEqual(monthTotal(h), { ver: '100,000,000', verTip: null, now: '110,000,000', nowTip: null, diff: '+10,000,000', diffTip: null });
