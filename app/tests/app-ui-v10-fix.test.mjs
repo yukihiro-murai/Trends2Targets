@@ -187,7 +187,7 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
   const bt = { fy: '2026', backtest: Object.assign({ fy: '2026', plans: 2 }, env.call('appBacktestSummary_(__r, __c)', { __r: rows, __c: { P0: 'C0', P1: 'C1' } })) };
   const card = run('anBacktestCard(__d)', { __d: bt });
   assert.match(card, /<table class="tbl anw anbt"><colgroup><col><col style="width:152px"><col style="width:152px"><col style="width:152px"><col style="width:112px"><col style="width:112px"><\/colgroup>/, '152・112 の格子（何か月先の列を足した。2026-10-13）');
-  assert.match(card, /<td class="num" data-tip="外れ幅（\d+ 点。実績が 0 円以下の点は除く） \d+\.\d%\n95% の幅 \d+\.\d%〜\d+\.\d%">\d+\.\d% <span class="note">\d+\.\d%〜\d+\.\d%<\/span><\/td>/, '95% の幅は値の下とカーソルに');
+  assert.match(card, /<td class="num" data-tip="外れ幅（\d+ 点。誤差合計 ÷ 実績の絶対値合計。0 円月・負の実績も含む） \d+\.\d%\n95% の幅 \d+\.\d%〜\d+\.\d%">\d+\.\d% <span class="note">\d+\.\d%〜\d+\.\d%<\/span><\/td>/, '95% の幅は値の下とカーソルに。0 円月と負の実績も含む測定定義を表示');
   assert.ok(css.includes('.tbl.anbt td.num > .note{display:block}'), '幅は値の下の行（152px の列に入る）');
   assert.doesNotMatch(card, /width:208px/);
 

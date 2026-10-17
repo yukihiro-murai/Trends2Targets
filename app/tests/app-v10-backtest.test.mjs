@@ -147,7 +147,7 @@ let first;
   assert.deepEqual([r.rows, r.written, r.skipped, r.cutoffYm, r.realMonths], [132, 132, false, CUT, 48]);
   assert.equal(first.rows.length, 132, '12 か月 × 11 方法（後ろの 5 つは素の回帰との比べの手法。Methods.js）');
   assert.deepEqual([...new Set(first.rows.map((x) => x.method))].sort(), ['LAST_YEAR', 'LAST_YEAR_PACE', 'LINEAR', 'LIVE', 'RECENT', 'ROBUST', 'SEASONAL', 'SIM', 'STAT_ONLY', 'TRI', 'TWO_YEAR']);
-  assert.ok(first.rows.every((x) => x.plan_id === planA && x.cutoff_ym === CUT && x.calc_version === 'BT-3' && x.computed_by === OWNER && /^[a-f0-9]{64}$/.test(x.engine_sha256)));
+  assert.ok(first.rows.every((x) => x.plan_id === planA && x.cutoff_ym === CUT && x.calc_version === 'BT-4' && x.computed_by === OWNER && /^[a-f0-9]{64}$/.test(x.engine_sha256)));
   assert.ok(first.rows.every((x) => /^BTP-[0-9A-F]{24}$/.test(x.point_id)), '点の印は回・方法・月から決まる');
   assert.deepEqual(of(first.rows, 'STAT_ONLY').map((x) => x.target_ym), fyYms(FY));
   assert.deepEqual(of(first.rows, 'STAT_ONLY').map((x) => x.horizon), Array.from({ length: 12 }, (_, i) => i + 1));
@@ -399,8 +399,8 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
     Object.assign(pt('P1', 4, 'STAT_ONLY', 100, 100, true), { counted: false })];
   const s = sum(small);
   const st0 = s.methods.find((m) => m.method === 'STAT_ONLY');
-  assert.deepEqual([st0.n, st0.pctN, st0.makers, st0.coverN], [3, 2, 1, 3], '数えない点は入れない。実績 0 円の点は外れ幅に入れない');
-  assert.ok(Math.abs(st0.mape - 0.1) < 1e-12 && Math.abs(st0.bias) < 1e-12);
+  assert.deepEqual([st0.n, st0.pctN, st0.makers, st0.coverN], [3, 3, 1, 3], '数えない点は入れない。実績 0 円の点も外れ幅の分子に入れる');
+  assert.ok(Math.abs(st0.mape - 0.6) < 1e-12 && Math.abs(st0.bias - 0.5) < 1e-12);
   assert.deepEqual([st0.mapeLo, st0.mapeHi, st0.biasLo, st0.biasHi, st0.coverLo, st0.coverHi], [null, null, null, null, null, null], '1 社だけなら幅を出さない');
   assert.ok(Math.abs(st0.cover - 1 / 3) < 1e-12, '帯に入った割合（110 の幅 99〜121 に 100 は入る。90 の幅 81〜99・実績 0 円は外）');
   assert.deepEqual([st0.horizonMin, st0.horizonMax], [2, 4], '何か月先（最小・最大）');
@@ -479,10 +479,10 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   env.as(OWNER);
   // 物差しを動かしていない年度は出さない
   assert.equal(env.call('apiCrossMaker(__in)', { __in: { fy: FY - 1 } }).backtest, null);
-  // 前の数え方（BT-1: 4/1 に 3 月の売上を使った・本番と時点の違う方法と比べた）の回は、新しくても数えない（行は消さない）
+  // 前の数え方（BT-3: 0 円月・負の実績を WAPE から除外）の回は、新しくても数えない（行は消さない）
   {
     const src = bt().filter((r) => r.plan_id === planA && r.bt_id === lastA.bt_id);
-    const old = src.map((r, i) => Object.assign({}, r, { bt_id: 'BT-OLD', point_id: 'BTP-' + String(i).padStart(24, '0'), calc_version: 'BT-1', computed_at: '2099-01-01T00:00:00+0900',
+    const old = src.map((r, i) => Object.assign({}, r, { bt_id: 'BT-OLD', point_id: 'BTP-' + String(i).padStart(24, '0'), calc_version: 'BT-3', computed_at: '2099-01-01T00:00:00+0900',
       p50: r.p50 === null ? null : r.p50 * 2 }));
     env.run('appWithLock_(() => appInsertRows_("BACKTEST", __r))', { __r: old.map((r) => { const o = Object.assign({}, r); delete o._row; return o; }) });
     env.run('APP_STORE_CACHE_ = {}');

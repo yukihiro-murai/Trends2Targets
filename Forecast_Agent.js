@@ -14,7 +14,7 @@
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.3-dev';
+const VERSION = '2.7.4-dev';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -657,6 +657,7 @@ function runForecastFYCore_(fy, clientName) {
 
   const knownSpotOffsetRate = isFinite(tuning.knownSpotOffsetRate) ? tuning.knownSpotOffsetRate : KNOWN_SPOT_OFFSET_RATE;
   const spotBackgroundByMonth = spotBgModel.expectedByMonth.map((v, i) => Math.max(0, Number(v || 0) - Number(knownSpotExpectedByMonth[i] || 0) * knownSpotOffsetRate));
+  const opsSpotBackgroundByMonth = spotBackgroundByMonth.slice(); // DLM shadowの旧Ops比較に使う補正前の背景
   const spotFixedByMonth = devFixedByMonth.map((v, i) => Number(v || 0) + Number(spotBackgroundByMonth[i] || 0));
 
   // 要因（主観係数）※必要情報が揃った行だけ読む
@@ -703,6 +704,10 @@ function runForecastFYCore_(fy, clientName) {
 
   toastProgress_(ss, `STEP5/6: Monte Carlo ${N_SIM}回（運用・背景SPOT・既知SPOT）…`, 8);
 
+  const biasCorrectionFactor = isFinite(calibration && calibration.bias_correction_factor) ? Number(calibration.bias_correction_factor) : 1.0;
+  const learnedMonthBias = parseResidualMonthBiasJson_(calibration && calibration.residual_month_bias_json);
+  const vertexForecastEnabled = readVertexForecastEnabled_();
+
   const mixed = forecastMonteCarloMixed_(model, {
     residualPct,
     factorsProduct,
@@ -723,22 +728,35 @@ function runForecastFYCore_(fy, clientName) {
     reliabilityApply,
     reliabilityMap,
     lmdiEnabled,
-    effects: learnedEffects
+    effects: learnedEffects,
+    historyAnnualAnchor: buildHistoryAnnualAnchor_(salesData, ctx, tuning, dlmPrimaryActive),
+    // 後段で月だけに掛かる既存補正がある場合は、検証した純履歴の経路へ入れない。
+    historyCalibrationNeutral: Math.abs(biasCorrectionFactor - 1) < 1e-12 &&
+      Object.keys(learnedMonthBias).every(k => Math.abs(Number(learnedMonthBias[k] || 0)) < 1e-12) && !vertexForecastEnabled
   });
 
   // BASE がない月の背景 SPOT は、ゼロを含む履歴分布から推定する。
   // 期待額を P10/P50/P90 に定額加算すると、空主観でも客観と混合の幅が違ってしまう。
   // 同じ標本の BASE + 背景 SPOT から客観の分位点も取り直す（既知案件は含めない）。
-  if ((spotBgModel.historyBasedByMonth || []).some(Boolean)) {
+  if ((spotBgModel.historyBasedByMonth || []).some(Boolean) || mixed.diagnostics.historyAnnualAnchor.applied) {
     // DLM shadow の比較用 opsQuantOnly（期待額を加えた旧Ops参照）は残す。
     quantOnly = { p10: quantOnly.p10.slice(), p50: quantOnly.p50.slice(), p90: quantOnly.p90.slice() };
     const d = mixed.diagnostics;
     const empirical = quantilesFromSimByMonth_(d.quantOpsSimByMonth.map((arr, i) =>
-      arr.map((v, s) => Number(v || 0) + Number(d.bgSpotSimByMonth[i][s] || 0))));
+      arr.map((v, s) => Number(v || 0) + Number((d.objectiveBgSpotSimByMonth || d.bgSpotSimByMonth)[i][s] || 0))));
     spotBgModel.historyBasedByMonth.forEach((yes, i) => {
-      if (!yes) return;
+      if (!yes && !d.historyAnnualAnchor.applied) return;
       ['p10', 'p50', 'p90'].forEach(k => { quantOnly[k][i] = empirical[k][i]; objOnly[k][i] = empirical[k][i]; });
     });
+  }
+
+  // 年額の水準を変えた後の背景の期待額。既知案件は補正しない。
+  const historyScale = mixed.diagnostics.historyAnnualAnchor.scale;
+  if (mixed.diagnostics.historyAnnualAnchor.applied) {
+    for (let i = 0; i < 12; i++) {
+      spotBackgroundByMonth[i] *= historyScale;
+      spotFixedByMonth[i] = devFixedByMonth[i] + spotBackgroundByMonth[i];
+    }
   }
 
   const opinionsSummaryTop = summarizeOpinionsTop_(opinions);
@@ -763,9 +781,6 @@ function runForecastFYCore_(fy, clientName) {
 
   // 学習系補正（全体係数・暦月バイアス・Vertexアシスト）は forecast_open 月だけに掛ける。
   // closed 月は実績で上書き済みであり、実績値を補正係数で変形させない。
-  const biasCorrectionFactor = isFinite(calibration && calibration.bias_correction_factor) ? Number(calibration.bias_correction_factor) : 1.0;
-  const learnedMonthBias = parseResidualMonthBiasJson_(calibration && calibration.residual_month_bias_json);
-  const vertexForecastEnabled = readVertexForecastEnabled_();
   const vertexAssist = vertexForecastEnabled ? readLatestVertexAssist_(clientName, months) : { ready: false };
   const vertexRelR = getSourceReliability_(reliabilityMap, 'vertex_forecast', 'assist');
   const vertexW = vertexAssist.ready
@@ -821,6 +836,7 @@ function runForecastFYCore_(fy, clientName) {
     devFixedByMonth,
     knownSpotExpectedByMonth,
     spotBackgroundByMonth,
+    opsSpotBackgroundByMonth,
     spotFixedByMonth,
     opinionsSummaryTop,
     opinionsSummaryByMonth,
@@ -1390,7 +1406,7 @@ function writeOutputFY_(result) {
       row++;
 
       const refQuantP50 = ((result.opsQuantOnly || result.quantOnly || result.objOnly || {}).p50) || [];
-      const bg = result.spotBackgroundByMonth || [];
+      const bg = result.opsSpotBackgroundByMonth || result.spotBackgroundByMonth || [];
       const dlmRows = result.months.map((m, i) => {
         const opsBaseQuant = Math.max(0, Number(refQuantP50[i] || 0) - Number(bg[i] || 0));
         const d50 = (dlm.p50[i] === null || dlm.p50[i] === undefined) ? '' : Number(dlm.p50[i]);
@@ -4826,6 +4842,39 @@ function forecastByResidualQuantiles_(model, devFixedByMonth, q) {
   return { p10, p50, p90 };
 }
 
+/**
+ * 履歴だけの年額の水準。FY2024の複数社開発比較で直近12月を採用（係数は全社共通）。
+ * 過去24月が実際の暦月で並び、対象年度より前で締まっている場合だけ使う。
+ * 未締め月を0として年額へ入れない。DLM primary と明示的なSPOT無効化は尊重する。
+ */
+function buildHistoryAnnualAnchor_(sales, ctx, tuning, dlmPrimary) {
+  const meta = { version: 'HISTORY_ANNUAL_ANCHOR_V1', selectedId: 'RECENT_12_ANNUAL', weight: 1,
+    eligible: false, trainingMonths: 24, targetAnnual: null, trainingThroughYm: '', fallbackReason: '' };
+  if (dlmPrimary) { meta.fallbackReason = 'dlm_primary'; return meta; }
+  const headers = sales.headerMonths || [], base = sales.baseSeries48 || [], spot = sales.spotSeries48 || [];
+  if (headers.length < 24 || base.length !== headers.length || spot.length !== headers.length) {
+    meta.fallbackReason = 'insufficient_calendar_history'; return meta;
+  }
+  const start = headers.length - 24;
+  for (let i = start; i < headers.length; i++) {
+    const m = headers[i];
+    if (!m || typeof m.getTime !== 'function' || !isFinite(m.getTime()) || m > ctx.lastClosedMonthStart || m >= ctx.forecastStart ||
+        (i > start && fmtYM_(m) !== fmtYM_(addMonths_(headers[i - 1], 1))) ||
+        !isFinite(base[i]) || !isFinite(spot[i])) {
+      meta.fallbackReason = 'unclosed_or_invalid_history'; return meta;
+    }
+  }
+  if (fmtYM_(headers[headers.length - 1]) !== fmtYM_(addMonths_(ctx.forecastStart, -1))) {
+    meta.fallbackReason = 'history_does_not_end_before_fy'; return meta;
+  }
+  const spotEnabled = !(isFinite(tuning.spotBgCapRate) && Number(tuning.spotBgCapRate) === 0);
+  meta.targetAnnual = Math.max(0, base.slice(-12).reduce((s, v, i) => s + Number(v) + (spotEnabled ? Number(spot[spot.length - 12 + i]) : 0), 0));
+  meta.trainingThroughYm = fmtYM_(headers[headers.length - 1]);
+  meta.componentBasis = spotEnabled ? 'BASE+SPOT' : 'BASE';
+  meta.eligible = true;
+  return meta;
+}
+
 function forecastMonteCarloMixed_(model, opt) {
   const nSim = opt.nSim || 1000;
   const residualPct = opt.residualPct || [0];
@@ -4982,6 +5031,35 @@ function forecastMonteCarloMixed_(model, opt) {
     }
   }
 
+  // 追加情報なしの経路だけで検証した補正。既知案件や人・AIの入力がある回は従来の混合を使う。
+  // 同じ試行のBASE/背景SPOTを同比率で変え、発生ゼロと月・年の中央値の違いを保持する。
+  const historyAnnualAnchor = Object.assign({ eligible: false, applied: false, scale: 1, fallbackReason: 'not_requested' }, opt.historyAnnualAnchor || {});
+  const hasAdditionalInputs = factorsProduct.length || factorsClient.length || opinions.length || kAIRawByMonth.some(k => Math.abs(k - 1) > 1e-12) ||
+    knownSpotProjectsByMonth.some(projects => projects.length > 0);
+  if (historyAnnualAnchor.eligible && hasAdditionalInputs) historyAnnualAnchor.fallbackReason = 'additional_inputs_present';
+  if (historyAnnualAnchor.eligible && opt.historyCalibrationNeutral === false) historyAnnualAnchor.fallbackReason = 'post_calibration_present';
+  if (historyAnnualAnchor.eligible && !hasAdditionalInputs && opt.historyCalibrationNeutral !== false) {
+    const annual = aggregateAnnualSim_(quantOpsSimByMonth.map((a, i) => a.map((v, s) => v + bgSpotSimByMonth[i][s])));
+    const center = percentile_(annual, 0.50);
+    historyAnnualAnchor.baselineAnnual = center;
+    const scale = Number(historyAnnualAnchor.targetAnnual) / center;
+    // 円未満の数値残差を割り算の基準にすると、数百万倍のレンジを作ってしまう。
+    if (center >= 1 && isFinite(scale) && scale >= 0) {
+      historyAnnualAnchor.scale = scale;
+      historyAnnualAnchor.applied = true;
+      historyAnnualAnchor.fallbackReason = '';
+      for (let i = 0; i < 12; i++) {
+        opsBaseByMonth[i] *= scale;
+        [quantOpsSimByMonth, bgSpotSimByMonth, subjectiveContinuousDeltaSimByMonth, subjectiveExclAIDeltaSimByMonth, aiDeltaSimByMonth]
+          .forEach(matrix => { matrix[i] = matrix[i].map(v => v * scale); });
+        totalRawSimByMonth[i] = totalRawSimByMonth[i].map(v => v * scale);
+        if (lmdiEnabled) ['kProd', 'kClient', 'kOpinion', 'kAI'].forEach(k => {
+          lmdiContribSimByMonth[k][i] = lmdiContribSimByMonth[k][i].map(v => v * scale);
+        });
+      }
+    } else historyAnnualAnchor.fallbackReason = center > 0 && center < 1 ? 'sub_yen_baseline' : 'zero_or_invalid_baseline_median';
+  }
+
   // DONE(step-3c-3a): 死にコード整理 + version/build-stage同期（挙動不変）。
   // DONE(step-3c-3b): 主観寄与のLMDI厳密加法分解 + 絶対/相対レンジ（CONFIGトグル / 既定OFF）。
   // DONE(step-3c-3c): POOL_PRIORのクライアント横断自動更新（adminAggregatePoolPriorAcrossBooks で実装済み / 中央集約book→各bookへfan-out）。
@@ -5087,6 +5165,7 @@ function forecastMonteCarloMixed_(model, opt) {
     raw: rawQ,
     calibrated: calibratedQ,
     diagnostics: {
+      historyAnnualAnchor,
       opsBaseByMonth,
       kProdByMonth,
       kClientByMonth,
@@ -7350,7 +7429,7 @@ function writeForecastArtifacts_(result, client) {
       const deterministicAdj = (result.spotFixedByMonth && isFinite(result.spotFixedByMonth[i])) ? result.spotFixedByMonth[i] : (result.devFixedByMonth[i] || 0);
       // forecast_source: actual_closed = 実績の締まった月（予測は実績に置き換え済み）。検証（B-2）はこの行を使わない
       const source = result.sourceByMonth ? (result.sourceByMonth[i] || 'forecast_open') : 'forecast_open';
-      rows.push([sid,runDate,client,fmtYM_(m),sc.name,result.mixed.p50[i],0,0,deterministicAdj,sc.arr[i],result.mixed.p10[i],result.mixed.p90[i],JSON.stringify({opinion:result.opinionsSummaryByMonth[i]||'', forecast_source: source}),null,JSON.stringify(buildCalibrationAppliedPayload_(result))]);
+      rows.push([sid,runDate,client,fmtYM_(m),sc.name,result.mixed.p50[i],0,0,deterministicAdj,sc.arr[i],result.mixed.p10[i],result.mixed.p90[i],JSON.stringify({opinion:result.opinionsSummaryByMonth[i]||'', forecast_source: source, history_model: result.mixed.diagnostics && result.mixed.diagnostics.historyAnnualAnchor || null}),null,JSON.stringify(buildCalibrationAppliedPayload_(result))]);
     });
   });
   const r0 = snap.getLastRow()+1;

@@ -419,21 +419,22 @@ function appMethodsRunsOf_(planId) {
  *            vsLinear: { diff, lo, hi, n, makers, verdict }（線形回帰との外れ幅の差。LINEAR 自身は null）,
  *            vsPrev: 同じ形（1 つ前の段との差。段の 2 つ目から。手法は null）}]
  *   verdict は appBacktestSummary_ と同じ: oneMaker・wait・smaller・larger・unclear
+ * 外れ幅と偏りの分母は Σ|実績|。0 円月と負の実績も分子に含め、全月 0 円のメーカーは比を作らない。
  */
 function appMethodsSummary_(pts, keys, stages) {
-  const ok = (p, k) => typeof p.v[k] === 'number' && isFinite(p.v[k]) && p.actual > 0;
+  const ok = (p, k) => typeof p.v[k] === 'number' && isFinite(p.v[k]) && typeof p.actual === 'number' && isFinite(p.actual);
   const by = (k, f) => pts.filter(p => ok(p, k)).reduce((o, p) => { (o[p.maker] = o[p.maker] || []).push(f(p)); return o; }, {});
   const diff = (k, vs) => {
     const b = {};
-    pts.filter(p => ok(p, k) && ok(p, vs)).forEach(p => { (b[p.maker] = b[p.maker] || []).push([Math.abs(p.v[k] - p.actual) - Math.abs(p.v[vs] - p.actual), p.actual]); });
+    pts.filter(p => ok(p, k) && ok(p, vs)).forEach(p => { (b[p.maker] = b[p.maker] || []).push([Math.abs(p.v[k] - p.actual) - Math.abs(p.v[vs] - p.actual), Math.abs(p.actual)]); });
     const d = appBacktestClusterRatio_(b);
-    const verdict = d.n && d.makers < APP_BACKTEST_MIN_MAKERS ? 'oneMaker' : d.n < APP_BACKTEST_MIN_POINTS || d.lo === null ? 'wait'
+    const verdict = !d.makers ? 'wait' : d.n && d.makers < APP_BACKTEST_MIN_MAKERS ? 'oneMaker' : d.n < APP_BACKTEST_MIN_POINTS || d.lo === null ? 'wait'
       : d.hi < 0 ? 'smaller' : d.lo > 0 ? 'larger' : 'unclear';
     return { vs: vs, diff: d.mean, lo: d.lo, hi: d.hi, n: d.n, makers: d.makers, verdict: verdict };
   };
   return keys.map(k => {
-    const a = appBacktestClusterRatio_(by(k, p => [Math.abs(p.v[k] - p.actual), p.actual]));
-    const b = appBacktestClusterRatio_(by(k, p => [p.v[k] - p.actual, p.actual]));
+    const a = appBacktestClusterRatio_(by(k, p => [Math.abs(p.v[k] - p.actual), Math.abs(p.actual)]));
+    const b = appBacktestClusterRatio_(by(k, p => [p.v[k] - p.actual, Math.abs(p.actual)]));
     const si = (stages || []).indexOf(k);
     return { key: k, n: a.n, makers: a.makers, mape: a.mean, mapeLo: a.lo, mapeHi: a.hi, bias: b.mean, biasLo: b.lo, biasHi: b.hi,
       vsLinear: k === 'LINEAR' ? null : diff(k, 'LINEAR'), vsPrev: si > 0 ? diff(k, stages[si - 1]) : null };

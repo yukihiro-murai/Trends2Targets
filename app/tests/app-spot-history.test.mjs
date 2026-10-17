@@ -87,6 +87,10 @@ assert.ok(n1.annual[0] <= n1.annual[1] && n1.annual[1] <= n1.annual[2], '年間 
 assert.deepEqual(n1.monthly.map(m => m.ym), months);
 assert.ok(n1.monthly.every(m => [m.p10, m.p50, m.p90].every(v => Number.isFinite(Number(v))) && Number(m.p10) <= Number(m.p50) && Number(m.p50) <= Number(m.p90)), '12 か月の予測と帯の順序');
 const effects = env.table('LAYER_EFFECTS').filter(r => r.run_id === first.runId);
+const historyEvidence = env.table('ENG_FORECAST_SNAPSHOT').filter(r => r.plan_id === planId)
+  .map(r => JSON.parse(r.key_factors_json || '{}').history_model).filter(Boolean);
+assert.ok(historyEvidence.some(r => r.version === 'HISTORY_ANNUAL_ANCHOR_V1' && r.applied), '履歴の方式・水準・補正倍率を保存する');
+assert.ok(Math.abs(n1.annual[1] - historyEvidence[0].targetAnnual) < 1e-6, '年間P50は直近12月の水準に一致');
 assert.equal(effects.length, 12);
 assert.ok(effects.every(r => ['human_yen', 'spot_yen', 'ai_yen'].every(k => Number(r[k]) === 0)), '履歴 SPOT を主観・既知 SPOT・AI の寄与にしない');
 assert.ok(effects.some(r => Number(r.stat_p50) > 0), '履歴 SPOT は統計の土台に含む');

@@ -4630,7 +4630,7 @@ function anBacktestCard(d){
   var rows = ms.map(function(m){
     var nm = AN_BT[m.method], band = m.method === 'STAT_ONLY' || m.method === 'LIVE';
     return '<tr><td data-tip="' + esc(nm[0] + '：' + nm[1]) + '">' + esc(nm[0]) + '</td>'
-      + anBtCell(m.mape, m.mapeLo, m.mapeHi, anPct1, '外れ幅（' + (m.pctN || 0) + ' 点。実績が 0 円以下の点は除く）', m.makers)
+      + anBtCell(m.mape, m.mapeLo, m.mapeHi, anPct1, '外れ幅（' + (m.pctN || 0) + ' 点。誤差合計 ÷ 実績の絶対値合計。0 円月・負の実績も含む）', m.makers)
       + anBtCell(m.bias, m.biasLo, m.biasHi, pct1, '偏り（プラスは予測が実績より高め）', m.makers)
       + (band ? anBtCell(m.cover, m.coverLo, m.coverHi, anPct, '帯に入った割合（' + (m.coverN || 0) + ' 点。目標 80%）', m.makers) : '<td class="num" data-tip="単純な方法には幅がありません">-</td>')
       + anBtAhead(m)
@@ -4685,11 +4685,11 @@ function anMethodsCard(d){
   var rows = keys.map(function(k){
     var r = live[k] || {}, b = back[k] || {}, nm = AN_MT[k], si = AN_MT_STAGES.indexOf(k);
     return '<tr' + (k === 'LINEAR' || k === 'FINAL' ? ' class="total"' : '') + '><td data-tip="' + esc(nm[0] + '：' + nm[1]) + '">' + esc(nm[0]) + '</td>'
-      + anBtCell(r.mape, r.mapeLo, r.mapeHi, anPct1, '外れ幅（各月が始まる前の最後の予測。' + (r.n || 0) + ' 点）', r.makers)
+      + anBtCell(r.mape, r.mapeLo, r.mapeHi, anPct1, '外れ幅（各月が始まる前の最後の予測。' + (r.n || 0) + ' 点。誤差合計 ÷ 実績の絶対値合計。0 円月・負の実績も含む）', r.makers)
       + anBtCell(r.bias, r.biasLo, r.biasHi, pct1, '偏り（プラスは予測が実績より高め）', r.makers)
       + (k === 'LINEAR' ? '<td class="ctr">-</td>' : anMtVs(r.vsLinear, '線形回帰'))
       + (si > 0 ? anMtVs(r.vsPrev, AN_MT[AN_MT_STAGES[si - 1]][0]) : '<td class="ctr">-</td>')
-      + (si < 0 ? anBtCell(b.mape, b.mapeLo, b.mapeHi, anPct1, '外れ幅（年度の初め 4/1 に戻って 1〜12 か月先を予測し直したもの。' + (b.n || 0) + ' 点）', b.makers) : '<td class="num" data-tip="人の入力・AI は過去に戻って作り直せないので、本番の記録だけで比べます">-</td>')
+      + (si < 0 ? anBtCell(b.mape, b.mapeLo, b.mapeHi, anPct1, '外れ幅（年度の初め 4/1 に戻って 1〜12 か月先を予測し直したもの。' + (b.n || 0) + ' 点。誤差合計 ÷ 実績の絶対値合計。0 円月・負の実績も含む）', b.makers) : '<td class="num" data-tip="人の入力・AI は過去に戻って作り直せないので、本番の記録だけで比べます">-</td>')
       + '</tr>';
   }).join('');
   var tbl = anTable(['', 152, 152, 112, 112, 152], '<th>予測</th><th class="num" data-tip="小さいほど当たっている">外れ幅</th>'

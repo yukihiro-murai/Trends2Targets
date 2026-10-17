@@ -132,9 +132,36 @@ const parts = (y, model, q50) => JSON.parse(JSON.stringify(env.run(`${ENG}.compu
   assert.equal(sum(pts.slice(0, 20))[3].vsLinear.verdict, 'wait', '20 点（30 点より少ない）');
   assert.equal(sum(pts.filter((p) => p.maker === 'A').concat(pts.filter((p) => p.maker === 'A').map((p) => Object.assign({}, p, { ym: '2027/' + p.ym.slice(5) })).slice(0, 25)))[3].vsLinear.verdict,
     'oneMaker', '1 社だけ');
-  // 実績が 0 円以下の点と、値の無い段は数えない
+  // 実績が 0 円の月も数える。値の無い段は除外し、全 0 の分母は比を作らない。
   const s2 = sum([{ maker: 'A', ym: '2026/04', actual: 0, v: { LINEAR: 5, FINAL: 5 } }, { maker: 'A', ym: '2026/05', actual: 100, v: { LINEAR: 110, FINAL: null } }]);
-  assert.deepEqual([s2[0].n, s2[3].n], [1, 0]);
+  assert.deepEqual([s2[0].n, s2[3].n], [2, 1]);
+  assert.ok(near(s2[0].mape, 0.15));
+  assert.equal(s2[3].mape, null);
+  assert.deepEqual([s2[3].vsLinear.n, s2[3].vsLinear.makers, s2[3].vsLinear.diff, s2[3].vsLinear.verdict], [1, 0, null, 'wait']);
+  // 正・0・負の実績を同じ定義で集計。メーカーごとの比の平均と、同じ点での比較を保つ。
+  const mixed = [
+    { maker: 'A', ym: 'M1', actual: 100, v: { LINEAR: 110, STAT: 130, PLUS_HUMAN: 120, FINAL: 120 } },
+    { maker: 'A', ym: 'M2', actual: 0, v: { LINEAR: 50, STAT: 0, PLUS_HUMAN: 10, FINAL: 10 } },
+    { maker: 'A', ym: 'M3', actual: -100, v: { LINEAR: -120, STAT: -100, PLUS_HUMAN: -100, FINAL: -100 } },
+    { maker: 'B', ym: 'M1', actual: 100, v: { LINEAR: 120, STAT: 140, PLUS_HUMAN: 150, FINAL: 150 } },
+    { maker: 'B', ym: 'M2', actual: 0, v: { LINEAR: 10, STAT: 0, PLUS_HUMAN: 0, FINAL: 0 } },
+    { maker: 'B', ym: 'M3', actual: -100, v: { LINEAR: -100, STAT: -100, PLUS_HUMAN: -100, FINAL: -100 } }
+  ];
+  const sm = sum(mixed);
+  assert.deepEqual([sm[0].n, sm[0].makers], [6, 2]);
+  assert.ok(near(sm[0].mape, (80 / 200 + 30 / 200) / 2));
+  assert.ok(near(sm[0].bias, (40 / 200 + 30 / 200) / 2));
+  assert.ok(sm[0].mapeLo < sm[0].mape && sm[0].mapeHi > sm[0].mape, 'メーカー単位の幅');
+  assert.deepEqual([sm[1].vsLinear.n, sm[1].vsLinear.makers], [6, 2]);
+  assert.ok(near(sm[1].vsLinear.diff, (-50 / 200 + 10 / 200) / 2));
+  assert.ok(near(sm[2].vsPrev.diff, 0.025));
+  const singleStage = { maker: 'A', ym: 'ONLY_FINAL', actual: 100, v: { FINAL: 99999 } };
+  const unpaired = sum(mixed.concat(singleStage));
+  assert.equal(unpaired[3].n, 7);
+  assert.deepEqual(unpaired[3].vsLinear, sm[3].vsLinear, '片方だけの値を paired 比較に混ぜない');
+  assert.deepEqual(unpaired[3].vsPrev, sm[3].vsPrev);
+  const invalid = sum([{ maker: 'A', ym: 'INVALID', actual: null, v: { LINEAR: 10, FINAL: 10 } }]);
+  assert.ok(invalid.every(r => r.n === 0 && r.mape === null), '欠測を実績 0 として扱わない');
 }
 
 // ---- 準備: 本物の A-1・A-2・A-3 で計画を作り、入力を置く（app-v10-layer-effects.test.mjs と同じ作り。年度は前の年度） ----
@@ -283,7 +310,7 @@ let runA;
     const a = 1000000, s = i % 2 ? 1 : -1;
     [['LINEAR', 0.2], ['RECENT', 0.1], ['ROBUST', 0.02], ['SIM', 0.15]].forEach(([m, e]) => rows.push({ plan_id: planId, point_id: 'BTP-T-' + m + '-' + ym, bt_id: 'BT-T1', cutoff_ym: cut,
       target_ym: ym, horizon: i + 1, method: m, p10: null, p50: a * (1 + s * e), p90: null, actual: a, real_months: 48, counted: true, engine_sha256: '', seed: '',
-      calc_version: 'BT-3', computed_at: '2026-10-15T10:00:00+0900', computed_by: OWNER }));
+      calc_version: env.run('APP_BACKTEST_CALC_VERSION'), computed_at: '2026-10-15T10:00:00+0900', computed_by: OWNER }));
   });
   env.run(`appWithLock_(() => appInsertRows_('BACKTEST', __r))`, { __r: rows });
   const asOf = new Date(FY + 1, 6, 1, 10).getTime();   // 翌年度の 7 月（年度の月は全部締まっている）

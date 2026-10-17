@@ -33,7 +33,7 @@
  * 物差しの版（数え方を変えたら上げて、新しい行を足す）。BT-2（2026-10-13）: 区切りの時点で締まった月だけを使う・本番と同じ時点の単純な方法
  * （LAST_YEAR_PACE）を足す・本番の horizon を本当の何か月先にする。前の版の回はまとめに入れない（行は消さない）
  */
-const APP_BACKTEST_CALC_VERSION = 'BT-3';   // BT-3（2026-10-15 段 2）: 統計だけを三角測量の土台に（4/1 には証拠が無いので初めの重み）・SIM を足した
+const APP_BACKTEST_CALC_VERSION = 'BT-4';   // BT-4（2026-10-17）: 履歴による年間水準の統計予測・0 円月と負の実績も WAPE の分子に含め、分母は実績の絶対値
 /** 組み立てる計算用のシート（統計の部分が読むものだけ） */
 const APP_BACKTEST_SHEETS = ['CONFIG', 'SALES_INPUT', 'SALES_MONTHLY'];
 /** 方法（記録の順。画面は比べる組で並べ直す）。単純な方法は p50 だけ */
@@ -194,6 +194,7 @@ function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync, light) {
     nSim: eng.N_SIM, months: months, sourceByMonth: sourceByMonth,
     aiWeight: tuningApplied.aiWeight, aiMaxAbsEffect: tuningApplied.aiMaxAbsEffect, tuning: tuningApplied,
     spotBgModel: spotBgModel, knownSpotProjectsByMonth: Array.from({ length: 12 }, () => []),
+    historyAnnualAnchor: eng.buildHistoryAnnualAnchor_(salesData, ctx, tuning, dlmPrimary),
     knownSpotBgSuppressRate: isFinite(tuning.knownSpotBgSuppressRate) ? tuning.knownSpotBgSuppressRate : eng.KNOWN_SPOT_BG_SUPPRESS_RATE,
     dlmBaseLogByMonth: dlmPrimary ? dlm.logByMonth : null, reliabilityApply: false, reliabilityMap: new Map(), lmdiEnabled: false
   });
@@ -429,7 +430,8 @@ function appBacktestClusterMean_(byMaker, clamp01) {
 
 /**
  * メーカーごとに合計の比（Σ分子 ÷ Σ分母）を出してから、appBacktestClusterMean_ と同じくメーカーの数で平均と 95% の幅を出す。
- * byMaker = { メーカー: [[分子, 分母]] }。外れ幅・偏りを、実績が 0 に近い月 1 つで壊れない合計の比（WAPE）で測る（提案 1。精度の画面と同じ測り方。2026-10-13）。
+ * byMaker = { メーカー: [[分子, 分母]] }。外れ幅・偏りを、実績が 0 に近い月 1 つで壊れない合計の比（WAPE）で測る。
+ * 分母は実績の絶対値。0 円の月の誤差も分子に含める。メーカーの分母が全月 0 なら比は作らず（null）、点の数には残す。
  * 返り値は appBacktestClusterMean_ と同じ形（n は点の数）
  */
 function appBacktestClusterRatio_(byMaker) {
@@ -446,8 +448,8 @@ function appBacktestClusterRatio_(byMaker) {
 
 /**
  * 数えた点（counted）を方法ごとにまとめる。clientOf = { 計画の ID: メーカーの ID }（メーカーの数を数え、95% の幅をメーカーごとに出す）。返り値:
- *   methods: [{ method, n（点）, makers, mape・mapeLo・mapeHi（外れ幅 = Σ|予測 − 実績| ÷ Σ実績（合計の比）。メーカーごとの合計の比の平均と 95% の幅。実績が 0 円以下の点は除く）,
- *              bias・biasLo・biasHi（偏り = Σ(予測 − 実績) ÷ Σ実績）, pctN（外れ幅を数えた点）, cover・coverLo・coverHi・coverN（P10〜P90 に入った割合。
+ *   methods: [{ method, n（点）, makers, mape・mapeLo・mapeHi（外れ幅 = Σ|予測 − 実績| ÷ Σ|実績|（合計の比）。メーカーごとの合計の比の平均と 95% の幅。0 円月・負の実績も含む）,
+ *              bias・biasLo・biasHi（偏り = Σ(予測 − 実績) ÷ Σ|実績|）, pctN（外れ幅の分子を数えた点。分母が全月 0 なら比は null）, cover・coverLo・coverHi・coverN（P10〜P90 に入った割合。
  *              統計だけ・本番だけ。メーカーごとの割合の平均と 95% の幅）, horizonMin・horizonMax・horizon（何か月先か。最小・最大・平均）}]
  *              （95% の幅は appBacktestClusterMean_。メーカーが 2 より少なければ null）
  *   compare: [{ method（STAT_ONLY・LIVE）, vs（STAT_ONLY は外れ幅のいちばん小さい 4/1 の単純な方法、LIVE は同じ時点の単純な方法 LAST_YEAR_PACE）,
@@ -463,15 +465,14 @@ function appBacktestSummary_(rows, clientOf) {
   const ape = {};
   const methods = APP_BACKTEST_METHODS.map(m => {
     const xs = pts.filter(r => r.method === m);
-    const pos = xs.filter(r => r.actual > 0);
-    const a = appBacktestClusterRatio_(group(pos, r => [Math.abs(r.p50 - r.actual), r.actual]));
-    const b = appBacktestClusterRatio_(group(pos, r => [r.p50 - r.actual, r.actual]));
+    const a = appBacktestClusterRatio_(group(xs, r => [Math.abs(r.p50 - r.actual), Math.abs(r.actual)]));
+    const b = appBacktestClusterRatio_(group(xs, r => [r.p50 - r.actual, Math.abs(r.actual)]));
     ape[m] = {};
-    pos.forEach(r => { ape[m][keyOf(r)] = { e: Math.abs(r.p50 - r.actual), a: r.actual, maker: of(r) }; });
+    xs.forEach(r => { ape[m][keyOf(r)] = { e: Math.abs(r.p50 - r.actual), a: Math.abs(r.actual), maker: of(r) }; });
     const band = xs.filter(r => typeof r.p10 === 'number' && typeof r.p90 === 'number' && isFinite(r.p10) && isFinite(r.p90));
     const w = appBacktestClusterMean_(group(band, r => (r.actual >= r.p10 && r.actual <= r.p90 ? 1 : 0)), true);
     const hs = xs.map(r => Number(r.horizon)).filter(h => isFinite(h) && h > 0);
-    return { method: m, n: xs.length, makers: Object.keys(group(xs, r => 1)).length, pctN: pos.length,
+    return { method: m, n: xs.length, makers: Object.keys(group(xs, r => 1)).length, pctN: xs.length,
       mape: a.mean, mapeLo: a.lo, mapeHi: a.hi, bias: b.mean, biasLo: b.lo, biasHi: b.hi,
       cover: band.length ? w.mean : null, coverLo: w.lo, coverHi: w.hi, coverN: band.length,
       horizonMin: hs.length ? Math.min.apply(null, hs) : null, horizonMax: hs.length ? Math.max.apply(null, hs) : null,
@@ -482,11 +483,11 @@ function appBacktestSummary_(rows, clientOf) {
     const m = c[0], vs = c[1];
     if (!vs) return { method: m, vs: '', n: 0, makers: 0, diff: null, lo: null, hi: null, verdict: 'wait' };
     const keys = Object.keys(ape[m]).filter(k => ape[vs][k]);
-    // 外れ幅の差: メーカーごとに、両方に外れ幅のある同じ点で、合計の比どうしの差（Σ|方法の外れ| − Σ|比べる方法の外れ|）÷ Σ実績
+    // 外れ幅の差: メーカーごとに、両方に予測のある同じ点で、合計の比どうしの差（Σ|方法の外れ| − Σ|比べる方法の外れ|）÷ Σ|実績|
     const by = {};
     keys.forEach(k => { (by[ape[m][k].maker] = by[ape[m][k].maker] || []).push([ape[m][k].e - ape[vs][k].e, ape[m][k].a]); });
     const d = appBacktestClusterRatio_(by);
-    const verdict = d.n && d.makers < APP_BACKTEST_MIN_MAKERS ? 'oneMaker' : d.n < APP_BACKTEST_MIN_POINTS || d.lo === null ? 'wait'
+    const verdict = !d.makers ? 'wait' : d.n && d.makers < APP_BACKTEST_MIN_MAKERS ? 'oneMaker' : d.n < APP_BACKTEST_MIN_POINTS || d.lo === null ? 'wait'
       : d.hi < 0 ? 'smaller' : d.lo > 0 ? 'larger' : 'unclear';
     return { method: m, vs: vs, n: d.n, makers: d.makers, diff: d.mean, lo: d.lo, hi: d.hi, verdict: verdict };
   });

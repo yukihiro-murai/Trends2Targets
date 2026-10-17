@@ -70,7 +70,7 @@ function appForecastSeed_(plan, forecastInputHash, engine) {
  * 種に APP_VERSION が入るので、版を上げた後の最初の予測は、同じ入力でも数字が少し動く（版 10 の手元の試しで年間の中心 −0.56%）
  */
 const APP_FORECAST_SEED_RULE = 'INPUT_V1';
-const APP_FORECAST_FIXES = [];
+const APP_FORECAST_FIXES = ['HISTORY_ANNUAL_ANCHOR_V1'];
 
 /**
  * 組み立て（FORECAST.RUN）: データ本体から計算用ブックを組み立てる。1 回の上限に収まらなければ、同じ処理を続けて動かす。

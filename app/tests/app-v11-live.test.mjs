@@ -176,6 +176,8 @@ let planId;
 const runForecast = () => { const st = env.runJob('FORECAST.RUN', { planId, confirms: ['extreme'] }); assert.equal(st.status, 'DONE', st.error); return st.result; };
 const runsOf = () => env.table('FORECAST_RUNS').filter((r) => r.plan_id === planId);
 const fixesOf = (runId) => JSON.parse(runsOf().find((r) => r.run_id === runId).fixes_json || '[]');
+const commonFixes = JSON.parse(env.run('JSON.stringify(APP_FORECAST_FIXES)'));
+const alignedFixes = commonFixes.concat(['annual_aligned']);
 const port = () => env.call('apiPortfolio()').plans.find((p) => p.planId === planId);
 const isLive = () => env.run('appPlanAlignedLive_(__p)', { __p: planId });
 const monthlySum = (runId) => env.table('FORECAST_MONTHLY').filter((m) => m.run_id === runId).reduce((s, m) => s + Number(m.p50), 0);
@@ -194,7 +196,7 @@ let r1, r2;
   // ---- 2a. 自動の学びの補正のまま予測: 本番でない（今までどおり「（試し）」） ----
   r1 = runForecast();
   assert.equal(isLive(), false, '自動の学びの補正のまま');
-  assert.deepEqual(fixesOf(r1.runId), [], '本番でない回の fixes_json は空');
+  assert.deepEqual(fixesOf(r1.runId), commonFixes, '年間そろえ未適用でも共通の履歴補正の版を残す');
   const p = port();
   assert.equal(p.alignedLive, false);
   assert.deepEqual([p.p10, p.p50, p.p90], [r1.headline.annual.p10, r1.headline.annual.p50, r1.headline.annual.p90], '年度は旧来の計算の年度合計のまま');
@@ -222,8 +224,8 @@ let r1, r2;
   assert.equal(isLive(), true, 'setCalibration の後に予測し直した');
   assert.equal(env.run('appPlanAlignedLive_(appPlanOf_(__p))', { __p: planId }), true, 'PLANS の行でも');
   assert.equal(env.run('appPlanAlignedLive_("")'), false);
-  assert.deepEqual(fixesOf(r2.runId), ['annual_aligned'], '本番で保存した回');
-  assert.deepEqual(fixesOf(r1.runId), [], '前の回は書き換えない');
+  assert.deepEqual(fixesOf(r2.runId), alignedFixes, '本番で保存した回');
+  assert.deepEqual(fixesOf(r1.runId), commonFixes, '前の回は書き換えない');
   assert.equal(runsOf().length, 2, '行は足すだけ');
 }
 
@@ -301,14 +303,14 @@ let r1, r2;
   assert.deepEqual([p.p50, p.annualBand], [p.legacyAnnual.p50, ''], '本番でない間は旧来の年度合計に戻る');
   const r3 = runForecast();
   assert.equal(isLive(), true, '予測し直すと本番');
-  assert.deepEqual(fixesOf(r3.runId), ['annual_aligned']);
+  assert.deepEqual(fixesOf(r3.runId), alignedFixes);
   near(port().p50, monthlySum(r3.runId), 1e-6);
   setCal(env, { planId, set: { auto_update_enabled: 1 }, reason: '自動の学びを戻す' });
   assert.equal(isLive(), false, '自動の学びが動いている間は本番でない（補正の値は同じでも）');
   const r4 = runForecast();
   assert.equal(isLive(), false);
-  assert.deepEqual(fixesOf(r4.runId), [], '本番でない間に保存した回は空');
-  assert.deepEqual(runsOf().map((r) => JSON.parse(r.fixes_json || '[]')), [[], ['annual_aligned'], ['annual_aligned'], []], '行ごとの印は保存したときのまま');
+  assert.deepEqual(fixesOf(r4.runId), commonFixes, '本番でない間に保存した回は空');
+  assert.deepEqual(runsOf().map((r) => JSON.parse(r.fixes_json || '[]')), [commonFixes, alignedFixes, alignedFixes, commonFixes], '行ごとの印は保存したときのまま');
   assert.equal(forecastTab().latest.shadow.live, false);
 }
 

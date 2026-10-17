@@ -46,7 +46,7 @@ export const ENGINE_EXPORTS = [
   'N_SIM', 'KNOWN_SPOT_OFFSET_RATE', 'KNOWN_SPOT_BG_SUPPRESS_RATE', 'normalizeClientName_', 'readSales48Months_', 'sumAcrossProducts_',
   'readModelTuningFromConfig_', 'createDefaultCalibrationState_', 'applyCalibrationToTuning_', 'getForecastContext_', 'adjustForUnclosedMonths_',
   'fitOpsModelTrendSeason_', 'buildResidualPool_', 'percentile_', 'readDlmEngineMode_', 'computeDlmFyForecast_', 'readDlmPrimarySpotCapBasis_',
-  'forecastByResidualQuantiles_', 'fitSpotRecurringModel_', 'forecastMonteCarloMixed_', 'forecastSeasonalWeighted48_', 'readForecastClosedMonthMode_',
+  'forecastByResidualQuantiles_', 'fitSpotRecurringModel_', 'forecastMonteCarloMixed_', 'forecastSeasonalWeighted48_', 'readForecastClosedMonthMode_', 'buildHistoryAnnualAnchor_',
   // 本番の A-9 の中身そのもの（物差しの「統計だけ」が、人の入力の無い本番と差 0 になることをテストで確かめる。app/tests/app-v10-backtest.test.mjs）
   'runForecastFYCore_',
   // 三角測量（段 2。物差しの統計だけ・手法の記録が、本番の A-9 と同じ土台を作る）

@@ -167,7 +167,7 @@ let run1;
   assert.ok(JSON.parse(oct.human_by_type_json).factor_product > 0, '10 月: 製品の入力で押し上げ');
   open.forEach((r) => assert.ok(Math.abs(r.other_yen) < 0.05 * Math.abs(r.final_p50), r.ym + ': 合わない分は小さい（' + r.other_yen + '）'));
   // 予測の版の列（新しい回）
-  assert.deepEqual([run1.app_version, run1.seed_rule, run1.fixes_json], [env.run('APP_VERSION'), 'INPUT_V1', '[]']);
+  assert.deepEqual([run1.app_version, run1.seed_rule, run1.fixes_json], [env.run('APP_VERSION'), 'INPUT_V1', env.run('JSON.stringify(APP_FORECAST_FIXES)')]);
   assert.equal(env.call('appLogTruncatedCells_("LAYER_EFFECTS")'), 0);
   assert.ok(!env.errors().some((e) => /^LOG\./.test(e.where)), 'エラーのログに記録の失敗が無い: ' + JSON.stringify(env.errors()));
 }

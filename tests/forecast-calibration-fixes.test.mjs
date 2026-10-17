@@ -67,5 +67,5 @@ assert.deepEqual([...new Set(out.map((r) => r[0]))].sort(), ['A1', 'B1']);
 assert.match(src, /const key = \[normalizeClientName_\(r\[2\]\), ym\]\.join\('\|'\);   \/\/ クライアントごとに引く/);
 assert.match(src, /p10Map\.has\(key\) && p90Map\.has\(key\)/);
 // 新しい予測の記録に forecast_source を残す
-assert.match(src, /JSON\.stringify\(\{opinion:result\.opinionsSummaryByMonth\[i\]\|\|'', forecast_source: source\}\)/);
+assert.match(src, /JSON\.stringify\(\{opinion:result\.opinionsSummaryByMonth\[i\]\|\|'', forecast_source: source, history_model:/);
 console.log('forecast-calibration-fixes: all tests passed');
