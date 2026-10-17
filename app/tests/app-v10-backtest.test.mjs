@@ -147,7 +147,7 @@ let first;
   assert.deepEqual([r.rows, r.written, r.skipped, r.cutoffYm, r.realMonths], [132, 132, false, CUT, 48]);
   assert.equal(first.rows.length, 132, '12 か月 × 11 方法（後ろの 5 つは素の回帰との比べの手法。Methods.js）');
   assert.deepEqual([...new Set(first.rows.map((x) => x.method))].sort(), ['LAST_YEAR', 'LAST_YEAR_PACE', 'LINEAR', 'LIVE', 'RECENT', 'ROBUST', 'SEASONAL', 'SIM', 'STAT_ONLY', 'TRI', 'TWO_YEAR']);
-  assert.ok(first.rows.every((x) => x.plan_id === planA && x.cutoff_ym === CUT && x.calc_version === 'BT-4' && x.computed_by === OWNER && /^[a-f0-9]{64}$/.test(x.engine_sha256)));
+  assert.ok(first.rows.every((x) => x.plan_id === planA && x.cutoff_ym === CUT && x.calc_version === 'BT-5' && x.computed_by === OWNER && /^[a-f0-9]{64}$/.test(x.engine_sha256)));
   assert.ok(first.rows.every((x) => /^BTP-[0-9A-F]{24}$/.test(x.point_id)), '点の印は回・方法・月から決まる');
   assert.deepEqual(of(first.rows, 'STAT_ONLY').map((x) => x.target_ym), fyYms(FY));
   assert.deepEqual(of(first.rows, 'STAT_ONLY').map((x) => x.horizon), Array.from({ length: 12 }, (_, i) => i + 1));
@@ -479,15 +479,15 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   env.as(OWNER);
   // 物差しを動かしていない年度は出さない
   assert.equal(env.call('apiCrossMaker(__in)', { __in: { fy: FY - 1 } }).backtest, null);
-  // 前の数え方（BT-3: 0 円月・負の実績を WAPE から除外）の回は、新しくても数えない（行は消さない）
+  // 前の数え方（BT-4: 背景 SPOT の時期分布を変更する前）の回は、新しくても数えない（行は消さない）
   {
     const src = bt().filter((r) => r.plan_id === planA && r.bt_id === lastA.bt_id);
-    const old = src.map((r, i) => Object.assign({}, r, { bt_id: 'BT-OLD', point_id: 'BTP-' + String(i).padStart(24, '0'), calc_version: 'BT-3', computed_at: '2099-01-01T00:00:00+0900',
+    const old = src.map((r, i) => Object.assign({}, r, { bt_id: 'BT-OLD', point_id: 'BTP-' + String(i).padStart(24, '0'), calc_version: 'BT-4', computed_at: '2099-01-01T00:00:00+0900',
       p50: r.p50 === null ? null : r.p50 * 2 }));
     env.run('appWithLock_(() => appInsertRows_("BACKTEST", __r))', { __r: old.map((r) => { const o = Object.assign({}, r); delete o._row; return o; }) });
     env.run('APP_STORE_CACHE_ = {}');
     const y = env.call('apiCrossMaker(__in)', { __in: { fy: FY } }).backtest;
-    assert.deepEqual([y.plans, y.points, y.oldCalcRuns, y.methods[0].mape], [2, b.points, 1, b.methods[0].mape], '前の数え方の回は入れず、数だけ出す');
+    assert.deepEqual([y.plans, y.points, y.oldCalcRuns, y.methods[0].mape], [2, b.points, 1, b.methods[0].mape], '新しい BT-4 の行でも BT-5 の月別予測へ混ぜず、旧版の回数だけ出す');
   }
 
   // 画面（UI.html の script を vm で読む）

@@ -7,7 +7,7 @@
 /** アプリの名前（社内の Web アプリと同じく英語 + 日本語。ブラウザのタブは英語だけ。2026-10-02 村井さん決定） */
 const APP_NAME = 'Trends2Targets';
 const APP_NAME_JA = '売上予測と予算策定';
-const APP_VERSION = '0.44.0';
+const APP_VERSION = '0.45.0';
 const APP_TZ = 'Asia/Tokyo';
 
 /** 新しく作るファイルの名前（名前の決まりの正本は gas-workspace の .ai/memory/projects/application-catalog.md: アプリ名_役割。2026-10-07） */

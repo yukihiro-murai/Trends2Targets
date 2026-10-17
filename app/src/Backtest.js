@@ -33,7 +33,7 @@
  * 物差しの版（数え方を変えたら上げて、新しい行を足す）。BT-2（2026-10-13）: 区切りの時点で締まった月だけを使う・本番と同じ時点の単純な方法
  * （LAST_YEAR_PACE）を足す・本番の horizon を本当の何か月先にする。前の版の回はまとめに入れない（行は消さない）
  */
-const APP_BACKTEST_CALC_VERSION = 'BT-4';   // BT-4（2026-10-17）: 履歴による年間水準の統計予測・0 円月と負の実績も WAPE の分子に含め、分母は実績の絶対値
+const APP_BACKTEST_CALC_VERSION = 'BT-5';   // BT-5（2026-10-17）: 本番と同じ背景 SPOT の時期分布。BT-4 の年間水準・0 円月と負の実績を含む WAPE は維持
 /** 組み立てる計算用のシート（統計の部分が読むものだけ） */
 const APP_BACKTEST_SHEETS = ['CONFIG', 'SALES_INPUT', 'SALES_MONTHLY'];
 /** 方法（記録の順。画面は比べる組で並べ直す）。単純な方法は p50 だけ */
@@ -195,6 +195,7 @@ function appBacktestStatCore_(eng, book, fy, asOfMs, closed, skipSync, light) {
     aiWeight: tuningApplied.aiWeight, aiMaxAbsEffect: tuningApplied.aiMaxAbsEffect, tuning: tuningApplied,
     spotBgModel: spotBgModel, knownSpotProjectsByMonth: Array.from({ length: 12 }, () => []),
     historyAnnualAnchor: eng.buildHistoryAnnualAnchor_(salesData, ctx, tuning, dlmPrimary),
+    historySpotTiming: eng.buildHistorySpotTiming_(client),
     knownSpotBgSuppressRate: isFinite(tuning.knownSpotBgSuppressRate) ? tuning.knownSpotBgSuppressRate : eng.KNOWN_SPOT_BG_SUPPRESS_RATE,
     dlmBaseLogByMonth: dlmPrimary ? dlm.logByMonth : null, reliabilityApply: false, reliabilityMap: new Map(), lmdiEnabled: false
   });

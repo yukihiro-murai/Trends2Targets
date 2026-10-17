@@ -90,6 +90,7 @@ const effects = env.table('LAYER_EFFECTS').filter(r => r.run_id === first.runId)
 const historyEvidence = env.table('ENG_FORECAST_SNAPSHOT').filter(r => r.plan_id === planId)
   .map(r => JSON.parse(r.key_factors_json || '{}').history_model).filter(Boolean);
 assert.ok(historyEvidence.some(r => r.version === 'HISTORY_ANNUAL_ANCHOR_V1' && r.applied), '履歴の方式・水準・補正倍率を保存する');
+assert.ok(historyEvidence.some(r => r.spotTiming && r.spotTiming.applied && r.spotTiming.mix === .5), '月位置の混合条件もsnapshotへ保存する');
 assert.ok(Math.abs(n1.annual[1] - historyEvidence[0].targetAnnual) < 1e-6, '年間P50は直近12月の水準に一致');
 assert.equal(effects.length, 12);
 assert.ok(effects.every(r => ['human_yen', 'spot_yen', 'ai_yen'].every(k => Number(r[k]) === 0)), '履歴 SPOT を主観・既知 SPOT・AI の寄与にしない');
@@ -104,6 +105,12 @@ assert.deepEqual(n2.annual, n1.annual);
 assert.deepEqual(n2.objective, n1.objective);
 for (const key of ['p10', 'p50', 'p90', 'obj_p10', 'obj_p50', 'obj_p90']) assert.deepEqual(bands(n2.monthly, key), bands(n1.monthly, key), key + ' は再実行で一致');
 assert.deepEqual(snapshot(), before);
+// anchor/timing適用時でもSeasonal参照線は独立方式で、物差しと同じ定義を保つ。
+const savedSeasonal = env.call(`(() => { const rows = {}; appReadPlanTable_('ENG_ROWS', __p)
+  .filter(r => r.sheet === 'OUTPUT' && Number(r.col_from) === 1)
+  .forEach(r => { rows[Number(r.row_no)] = JSON.parse(r.cells_json); });
+  return Array.from({length:12},(_,i)=>{ const x=rows[29+i][5]; return appCellDecode_(x.charAt(0),x.slice(1)); });
+})()`, {__p:planId});
 
 /** 本番 A-9 と STAT_ONLY を同じ種・時点で動かす。閉じていない月のマスクは本番側にも同じ条件で渡す。 */
 function cores(seed, asOfMs, closed = null) {
@@ -127,6 +134,7 @@ function cores(seed, asOfMs, closed = null) {
   })()`, { __p: planId, __client: CLIENT, __s: seed, __t: asOfMs, __k: closed });
 }
 const liveNow = cores(firstRun.seed, AS_OF);
+assert.deepEqual(liveNow.stat.seasonal,savedSeasonal,'補正適用時も保存OUTPUTとBacktest.SEASONALの12月が一致');
 assert.ok(liveNow.live.base.every(v => Number(v) === 0), 'BASE の正の推計に依存しない');
 assert.ok(liveNow.live.background.some(v => v > 0));
 assert.ok(liveNow.live.known.every(v => v === 0));
