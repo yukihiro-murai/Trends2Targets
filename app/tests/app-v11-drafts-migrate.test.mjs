@@ -214,7 +214,7 @@ function checkMigrated(env, before, moved) {
   env.call('apiListPlans()');
   checkMigrated(env, before, ['PLANS', 'FORECAST_RUNS', 'PLAN_VERSIONS']);
   assert.deepEqual([...env.data().getSheetByName('PLANS').rows[0]], V9.PLANS.concat(['purpose']));
-  assert.deepEqual([...env.data().getSheetByName('FORECAST_RUNS').rows[0]], V9.FORECAST_RUNS.concat(['app_version', 'seed_rule', 'fixes_json']));
+  assert.deepEqual([...env.data().getSheetByName('FORECAST_RUNS').rows[0]], V9.FORECAST_RUNS.concat(['app_version', 'seed_rule', 'fixes_json', 'planning_json']));
   for (const n of V10_TABLES) assert.ok(env.data().getSheetByName(n), '版 10 の表も作った: ' + n);
   const ma = migrateAudits(env);
   assert.deepEqual(JSON.parse(ma[ma.length - 1].after_json).tables.map((t) => t.table), ['PLANS', 'FORECAST_RUNS', 'PLAN_VERSIONS']);

@@ -48,7 +48,7 @@ function planBook(client, fy) {
   // 足した列: 定義の終わりと同じ並び。前の版の列はその前まで
   const added = env.call('APP_ADDED_COLUMNS');
   assert.deepEqual(Object.keys(added).filter((k) => k !== 'PLAN_VERSIONS').sort(), ['FORECAST_RUNS', 'PLANS']);   // PLAN_VERSIONS は版 11（app-v11-drafts.test.mjs）
-  assert.deepEqual(T.FORECAST_RUNS.columns.slice(-3), ['app_version', 'seed_rule', 'fixes_json']);
+  assert.deepEqual(T.FORECAST_RUNS.columns.slice(-4), ['app_version', 'seed_rule', 'fixes_json', 'planning_json']);
   assert.deepEqual(T.PLANS.columns.slice(-1), ['purpose']);
   for (const [name, list] of Object.entries(added)) {
     let end = T[name].columns.length;

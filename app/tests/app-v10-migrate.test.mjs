@@ -18,7 +18,7 @@ const V9 = {
     'annual_p10', 'annual_p50', 'annual_p90', 'objective_p10', 'objective_p50', 'objective_p90',
     'changed_sheets_json', 'confirms_json', 'started_at', 'finished_at', 'actor_email'],
 };
-const ADDED = { PLANS: ['purpose'], FORECAST_RUNS: ['app_version', 'seed_rule', 'fixes_json'] };
+const ADDED = { PLANS: ['purpose'], FORECAST_RUNS: ['app_version', 'seed_rule', 'fixes_json', 'planning_json'] };
 const D = (y, m, d = 1) => new Date(y, m - 1, d);
 
 /** 年度 fy・メーカー名 client の計画のブック（OUTPUT に公式版に要る数字） */

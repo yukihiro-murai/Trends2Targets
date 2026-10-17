@@ -14,7 +14,9 @@
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.5-dev';
+const VERSION = '2.7.6-dev';
+// FY2024の比較で選ぶ月次点予測。P50/予測帯とは別の年額配分として保存する。
+const HISTORY_MONTHLY_POINT_METHOD = 'BASE_MC_SPOT_EWMA24';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -823,6 +825,7 @@ function runForecastFYCore_(fy, clientName) {
     productWeightWarning = `PRODUCT に有効行がありますが、kProd が全月1.0です。製品名キー/構成比を確認してください（${productsText}）。`;
   }
 
+  const monthlyPlanning = buildHistoryMonthlyPlanning_(mixed, months, salesData, { closedMonthMode, sourceByMonth });
   return {
     runId: Utilities.getUuid(),
     runAt: runDate,
@@ -833,6 +836,7 @@ function runForecastFYCore_(fy, clientName) {
     quantOnly,
     opsQuantOnly,
     mixed,
+    monthlyPlanning,
     mixedDiagnostics: mixed.diagnostics || null,
     regTotal,
     devFixedByMonth,
@@ -4912,6 +4916,67 @@ function redistributeHistorySpotTiming_(simByMonth, policy) {
   return { simByMonth: out, phaseCounts: phaseCounts, shiftedPaths: n - phaseCounts[0], sampleCount: n };
 }
 
+/** 円単位の最大剰余法。月を丸めても年度合計を変えない。抽選は行わない。 */
+function allocateAnnualYen_(annual, weights) {
+  if (!Number.isSafeInteger(annual) || annual < 0 || !Array.isArray(weights) || weights.length !== 12 ||
+      weights.some(v => typeof v !== 'number' || !isFinite(v) || v < 0)) throw new Error('月次予測の年額または配分が不正です。');
+  const total = weights.reduce((s, v) => s + v, 0);
+  if (!isFinite(total)) throw new Error('月次予測の配分合計が不正です。');
+  if (total === 0 && annual > 0) throw new Error('正の年額に対する月次予測の根拠がありません。');
+  const shares = total > 0 ? weights.map(v => v / total) : new Array(12).fill(1 / 12);
+  const raw = shares.map(v => annual * v), points = raw.map(Math.floor);
+  const remain = annual - points.reduce((s, v) => s + v, 0);
+  if (!Number.isSafeInteger(remain) || remain < 0 || remain > 12) throw new Error('月次予測の円丸めに失敗しました。');
+  const order = raw.map((v, i) => ({ i, fraction: v - points[i] })).sort((a, b) => b.fraction - a.fraction || a.i - b.i);
+  for (let i = 0; i < remain; i++) points[order[i].i]++;
+  return { points, shares };
+}
+
+/**
+ * 年度中心をBASE/SPOTへ分けて配分する点予測。月中央値や確率帯は変更しない。
+ * SPOTの履歴のない月を均等配分で埋めず、BASEは既存MCの平均形状を使う。
+ */
+function buildHistoryMonthlyPlanning_(mixed, months, history, opt) {
+  const meta = { version: 'HISTORY_MONTHLY_POINT_V1', method: HISTORY_MONTHLY_POINT_METHOD, applied: false, reason: 'history_only_unavailable' };
+  const d = mixed && mixed.diagnostics || {}, anchor = d.historyAnnualAnchor || {};
+  if (!(d.historySpotTiming && d.historySpotTiming.eligible)) { meta.reason = anchor.fallbackReason || meta.reason; return meta; }
+  if (anchor.componentBasis === 'BASE') { meta.reason = 'background_spot_disabled'; return meta; }
+  opt = opt || {};
+  if (opt.closedMonthMode === 'actual' && (opt.sourceByMonth || []).some(v => v === 'actual_closed')) {
+    meta.reason = 'closed_month_actual_view'; return meta;
+  }
+  const base = history && history.baseSeries48 || [], spot = history && history.spotSeries48 || [];
+  const matrix = d.totalCalibratedSimByMonth, opsMatrix = d.quantOpsSimByMonth;
+  if (!Array.isArray(months) || months.length !== 12 || base.length < 24 || spot.length < 24 ||
+      base.slice(-24).concat(spot.slice(-24)).some(v => typeof v !== 'number' || !isFinite(v)) ||
+      !Array.isArray(matrix) || matrix.length !== 12 || !Array.isArray(opsMatrix) || opsMatrix.length !== 12) {
+    meta.reason = 'invalid_point_inputs'; return meta;
+  }
+  const n = Array.isArray(matrix[0]) ? matrix[0].length : 0;
+  if (!n || matrix.concat(opsMatrix).some(a => !Array.isArray(a) || a.length !== n || a.some(v => typeof v !== 'number' || !isFinite(v) || v < 0))) {
+    meta.reason = 'invalid_point_paths'; return meta;
+  }
+  const annualRawP50 = percentile_(aggregateAnnualSim_(matrix), 0.5), annualTarget = Math.round(annualRawP50);
+  if (!isFinite(annualRawP50) || annualRawP50 < 0 || !Number.isSafeInteger(annualTarget)) { meta.reason = 'invalid_point_annual'; return meta; }
+  const recentBase = base.slice(-12).map(v => Math.max(0, v)), recentSpot = spot.slice(-12).map(v => Math.max(0, v));
+  const previousSpot = spot.slice(-24, -12).map(v => Math.max(0, v));
+  const b = sumArr_(recentBase), s = sumArr_(recentSpot);
+  if (b + s === 0 && annualTarget > 0) { meta.reason = 'no_prior12_positive_sales'; return meta; }
+  const normalized = a => { const sum = sumArr_(a); return sum > 0 ? a.map(v => v / sum) : new Array(12).fill(1 / 12); };
+  const opsMean = opsMatrix.map(meanArr_), means = matrix.map(meanArr_);
+  if (opsMean.concat(means).some(v => !isFinite(v))) { meta.reason = 'invalid_point_mean'; return meta; }
+  const useBaseMean = sumArr_(opsMean) >= 1;
+  const baseShare = normalized(useBaseMean ? opsMean : recentBase);
+  // FY2024で固定3候補から選んだ同月形状。直近年2、前々年1。月次netの正部分を使う。
+  const spotShape = recentSpot.map((v, i) => (2 * v + previousSpot[i]) / 3);
+  const spotShare = normalized(spotShape), alpha = b + s > 0 ? b / (b + s) : 0;
+  const allocation = allocateAnnualYen_(annualTarget, baseShare.map((v, i) => alpha * v + (1 - alpha) * spotShare[i]));
+  return Object.assign(meta, { applied: true, reason: '', annualRawP50, annualTarget, trainingThroughYm: anchor.trainingThroughYm,
+    componentBasis: 'positive_month_net_BASE_SPOT_last12', baseAnnualPositive: b, spotAnnualPositive: s, baseWeight: alpha,
+    baseProfileBasis: useBaseMean ? 'mc_base_mean' : 'last12_base', annualBasis: 'annual_p50_rounded_yen',
+    months: months.map((m, i) => ({ ym: fmtYM_(m), point: allocation.points[i], share: allocation.shares[i], mean: means[i] })) });
+}
+
 function forecastMonteCarloMixed_(model, opt) {
   const nSim = opt.nSim || 1000;
   const residualPct = opt.residualPct || [0];
@@ -7409,6 +7474,7 @@ function runPhase1Forecast(opt) {
     // 不要なため、ブロッキングな案内ダイアログは出さない。完了の手掛かりとして軽量トーストのみ表示する
     // （次手順の案内文言は含めない）。トースト自体も不要なら次行を削除してよい。
     ss.toast('予測を更新しました。', MENU_NAME, 5);
+    return { monthlyPlanning: result.monthlyPlanning || null };
   } catch (e) {
     updateProcessStatus_('step4_status','error','',0,String(e.message || e));
     if (e && e.webConfirm) throw e;
@@ -7489,7 +7555,10 @@ function writeForecastArtifacts_(result, client) {
       const deterministicAdj = (result.spotFixedByMonth && isFinite(result.spotFixedByMonth[i])) ? result.spotFixedByMonth[i] : (result.devFixedByMonth[i] || 0);
       // forecast_source: actual_closed = 実績の締まった月（予測は実績に置き換え済み）。検証（B-2）はこの行を使わない
       const source = result.sourceByMonth ? (result.sourceByMonth[i] || 'forecast_open') : 'forecast_open';
-      rows.push([sid,runDate,client,fmtYM_(m),sc.name,result.mixed.p50[i],0,0,deterministicAdj,sc.arr[i],result.mixed.p10[i],result.mixed.p90[i],JSON.stringify({opinion:result.opinionsSummaryByMonth[i]||'', forecast_source: source, history_model: result.mixed.diagnostics && result.mixed.diagnostics.historyAnnualAnchor || null}),null,JSON.stringify(buildCalibrationAppliedPayload_(result))]);
+      const point = result.monthlyPlanning && result.monthlyPlanning.applied ? result.monthlyPlanning.months[i] : null;
+      const pointEvidence = point ? Object.assign({}, point, { version: result.monthlyPlanning.version,
+        method: result.monthlyPlanning.method, annualTarget: result.monthlyPlanning.annualTarget }) : null;
+      rows.push([sid,runDate,client,fmtYM_(m),sc.name,result.mixed.p50[i],0,0,deterministicAdj,sc.arr[i],result.mixed.p10[i],result.mixed.p90[i],JSON.stringify({opinion:result.opinionsSummaryByMonth[i]||'', forecast_source: source, history_model: result.mixed.diagnostics && result.mixed.diagnostics.historyAnnualAnchor || null, monthly_point: pointEvidence}),null,JSON.stringify(buildCalibrationAppliedPayload_(result))]);
     });
   });
   const r0 = snap.getLastRow()+1;

@@ -70,7 +70,58 @@ function appForecastSeed_(plan, forecastInputHash, engine) {
  * 種に APP_VERSION が入るので、版を上げた後の最初の予測は、同じ入力でも数字が少し動く（版 10 の手元の試しで年間の中心 −0.56%）
  */
 const APP_FORECAST_SEED_RULE = 'INPUT_V1';
-const APP_FORECAST_FIXES = ['HISTORY_ANNUAL_ANCHOR_V1', 'HISTORY_SPOT_TIMING_V1'];
+const APP_FORECAST_FIXES = ['HISTORY_ANNUAL_ANCHOR_V1', 'HISTORY_SPOT_TIMING_V1', 'HISTORY_MONTHLY_POINT_V1'];
+
+/**
+ * 計画用月額の小さな控えだけを受け取る。中央値・予測帯とは別で、旧回や不完全な控えを補完しない。
+ * 保存とAPIで同じ検証を使う。余分な試行配列等は返さず、計算ジョブへは12月の要約だけを渡す。
+ */
+function appForecastPlanningOf_(raw, fy, annualRawP50) {
+  let value = raw;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch (e) { return null; }
+  }
+  const finite = v => typeof v === 'number' && isFinite(v);
+  const integer = v => finite(v) && Number.isSafeInteger(v) && v >= 0;
+  const year = Number(fy);
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 'HISTORY_MONTHLY_POINT_V1' || value.applied !== true ||
+      !Number.isInteger(year) || year < 1000 || year > 9998 || typeof value.method !== 'string' || !value.method.trim() || value.method.length > 120 ||
+      !finite(value.annualRawP50) || value.annualRawP50 < 0 || !integer(value.annualTarget) || value.annualTarget !== Math.round(value.annualRawP50) ||
+      !finite(annualRawP50) || annualRawP50 < 0 || value.annualTarget !== Math.round(annualRawP50) ||
+      Math.abs(value.annualRawP50 - annualRawP50) > Math.max(1e-6, Math.abs(annualRawP50) * 1e-12) ||
+      typeof value.trainingThroughYm !== 'string' || !/^\d{4}\/(0[1-9]|1[0-2])$/.test(value.trainingThroughYm) || value.trainingThroughYm >= year + '/04' ||
+      !Array.isArray(value.months) || value.months.length !== 12) return null;
+  const expected = Array.from({ length: 12 }, (_, i) => {
+    const m = 4 + i;
+    return (m > 12 ? year + 1 : year) + '/' + ('0' + (m > 12 ? m - 12 : m)).slice(-2);
+  });
+  const byYm = {};
+  let total = 0, shares = 0, means = 0;
+  for (let i = 0; i < value.months.length; i++) {
+    const m = value.months[i];
+    if (!m || typeof m !== 'object' || typeof m.ym !== 'string' || expected.indexOf(m.ym) < 0 || byYm[m.ym] ||
+        !integer(m.point) || !finite(m.share) || m.share < 0 || m.share > 1 || !finite(m.mean) || m.mean < 0) return null;
+    byYm[m.ym] = { ym: m.ym, point: m.point, share: m.share, mean: m.mean };
+    total += m.point; shares += m.share; means += m.mean;
+  }
+  if (!Number.isSafeInteger(total) || total !== value.annualTarget || !isFinite(means) ||
+      (value.annualTarget > 0 && !(means > 0)) ||
+      !(Math.abs(shares - 1) <= 1e-8 || (value.annualTarget === 0 && Math.abs(shares) <= 1e-8))) return null;
+  const out = { version: value.version, applied: true, method: value.method.trim(), annualRawP50: value.annualRawP50,
+    annualTarget: value.annualTarget, trainingThroughYm: value.trainingThroughYm, months: expected.map(ym => byYm[ym]) };
+  // 配分根拠は任意。古い控えを必須項目追加で失効させず、許可された小さな値だけを保持する。
+  if (value.componentBasis === 'positive_month_net_BASE_SPOT_last12') out.componentBasis = value.componentBasis;
+  ['baseAnnualPositive', 'spotAnnualPositive'].forEach(k => { if (finite(value[k]) && value[k] >= 0) out[k] = value[k]; });
+  if (finite(value.baseWeight) && value.baseWeight >= 0 && value.baseWeight <= 1) {
+    const both = out.baseAnnualPositive !== undefined && out.spotAnnualPositive !== undefined;
+    const sum = both ? out.baseAnnualPositive + out.spotAnnualPositive : 0;
+    const weight = sum > 0 ? out.baseAnnualPositive / sum : 0;
+    if (!both || (isFinite(sum) && Math.abs(value.baseWeight - weight) <= 1e-9)) out.baseWeight = value.baseWeight;
+  }
+  if (['mc_base_mean', 'last12_base'].indexOf(value.baseProfileBasis) >= 0) out.baseProfileBasis = value.baseProfileBasis;
+  if (value.annualBasis === 'annual_p50_rounded_yen') out.annualBasis = value.annualBasis;
+  return appUtf8Bytes_(JSON.stringify(out)) <= 4000 ? out : null;
+}
 
 /**
  * 組み立て（FORECAST.RUN）: データ本体から計算用ブックを組み立てる。1 回の上限に収まらなければ、同じ処理を続けて動かす。
@@ -116,9 +167,10 @@ function appForecastRunCalc_(ctx, p) {
       allowMissingUserInputs: appPlanIsMeasure_(plan) });   // 測る専用は過去の売上だけでも試す。今ある入力はそのまま読む
     if (!run.ok) return { needConfirm: run.needConfirm, planId: plan.plan_id, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
     const headline = appForecastHeadline_(scratch);
+    const planning = appForecastPlanningOf_(run.planning, plan.fy, headline && headline.annual && headline.annual.p50);
     // 手法ごとの予測（素の回帰との比べ。Methods.js）: 統計の部分だけをもう一度動かす（計算用ブックは書き換えない。失敗しても予測は止めない）
     const methods = appMethodsLive_(ctx, plan, scratch, p, run.seed, tri.weights);
-    const payload = Object.assign({}, p, { seed: run.seed, engine: { version: run.version, sourceSha256: run.sourceSha256 }, headline: headline,
+    const payload = Object.assign({}, p, { seed: run.seed, engine: { version: run.version, sourceSha256: run.sourceSha256 }, headline: headline, planning: planning,
       runMs: new Date().getTime() - t0, layerTail: layerTail }, appPayloadCompact_(methods, tri, eff));
     return { __next: { kind: 'FORECAST.RUN_SAVE', payload: payload }, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
   });
@@ -153,7 +205,8 @@ function appForecastRunSave_(ctx, p) {
         annual_p10: num(h.annual.p10), annual_p50: num(h.annual.p50), annual_p90: num(h.annual.p90),
         objective_p10: num(h.objective.p10), objective_p50: num(h.objective.p50), objective_p90: num(h.objective.p90),
         changed_sheets_json: names, confirms_json: p.confirms, started_at: p.startedAt, finished_at: now, actor_email: ctx.actor,
-        app_version: APP_VERSION, seed_rule: APP_FORECAST_SEED_RULE, fixes_json: appForecastFixesOf_(scratch) }] },   // 本番にした回は annual_aligned（Portfolio.js）
+        app_version: APP_VERSION, seed_rule: APP_FORECAST_SEED_RULE, fixes_json: appForecastFixesOf_(scratch),
+        planning_json: appForecastPlanningOf_(p.planning, plan.fy, h.annual.p50) || '' }] },   // 本番にした回は annual_aligned（Portfolio.js）
       { table: 'FORECAST_MONTHLY', mode: 'ensure', rows: (h.monthly || []).map(m => ({
         run_id: p.runId, plan_id: plan.plan_id, ym: m.month, p10: num(m.p10), p50: num(m.p50), p90: num(m.p90),
         obj_p10: obj[m.month] ? num(obj[m.month].p10) : null, obj_p50: obj[m.month] ? num(obj[m.month].p50) : null, obj_p90: obj[m.month] ? num(obj[m.month].p90) : null })) }
@@ -259,7 +312,7 @@ function appForecastLatest_(planId) {
   const monthly = latest ? appReadTable_('FORECAST_MONTHLY').filter(m => m.run_id === latest.run_id).map(appStripRow_) : [];
   return {
     plan: { planId: plan.plan_id, clientName: clients[plan.client_id] || plan.client_label, fy: plan.fy },
-    latest: latest, monthly: monthly,
+    latest: latest, monthly: monthly, planning: latest ? appForecastPlanningOf_(latest.planning_json, plan.fy, latest.annual_p50) : null,
     runs: runs.slice(0, 10).map(r => ({ runId: r.run_id, finishedAt: r.finished_at, actor: r.actor_email, p50: r.annual_p50 })),
     stored: appStoredHeadline_(plan.plan_id)
   };

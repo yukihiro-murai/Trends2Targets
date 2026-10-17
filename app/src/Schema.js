@@ -13,15 +13,16 @@
  * 記録は計算に使わない。
  * 版 11（2026-10-09 村井さん承認「推奨する対応を継続」。SCHEMA_PLAN_v10-12_JA.md の 4 章）で、予算の下書き（BUDGET_DRAFTS。追記だけ）を足し、
  * 公式版（PLAN_VERSIONS）の後ろに、出したときの届く見込みと前提の列を足した（APP_ADDED_COLUMNS。出した後は変えない）。中身は BudgetDrafts.js・V11.js・Versions.js
+ * 版 16 は FORECAST_RUNS 末尾に計画用月額 planning_json を足す。既存の予測帯・旧回は書き換えず、新しい回の12月要約だけを保存する。
  */
-const APP_SCHEMA_VERSION = 15;
+const APP_SCHEMA_VERSION = 16;
 
 /**
  * 版を上げて、今ある表の後ろに足した列（古い順）。データ本体の 1 行目が足す前の列なら、版を上げた後の最初の操作で後ろに列の名前を書き足す
  * （Setup.js の appMigrateColumns_。前の列の位置と値は動かさず、前からある行の新しい列は空）。APP_TABLES の列の終わりと同じ並びにする（app/tests が見張る）
  */
 const APP_ADDED_COLUMNS = {
-  FORECAST_RUNS: [{ version: 10, columns: ['app_version', 'seed_rule', 'fixes_json'] }],
+  FORECAST_RUNS: [{ version: 10, columns: ['app_version', 'seed_rule', 'fixes_json'] }, { version: 16, columns: ['planning_json'] }],
   PLANS: [{ version: 10, columns: ['purpose'] }],
   PLAN_VERSIONS: [{ version: 11, columns: ['reach_final', 'reach_adopted', 'center', 'sd', 'tau', 'w', 'closed_months', 'prob_mode', 'prob_basis_json'] }]
 };
@@ -84,10 +85,11 @@ const APP_TABLES = {
     // 新アプリで動かした予測 1 回（追記のみ）。同じ入力（input_hash）・種（seed）・「今」（as_of）なら同じ結果になる
     // 版 10 の列（3-8）: app_version = アプリの版、seed_rule = 種の決め方（INPUT_V1 = 入力の中身と版から。空 = 版 10 より前の回で、seed が
     // 64 文字の 16 進なら INPUT_V1＝v0.29.0、RUN-… なら実行ごとの種＝v0.28.0 まで）、fixes_json = 本番に入れたアプリ側の直し。前からある行は空のまま（書き換えない）
+    // 版 16: planning_json = HISTORY_MONTHLY_POINT_V1 の計画用月額（中央値とは別）。旧回/対象外は空のまま。
     key: ['run_id'],
     columns: ['run_id', 'plan_id', 'status', 'engine_version', 'engine_sha256', 'seed', 'as_of', 'input_hash',
       'annual_p10', 'annual_p50', 'annual_p90', 'objective_p10', 'objective_p50', 'objective_p90',
-      'changed_sheets_json', 'confirms_json', 'started_at', 'finished_at', 'actor_email', 'app_version', 'seed_rule', 'fixes_json'],
+      'changed_sheets_json', 'confirms_json', 'started_at', 'finished_at', 'actor_email', 'app_version', 'seed_rule', 'fixes_json', 'planning_json'],
     types: { annual_p10: 'num', annual_p50: 'num', annual_p90: 'num', objective_p10: 'num', objective_p50: 'num', objective_p90: 'num' }
   },
   PLAN_ACTIONS: {

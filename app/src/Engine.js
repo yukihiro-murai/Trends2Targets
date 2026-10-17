@@ -307,7 +307,7 @@ function appLegacyServices_(book, opts) {
  *               （予測は Forecast.js の appForecastSeed_: 同じ入力・同じ版なら同じ種 = 同じ P10/P50/P90）
  *   uuidSeed … 旧来の計算が作る ID（FORECAST_SNAPSHOT の snapshot_id・AI_IMPACT_HISTORY の run_id など）の種。実行ごとに違う値（実行の ID）にする。
  *               乱数と同じ種にすると、同じ入力の 2 回の予測が同じ ID になり、B-2 が回を分けられない（snapshot_id・run_id で分ける）
- * 返り値: { ok, needConfirm?, version, sourceSha256, seed（使った乱数の種） }
+ * 返り値: { ok, needConfirm?, version, sourceSha256, seed（使った乱数の種）, planning（計画用月額の要約か null） }
  */
 function appRunLegacyForecast_(book, opts) {
   const svc = appLegacyServices_(book, opts);
@@ -318,8 +318,9 @@ function appRunLegacyForecast_(book, opts) {
     Object.keys(eng.WEB_UI_CONFIRMS_).forEach(k => { delete eng.WEB_UI_CONFIRMS_[k]; });
     (opts.confirms || []).forEach(k => { eng.WEB_UI_CONFIRMS_[String(k)] = true; });
     try {
-      eng.runPhase1Forecast({ allowMissingUserInputs: opts.allowMissingUserInputs === true });
-      return { ok: true, version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256, seed: seed };
+      const result = eng.runPhase1Forecast({ allowMissingUserInputs: opts.allowMissingUserInputs === true });
+      return { ok: true, version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256, seed: seed,
+        planning: result && result.monthlyPlanning || null };
     } catch (e) {
       if (e && e.webConfirm) return { ok: false, needConfirm: e.webConfirm, version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256, seed: seed };
       throw e;

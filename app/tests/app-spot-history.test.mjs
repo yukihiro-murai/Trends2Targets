@@ -81,6 +81,25 @@ const bands = (rows, key) => rows.map(r => Number(r[key]));
 const first = forecast();
 const firstRun = env.table('FORECAST_RUNS').find(r => r.run_id === first.runId);
 const n1 = numbers(first.runId);
+// 本物のA-9 → Engine → 計算/保存ジョブで計画値と任意根拠が残る。分位点は別項目のまま。
+const planning1 = JSON.parse(firstRun.planning_json);
+assert.equal(planning1.version, 'HISTORY_MONTHLY_POINT_V1');
+assert.equal(planning1.method, 'BASE_MC_SPOT_EWMA24');
+assert.equal(planning1.applied, true);
+assert.deepEqual(planning1.months.map(m => m.ym), months);
+assert.equal(planning1.annualRawP50, n1.annual[1]);
+assert.equal(planning1.annualTarget, Math.round(n1.annual[1]));
+assert.equal(planning1.months.reduce((s, m) => s + m.point, 0), planning1.annualTarget);
+assert.ok(planning1.months.every(m => Number.isSafeInteger(m.point) && m.point >= 0 && Number.isFinite(m.mean)));
+assert.ok(planning1.months.some(m => m.point > 0));
+assert.equal(planning1.componentBasis, 'positive_month_net_BASE_SPOT_last12');
+assert.equal(planning1.baseAnnualPositive, 0);
+assert.ok(planning1.spotAnnualPositive > 0);
+assert.equal(planning1.baseWeight, 0);
+assert.equal(planning1.baseProfileBasis, 'last12_base');
+assert.equal(planning1.annualBasis, 'annual_p50_rounded_yen');
+assert.ok(Buffer.byteLength(firstRun.planning_json) <= 4000);
+assert.deepEqual(env.call('apiForecastLatest(__in)', {__in:{planId}}).planning, planning1);
 assert.ok(n1.annual[1] > 0, 'BASE がゼロでも年間 P50 をゼロにしない');
 assert.ok(n1.annual.every(Number.isFinite));
 assert.ok(n1.annual[0] <= n1.annual[1] && n1.annual[1] <= n1.annual[2], '年間 P10 <= P50 <= P90');
@@ -91,6 +110,14 @@ const historyEvidence = env.table('ENG_FORECAST_SNAPSHOT').filter(r => r.plan_id
   .map(r => JSON.parse(r.key_factors_json || '{}').history_model).filter(Boolean);
 assert.ok(historyEvidence.some(r => r.version === 'HISTORY_ANNUAL_ANCHOR_V1' && r.applied), '履歴の方式・水準・補正倍率を保存する');
 assert.ok(historyEvidence.some(r => r.spotTiming && r.spotTiming.applied && r.spotTiming.mix === .5), '月位置の混合条件もsnapshotへ保存する');
+const neutral1 = env.table('ENG_FORECAST_SNAPSHOT').filter(r => r.plan_id === planId && r.scenario === 'neutral');
+assert.equal(neutral1.length, 12);
+for (const row of neutral1) {
+  const month = n1.monthly.find(m => m.ym === row.target_month), point = planning1.months.find(m => m.ym === row.target_month);
+  assert.equal(Number(row.final_pred), Number(month.p50), 'neutral snapshotは月中央値を維持');
+  assert.deepEqual(JSON.parse(row.key_factors_json).monthly_point,
+    {...point, version:planning1.version, method:planning1.method, annualTarget:planning1.annualTarget}, '計画値は別のsidecar');
+}
 assert.ok(Math.abs(n1.annual[1] - historyEvidence[0].targetAnnual) < 1e-6, '年間P50は直近12月の水準に一致');
 assert.equal(effects.length, 12);
 assert.ok(effects.every(r => ['human_yen', 'spot_yen', 'ai_yen'].every(k => Number(r[k]) === 0)), '履歴 SPOT を主観・既知 SPOT・AI の寄与にしない');
@@ -105,6 +132,24 @@ assert.deepEqual(n2.annual, n1.annual);
 assert.deepEqual(n2.objective, n1.objective);
 for (const key of ['p10', 'p50', 'p90', 'obj_p10', 'obj_p50', 'obj_p90']) assert.deepEqual(bands(n2.monthly, key), bands(n1.monthly, key), key + ' は再実行で一致');
 assert.deepEqual(snapshot(), before);
+assert.deepEqual(JSON.parse(secondRun.planning_json), planning1);
+
+// 既存の予算下書きがある合成状態でも、本物A-9の計画値を予算へ転記せず従来の復元を通す。
+// MEASUREは新規予算を作らないため、ここでは過去から存在する下書きをfixtureとして置く。
+const budgetFixture = months.map((ym, i) => ({plan_id:planId,draft_id:'BDR-POINT-'+i,action_id:'OLD-BUDGET',ym,
+  adopted:12345+i,uplift:20+i,basis:'MANUAL',prob:null,alloc:'MANUAL',run_id:second.runId,
+  center:Number(n2.monthly[i].p50),actor_email:OWNER,saved_at:'2026-04-01T00:00:00+0900'}));
+env.run('appWithLock_(() => appAppendLogRows_("BUDGET_DRAFTS",__rows))',{__rows:budgetFixture});
+const budgetBefore = env.table('BUDGET_DRAFTS');
+const third = forecast(), n3 = numbers(third.runId);
+assert.deepEqual(n3.annual,n1.annual);
+for (const key of ['p10','p50','p90','obj_p10','obj_p50','obj_p90']) assert.deepEqual(bands(n3.monthly,key),bands(n1.monthly,key),'予算と計画値を足しても予測帯は不変: '+key);
+assert.deepEqual(env.table('BUDGET_DRAFTS'),budgetBefore,'新しい計画値から予算下書きを作らない');
+assert.deepEqual(env.call('apiForecastLatest(__in)',{__in:{planId}}).planning,planning1);
+const savedBudget = env.call('appWorkScratch_(appPlanOf_(__p)).getSheetByName("OUTPUT").getRange(29,8,12,2).getValues()',{__p:planId});
+assert.deepEqual(savedBudget,budgetFixture.map(r=>[r.adopted,r.uplift]),'3段階の保存後も既存予算はそのまま');
+assert.equal(third.budgetRestored,12);
+assert.deepEqual(snapshot(),before,'計画値の保存で履歴入力を変えない');
 // anchor/timing適用時でもSeasonal参照線は独立方式で、物差しと同じ定義を保つ。
 const savedSeasonal = env.call(`(() => { const rows = {}; appReadPlanTable_('ENG_ROWS', __p)
   .filter(r => r.sheet === 'OUTPUT' && Number(r.col_from) === 1)
