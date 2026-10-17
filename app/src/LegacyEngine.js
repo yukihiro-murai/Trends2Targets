@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.1-dev、SHA-256 ff4cd909b35a9a202afdebf1dc822277f57b65374f134c56dfd9894f31a8ac75）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.2-dev、SHA-256 7d73a63067712fbfe7f795c98cab6dcbc229a23c1eabe2967ba6b8bf7b728143）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,7 +31,7 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.1-dev';
+const VERSION = '2.7.2-dev';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -2493,8 +2493,9 @@ function estimateMonthAverage_(y, closedIdx, monthMod) {
 }
 
 /** ====== 入力異常検出（おかしなデータで止める） ====== */
-function validateAllInputsOrThrow_(fy) {
+function validateAllInputsOrThrow_(fy, opt) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const allowMissing = !!(opt && opt.allowMissingUserInputs === true);
 
   // CONFIG
   const cfg = ss.getSheetByName(SHEETS.CONFIG);
@@ -2503,7 +2504,7 @@ function validateAllInputsOrThrow_(fy) {
   const people = getPeopleListFromConfig_();
   if (!client) throw new Error('CONFIG!B2（メーカー名）が未入力です。');
   if (!isFinite(fyNum) || fyNum <= 2000) throw new Error('CONFIG!B3（予測年度FY）が不正です。');
-  if (people.length === 0) throw new Error('CONFIG!B4（担当者）が未入力です。');
+  if (people.length === 0 && !allowMissing) throw new Error('CONFIG!B4（担当者）が未入力です。');
 
   // SALES_MONTHLY（数値かどうか）
   const sales = ss.getSheetByName(SHEETS.SALES_MONTHLY);
@@ -2539,11 +2540,12 @@ function validateAllInputsOrThrow_(fy) {
   // FACTORS / OPINIONS / DEV_SPOT：明らかに変な行があれば停止（未完成行は“無視”＝エラーにはしない）
   validateFactorsSheet_(SHEETS.PRODUCT, { cols: 5, mode: 'product' });
   validateFactorsSheet_(SHEETS.CLIENT, { cols: 4, mode: 'client' });
-  validateOpinionsSheet_(people);
+  validateOpinionsSheet_(people, opt);
   validateDevSheet_();
 }
 
-function validateRequiredUserInputsOrThrow_() {
+function validateRequiredUserInputsOrThrow_(opt) {
+  if (opt && opt.allowMissingUserInputs === true) return;   // 新アプリの測る専用だけ。未入力を埋めずに中立のまま計算する
   const people = getPeopleListFromConfig_();
   const missingPeople = findMissingPeopleOpinionsByValidRows_(people);
   if (missingPeople.length > 0) {
@@ -2793,13 +2795,20 @@ function validateFactorsSheet_(sheetName, opt) {
   }
 }
 
-function validateOpinionsSheet_(requiredPeople) {
+function validateOpinionsSheet_(requiredPeople, opt) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(SHEETS.OPINIONS);
-  if (!sh) throw new Error('OPINIONSシートがありません。A-7を実行してください。');
+  const allowMissing = !!(opt && opt.allowMissingUserInputs === true);
+  if (!sh) {
+    if (allowMissing) return;
+    throw new Error('OPINIONSシートがありません。A-7を実行してください。');
+  }
 
   const last = sh.getLastRow();
-  if (last < 2) throw new Error('OPINIONSに入力行がありません。A-7を実行してください。');
+  if (last < 2) {
+    if (allowMissing) return;
+    throw new Error('OPINIONSに入力行がありません。A-7を実行してください。');
+  }
 
   const vals = sh.getRange(2, 1, last - 1, 5).getValues();
 
@@ -2832,7 +2841,7 @@ function validateOpinionsSheet_(requiredPeople) {
   }
 
   const missing = requiredPeople.filter(p => !okPeople.has(p));
-  if (missing.length > 0) {
+  if (missing.length > 0 && !allowMissing) {
     throw new Error(`OPINIONSに担当者全員の有効な入力がありません。\n未入力: ${missing.join(', ')}\nA-7で入力してください。`);
   }
 }
@@ -7194,7 +7203,7 @@ function countAIResearchStructuredRows_() {
   return Math.max(0, sh.getLastRow() - 1);
 }
 
-function runPhase1Forecast() {
+function runPhase1Forecast(opt) {
   try {
     requireStepSuccess_('step1_status', '先にA-2 売上データを取り込む を実行してください。');
     const started = new Date();
@@ -7205,8 +7214,8 @@ function runPhase1Forecast() {
     if (!client) throw new Error('CONFIG!B2 にクライアントを設定してください。');
     const fy = Number(cfg.getRange('B3').getValue()) || getDefaultFY_();
     cfg.getRange('B3').setValue(fy);
-    validateAllInputsOrThrow_(fy);
-    validateRequiredUserInputsOrThrow_();
+    validateAllInputsOrThrow_(fy, opt);
+    validateRequiredUserInputsOrThrow_(opt);
     runHierarchicalA9AlertsOrThrow_(fy);
     syncSalesFromSalesInput_(fy, client);
     const result = runForecastFYCore_(fy, client);
@@ -11099,7 +11108,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: 'ff4cd909b35a9a202afdebf1dc822277f57b65374f134c56dfd9894f31a8ac75',
+    SOURCE_SHA256: '7d73a63067712fbfe7f795c98cab6dcbc229a23c1eabe2967ba6b8bf7b728143',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

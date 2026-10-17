@@ -70,6 +70,14 @@ const APP_OWNER_ACTIONS = {
     payload: i => ({ clientName: i.clientName, fy: Number(i.fy), peopleCsv: i.peopleCsv, purpose: i.purpose }) },
   setPeople: { job: 'PLAN.EDIT', args: ['planId', 'peopleCsv', 'inputHash'], current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
     payload: i => ({ planId: i.planId, action: 'SETUP.PEOPLE', args: { peopleCsv: i.peopleCsv }, inputHash: i.inputHash }) },
+  // 売上の取り込み・月別集計・予測は、指定した 1 計画だけを既存の処理で動かす（ほかの計画は始めない）
+  importSales: { job: 'PLAN.RUN', args: ['planId', 'inputHash'], check: t => appOwnerCheckPlanRunHash_(t),
+    current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
+    payload: i => ({ planId: i.planId, action: 'IMPORT.SALES', args: {}, inputHash: i.inputHash }) },
+  aggregateSales: { job: 'PLAN.RUN', args: ['planId', 'inputHash'], check: t => appOwnerCheckPlanRunHash_(t),
+    current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
+    payload: i => ({ planId: i.planId, action: 'SALES.AGGREGATE', args: {}, inputHash: i.inputHash }) },
+  runForecast: { job: 'FORECAST.RUN', args: ['planId'], check: t => appOwnerCheckPlanId_(t), payload: i => ({ planId: i.planId }) },
   // 計画の印（測る専用）を付ける・外す（所有者だけ。監査に前と後の値。PlanPurpose.js）
   setPlanPurpose: { name: 'PLAN.PURPOSE', args: ['planId', 'purpose'], check: t => { appOwnerCheckPlanId_(t); appOwnerCheckPurpose_(t); },
     opts: i => ({ minRole: 'ADMIN', entityType: 'PLAN', entityId: i.planId, detail: i, after: res => res.plan }),
@@ -261,8 +269,17 @@ function appOwnerCheckCutoffFy_(t) {
 }
 
 /** 指紋（inputHash）は省ける。入れるなら calibrationPreview などで受け取った 64 桁のまま */
-function appOwnerCheckHash_(t) {
-  if (t.inputHash !== undefined && !/^[a-f0-9]{64}$/.test(String(t.inputHash))) throw new Error('inputHash は calibrationPreview の inputHash（64 桁）をそのまま入れてください（省くと、実行したときの今の指紋で書きます）。');
+function appOwnerCheckHash_(t, source) {
+  if (t.inputHash !== undefined && !/^[a-f0-9]{64}$/.test(String(t.inputHash))) throw new Error('inputHash は ' + (source || 'calibrationPreview') + ' の inputHash（64 桁）をそのまま入れてください（省くと、実行したときの今の指紋で書きます）。');
+}
+
+/** 売上を動かす操作: 計画は必須。指定された指紋が古ければ処理を始めない（省略時は current で今の値を渡す） */
+function appOwnerCheckPlanRunHash_(t) {
+  appOwnerCheckPlanId_(t);
+  appOwnerCheckHash_(t, '計画');
+  if (t.inputHash === undefined || !appIsSetUp_()) return;
+  const current = appOwnerPlanHash_(t.planId);
+  if (current && current !== t.inputHash) throw new Error(APP_STALE_MSG);
 }
 
 /**

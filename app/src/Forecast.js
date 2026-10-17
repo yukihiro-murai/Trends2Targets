@@ -112,7 +112,8 @@ function appForecastRunCalc_(ctx, p) {
     // 人と AI の効き係数（段 3。Effects.js）: 締まった月の当たり方からベイズで出し、旧来の計算に渡す（人の倍率を βH 乗・AI の倍率を βAI 乗・事後の幅を見通しの幅に足す）
     const eff = appLearnEffects_(ctx, plan, p.asOfMs);
     const run = appRunLegacyForecast_(scratch, { asOfMs: p.asOfMs, seed: eng => appForecastSeed_(plan, forecastInputHash, eng), uuidSeed: p.runId,
-      confirms: p.confirms || [], actor: ctx.actor, triWeights: tri.weights, effects: appEffForEngine_(eff) });
+      confirms: p.confirms || [], actor: ctx.actor, triWeights: tri.weights, effects: appEffForEngine_(eff),
+      allowMissingUserInputs: appPlanIsMeasure_(plan) });   // 測る専用は過去の売上だけでも試す。今ある入力はそのまま読む
     if (!run.ok) return { needConfirm: run.needConfirm, planId: plan.plan_id, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
     const headline = appForecastHeadline_(scratch);
     // 手法ごとの予測（素の回帰との比べ。Methods.js）: 統計の部分だけをもう一度動かす（計算用ブックは書き換えない。失敗しても予測は止めない）

@@ -16,7 +16,7 @@ const RESULT_MAX = 8000;
 /** 読むだけの操作（頼みを残す）と、裏の処理を始める操作（頼みを jobStatus に置き換える）。ほかは書く操作（頼みを消す） */
 const READS = ['listDirectory', 'listSettings', 'listPlans', 'planCandidates', 'health', 'listAudit', 'yearPreview', 'poolPreview', 'calibrationPreview', 'jobStatus',
   'listPersonLinks', 'vertexConfigPreview', 'bulkStatus'];   // 人のつなぎ（listPersonLinks・linkPerson・unlinkPerson）は app-v10-hits.test.mjs、AI 調査の問い合わせ先は app-vertex-config.test.mjs で確かめる
-const JOBS = ['createPlan', 'setPeople', 'yearClose', 'poolApply', 'setCalibration', 'runBacktest'];   // 補正の値（setCalibration）は app-calibration.test.mjs、物差し（runBacktest）は app-v10-backtest.test.mjs で確かめる
+const JOBS = ['createPlan', 'setPeople', 'importSales', 'aggregateSales', 'runForecast', 'yearClose', 'poolApply', 'setCalibration', 'runBacktest'];   // 補正の値（setCalibration）は app-calibration.test.mjs、物差し（runBacktest）は app-v10-backtest.test.mjs で確かめる
 const seen = { direct: 0, queued: 0 };   // 裏の処理が、始めたその場で終わった回数・まだ終わっていなかった回数
 
 /** OWNER_TASK に頼みを置いて、エディタからの実行と同じく引数なしで apiOwnerTask を動かす */
@@ -269,6 +269,74 @@ let planId;
   assert.equal(after.displayName, 'テスト');
   assert.equal(after.auto, false);
   assert.equal(after.rowVersion, 1);
+}
+
+// ==== 7b. 指定した計画の売上取り込み・月別集計・予測: 同じ裏の処理、役割、監査と jobStatus を通す ====
+{
+  const jobs0 = jobProps(env);
+  for (const action of ['importSales', 'aggregateSales', 'runForecast']) {
+    for (const badId of [undefined, '', 123]) fails(env, { action, planId: badId }, /計画の ID/);
+    fails(env, { action, planId: 'PL-none' }, /計画が見つかりません/);
+  }
+  for (const action of ['importSales', 'aggregateSales']) {
+    fails(env, { action, planId, inputHash: 'abc' }, /inputHash.*64 桁/);
+    fails(env, { action, planId, inputHash: 'f'.repeat(64) }, /画面が古い/);
+  }
+  fails(env, { action: 'runForecast', planId, confirms: ['extreme'] }, /使えない項目があります: confirms/);
+  assert.equal(jobProps(env), jobs0, '入力の不備と古い指紋は、裏の処理を始める前に断る');
+
+  // 所有者でなければ apiOwnerTask は断り、操作の結果も書き換えない
+  const prevResult = env.props.OWNER_TASK_RESULT;
+  env.as(MEMBER);
+  for (const action of ['importSales', 'aggregateSales', 'runForecast']) {
+    assert.throws(() => task(env, { action, planId }), /権限がありません/);
+    assert.equal(env.props.OWNER_TASK_RESULT, prevResult);
+  }
+  env.as(OWNER);
+  assert.equal(jobProps(env), jobs0, '所有者以外は処理を入れない');
+
+  // 所有者の中の経路も、apiStartJob と同じ操作ごとの役割を求める
+  for (const [action, role] of [['importSales', 'PLANNER'], ['aggregateSales', 'VIEWER'], ['runForecast', 'VIEWER']]) {
+    assert.throws(() => env.call(`appOwnerRunAction_({ actor: __actor, requestId: 'REQ-SALES-DENIED',
+      roles: [{ role: __role, scope_type: 'ALL', client_id: '' }] }, __task)`,
+    { __actor: OWNER, __role: role, __task: { action, planId } }), /権限がありません/);
+  }
+  assert.equal(audits(env, 'JOB.START', 'DENIED').filter(a => a.request_id === 'REQ-SALES-DENIED').length, 3);
+  assert.equal(jobProps(env), jobs0);
+
+  for (const [action, planAction, sheet] of [['importSales', 'IMPORT.SALES', 'SALES_INPUT'], ['aggregateSales', 'SALES.AGGREGATE', 'SALES_MONTHLY']]) {
+    const inputHash = env.run('appOwnerPlanHash_(__p)', { __p: planId });
+    // 取り込みは現在の指紋を省略補完し、集計は明示した現在の指紋を使う
+    const started = ok(env, Object.assign({ action, planId }, action === 'aggregateSales' ? { inputHash } : {}));
+    const queued = env.call('appJobGet_(__id)', { __id: started.full.result.jobId });
+    assert.equal(queued.kind, 'PLAN.RUN');
+    assert.deepEqual(queued.payload, { planId, action: planAction, args: {}, inputHash });
+    assert.equal(queued.requestedBy, OWNER);
+    const done = finishJob(env);
+    assert.equal(done.status, 'DONE', done.error);
+    assert.ok(done.result.changed.includes(sheet), JSON.stringify(done.result));
+    const saved = sheet === 'SALES_INPUT' ? env.table('ENG_SALES_INPUT') : env.table('ENG_ROWS').filter(r => r.sheet === sheet);
+    assert.ok(saved.some(r => r.plan_id === planId), action + ' の結果がデータ本体に残る');
+    for (const stage of ['BUILD', 'CALC', 'SAVE']) {
+      const audit = audits(env, 'PLAN.' + planAction + '.' + stage, 'END').slice(-1)[0];
+      assert.equal(audit.result, 'OK');
+      assert.equal(audit.actor_email, OWNER);
+    }
+  }
+
+  // 主観入力のない通常の計画は、既存の予測の確かめ方で止まる。所有者の入口でも確認を勝手に通さない
+  const started = ok(env, { action: 'runForecast', planId });
+  const queued = env.call('appJobGet_(__id)', { __id: started.full.result.jobId });
+  assert.equal(queued.kind, 'FORECAST.RUN');
+  assert.deepEqual(queued.payload, { planId });
+  const before = env.table('FORECAST_RUNS').length;
+  const done = finishJob(env);
+  assert.equal(done.status, 'FAILED');
+  assert.match(done.error, /未入力|足りません|不足/);
+  assert.equal(env.table('FORECAST_RUNS').length, before);
+  const audit = audits(env, 'FORECAST.RUN.CALC', 'END').slice(-1)[0];
+  assert.equal(audit.result, 'FAILED');
+  assert.equal(audit.actor_email, OWNER);
 }
 
 // ==== 8. バックアップ・手入れ・監査の鎖・状態（要約） ====

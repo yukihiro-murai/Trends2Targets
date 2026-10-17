@@ -14,7 +14,7 @@
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.1-dev';
+const VERSION = '2.7.2-dev';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -2476,8 +2476,9 @@ function estimateMonthAverage_(y, closedIdx, monthMod) {
 }
 
 /** ====== 入力異常検出（おかしなデータで止める） ====== */
-function validateAllInputsOrThrow_(fy) {
+function validateAllInputsOrThrow_(fy, opt) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const allowMissing = !!(opt && opt.allowMissingUserInputs === true);
 
   // CONFIG
   const cfg = ss.getSheetByName(SHEETS.CONFIG);
@@ -2486,7 +2487,7 @@ function validateAllInputsOrThrow_(fy) {
   const people = getPeopleListFromConfig_();
   if (!client) throw new Error('CONFIG!B2（メーカー名）が未入力です。');
   if (!isFinite(fyNum) || fyNum <= 2000) throw new Error('CONFIG!B3（予測年度FY）が不正です。');
-  if (people.length === 0) throw new Error('CONFIG!B4（担当者）が未入力です。');
+  if (people.length === 0 && !allowMissing) throw new Error('CONFIG!B4（担当者）が未入力です。');
 
   // SALES_MONTHLY（数値かどうか）
   const sales = ss.getSheetByName(SHEETS.SALES_MONTHLY);
@@ -2522,11 +2523,12 @@ function validateAllInputsOrThrow_(fy) {
   // FACTORS / OPINIONS / DEV_SPOT：明らかに変な行があれば停止（未完成行は“無視”＝エラーにはしない）
   validateFactorsSheet_(SHEETS.PRODUCT, { cols: 5, mode: 'product' });
   validateFactorsSheet_(SHEETS.CLIENT, { cols: 4, mode: 'client' });
-  validateOpinionsSheet_(people);
+  validateOpinionsSheet_(people, opt);
   validateDevSheet_();
 }
 
-function validateRequiredUserInputsOrThrow_() {
+function validateRequiredUserInputsOrThrow_(opt) {
+  if (opt && opt.allowMissingUserInputs === true) return;   // 新アプリの測る専用だけ。未入力を埋めずに中立のまま計算する
   const people = getPeopleListFromConfig_();
   const missingPeople = findMissingPeopleOpinionsByValidRows_(people);
   if (missingPeople.length > 0) {
@@ -2776,13 +2778,20 @@ function validateFactorsSheet_(sheetName, opt) {
   }
 }
 
-function validateOpinionsSheet_(requiredPeople) {
+function validateOpinionsSheet_(requiredPeople, opt) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(SHEETS.OPINIONS);
-  if (!sh) throw new Error('OPINIONSシートがありません。A-7を実行してください。');
+  const allowMissing = !!(opt && opt.allowMissingUserInputs === true);
+  if (!sh) {
+    if (allowMissing) return;
+    throw new Error('OPINIONSシートがありません。A-7を実行してください。');
+  }
 
   const last = sh.getLastRow();
-  if (last < 2) throw new Error('OPINIONSに入力行がありません。A-7を実行してください。');
+  if (last < 2) {
+    if (allowMissing) return;
+    throw new Error('OPINIONSに入力行がありません。A-7を実行してください。');
+  }
 
   const vals = sh.getRange(2, 1, last - 1, 5).getValues();
 
@@ -2815,7 +2824,7 @@ function validateOpinionsSheet_(requiredPeople) {
   }
 
   const missing = requiredPeople.filter(p => !okPeople.has(p));
-  if (missing.length > 0) {
+  if (missing.length > 0 && !allowMissing) {
     throw new Error(`OPINIONSに担当者全員の有効な入力がありません。\n未入力: ${missing.join(', ')}\nA-7で入力してください。`);
   }
 }
@@ -7177,7 +7186,7 @@ function countAIResearchStructuredRows_() {
   return Math.max(0, sh.getLastRow() - 1);
 }
 
-function runPhase1Forecast() {
+function runPhase1Forecast(opt) {
   try {
     requireStepSuccess_('step1_status', '先にA-2 売上データを取り込む を実行してください。');
     const started = new Date();
@@ -7188,8 +7197,8 @@ function runPhase1Forecast() {
     if (!client) throw new Error('CONFIG!B2 にクライアントを設定してください。');
     const fy = Number(cfg.getRange('B3').getValue()) || getDefaultFY_();
     cfg.getRange('B3').setValue(fy);
-    validateAllInputsOrThrow_(fy);
-    validateRequiredUserInputsOrThrow_();
+    validateAllInputsOrThrow_(fy, opt);
+    validateRequiredUserInputsOrThrow_(opt);
     runHierarchicalA9AlertsOrThrow_(fy);
     syncSalesFromSalesInput_(fy, client);
     const result = runForecastFYCore_(fy, client);

@@ -40,6 +40,19 @@ Trends2Targets_System/
 
 計画は所有者が `apiOwnerTask` の `createPlan` で作ります（画面に計画を作る操作はありません。旧来の A-1 初期セットアップを計算用ブックで動かして保存。2026-10-05 に旧ブックからの取り込みを外した）。
 
+### 主観情報なしのテスト予測（v0.43.1・2026-10-17）
+
+測る専用（`purpose:"MEASURE"`）の計画は、担当者を空にして、過去の売上だけで予測できます。製品・メーカー・担当者の見解・スポットの行や理由を架空に補う必要はありません。入力済みの値の検証と影響の確認は引き続き行い、有効な入力があれば使います。通常計画の担当者・見解・製品の理由の必須条件は変えていません。
+
+所有者が `OWNER_TASK` に次の操作を順に入れて `apiOwnerTask` を実行します。各処理が `DONE` になるまで、置き換わった `jobStatus` で確認してから次へ進みます。
+
+1. `{"action":"createPlan","clientName":"（planCandidates の zac）","fy":2026,"peopleCsv":"","purpose":"MEASURE"}`
+2. `{"action":"importSales","planId":"PL-…"}`（過去の売上を取り込む）
+3. `{"action":"aggregateSales","planId":"PL-…"}`（月ごとに集計）
+4. `{"action":"runForecast","planId":"PL-…"}`（予測を保存）
+
+FY2026 は 2026/04〜2027/03 です。結果は「予測一覧」「予測結果」で確認できます。測る専用は最大 5 計画で、ホーム・分析の合計、予算の保存、公式版、自動の市場調査からは除かれます。同じメーカー・年度の通常計画がある場合は重複して作れません。`importSales`・`aggregateSales` は既存の `PLAN.RUN`、`runForecast` は `FORECAST.RUN` と同じ検証・権限・監査・保存を通ります。
+
 ## 旧来の計算（段階2-2）
 
 - 旧来の計算（ルートの `Forecast_Agent.js`）と旧来の Web アプリ（`Forecast_WebApp.js`）は、`app/src/LegacyEngine.js` にそのまま関数で包んで入れます（自動生成。中身は1文字も変えない）。**どちらかを変えたら作り直してください**（`app/tests/app-engine.test.mjs` が古いと失敗します）。

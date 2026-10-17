@@ -301,7 +301,8 @@ function appLegacyServices_(book, opts) {
 
 /**
  * 計算用ブックの上で旧来の予測（A-9 runPhase1Forecast）を動かす。乱数の種・ID の種・「今」を固定する。
- * opts: { asOfMs, seed, uuidSeed, confirms: ['extreme', ...], actor }
+ * opts: { asOfMs, seed, uuidSeed, confirms: ['extreme', ...], actor, allowMissingUserInputs }
+ *   allowMissingUserInputs … 測る専用の計画で、担当者・主観の未入力を中立のまま許す。入力済みの値は通常どおり検証する
  *   seed     … 乱数（Math.random）の種。文字か、旧来の計算の版（{ version, sourceSha256 }）から種を作る関数
  *               （予測は Forecast.js の appForecastSeed_: 同じ入力・同じ版なら同じ種 = 同じ P10/P50/P90）
  *   uuidSeed … 旧来の計算が作る ID（FORECAST_SNAPSHOT の snapshot_id・AI_IMPACT_HISTORY の run_id など）の種。実行ごとに違う値（実行の ID）にする。
@@ -317,7 +318,7 @@ function appRunLegacyForecast_(book, opts) {
     Object.keys(eng.WEB_UI_CONFIRMS_).forEach(k => { delete eng.WEB_UI_CONFIRMS_[k]; });
     (opts.confirms || []).forEach(k => { eng.WEB_UI_CONFIRMS_[String(k)] = true; });
     try {
-      eng.runPhase1Forecast();
+      eng.runPhase1Forecast({ allowMissingUserInputs: opts.allowMissingUserInputs === true });
       return { ok: true, version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256, seed: seed };
     } catch (e) {
       if (e && e.webConfirm) return { ok: false, needConfirm: e.webConfirm, version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256, seed: seed };

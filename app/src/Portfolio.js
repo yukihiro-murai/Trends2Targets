@@ -39,7 +39,7 @@ function appPlanCreateCheck_(p) {
   if (clientName.length > 100) throw new Error('メーカーの名前が長すぎます。');
   if (!fy || fy < 2000 || fy > 2100 || Math.floor(fy) !== fy) throw new Error('年度（FY）を 4 桁の数で入れてください。');
   appRequireOpenYear_(fy);   // 締めた年度には、新しい計画を作れない（組み立て・保存の両方で確かめる）
-  if (!people.length) throw new Error('担当者を 1 人以上入れてください。');
+  if (!people.length && purpose !== APP_PLAN_MEASURE) throw new Error('担当者を 1 人以上入れてください。');
   if (people.some(x => x.length > 40)) throw new Error('担当者の名前が長すぎます。');
   appPlanCheckArgs_([clientName].concat(people));
   const normalized = appNormalizeName_(clientName);
