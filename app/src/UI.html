@@ -2964,10 +2964,16 @@ function fcBudgetTab(d, v){
 function fcMonthlyPlanning(p, ms, annual, shown){
   var yenInt = function(n){ return isNum(n) && n >= 0 && Math.floor(n) === n && n <= 9007199254740991; };
   var key = function(s){ var m = /^(\d{4})[\/-](0[1-9]|1[0-2])$/.exec(String(s || '')); return m ? m[1] + '/' + m[2] : ''; };
-  if (!p || p.version !== 'HISTORY_MONTHLY_POINT_V1' || p.applied !== true || typeof p.method !== 'string' || !p.method
+  var independent = !!p && p.version === 'HISTORY_MONTHLY_POINT_V2';
+  if (!p || (p.version !== 'HISTORY_MONTHLY_POINT_V1' && !independent) || p.applied !== true || typeof p.method !== 'string' || !p.method
       || !yenInt(p.annualTarget) || !Array.isArray(p.months) || p.months.length !== 12 || ms.length !== 12
-      || !isNum(annual.p50) || Math.round(annual.p50) !== p.annualTarget
-      || !isNum(shown.p50) || Math.round(shown.p50) !== p.annualTarget) return null;
+      || !isNum(annual.p50) || !isNum(shown.p50)) return null;
+  if (independent) {
+    // V2の年額は月次予測の合計。現在の回の年度中央値との照合は保ち、同額にはそろえない。
+    if (!p.method.trim() || !isNum(p.annualRawP50) || p.annualRawP50 < 0 || annual.p50 < 0
+        || Math.abs(p.annualRawP50 - annual.p50) > Math.max(1e-6, Math.abs(annual.p50) * 1e-12)
+        || Math.round(shown.p50) !== Math.round(p.annualRawP50)) return null;
+  } else if (Math.round(annual.p50) !== p.annualTarget || Math.round(shown.p50) !== p.annualTarget) return null;
   var byMonth = {}, seen = {}, sum = 0, valid = true;
   p.months.forEach(function(m){
     var k = m && key(m.ym);
@@ -2980,7 +2986,7 @@ function fcMonthlyPlanning(p, ms, annual, shown){
     if (!k || seen[k] || !Object.prototype.hasOwnProperty.call(byMonth, k)) { valid = false; return null; }
     seen[k] = true; return byMonth[k];
   });
-  return valid && sum === p.annualTarget ? { points: points, annualTarget: p.annualTarget } : null;
+  return valid && sum === p.annualTarget ? { version: p.version, points: points, annualTarget: p.annualTarget } : null;
 }
 /** 月ごとの表とグラフ（mode = result: 見通しだけ・budget: 中心と予算の欄） */
 function fcMonthlyTab(d, v, mode){
@@ -2996,11 +3002,13 @@ function fcMonthlyTab(d, v, mode){
   var lv = sh && sh.live && sh.annual ? sh.annual : null, ka = lv || annual, lvBand = lv ? fcLiveBandTip(lv, al) : '';
   if (!ran || !sec) return guide(canPlan ? 'explain' : 'observe', canPlan ? 'まだ予測がありません。予測準備で実行すると、ここに出ます。' : 'まだ予測がありません。');
   var planning = mode === 'result' ? fcMonthlyPlanning(d.planning, ms, annual, ka) : null;
-  var planningTip = '年間の中心額を過去の月別傾向で配分した見込額。月中央値とは異なる';
-  html += '<div class="kpis">' + (showBud ? '' : fcKpi(qName('p10'), ka.p10, false, qTip('p10') + '（年度合計）', false, lv ? { after: lvBand } : null))
-    + fcKpi(qName('p50'), planning ? planning.annualTarget : ka.p50, !showBud, (lv ? fcLiveMidHead(lv) : qTip('p50')) + '（年度合計）', false, lv ? { after: fcLiveTip(lv, annual, lvBand) }
-      : al ? { after: fcAlignedTip(al, sh.reach, !!(d.plan && d.plan.frozen) || !!(v.plan && v.plan.frozen)) } : null)
-    + (showBud ? '' : fcKpi(qName('p90'), ka.p90, false, qTip('p90') + '（年度合計）', false, lv ? { after: lvBand } : null))
+  var planningV2 = !!planning && planning.version === 'HISTORY_MONTHLY_POINT_V2';
+  var planningTip = planningV2 ? '過去の実績に基づく月別の見込額。月中央値とは異なる' : '年間の中心額を過去の月別傾向で配分した見込額。月中央値とは異なる';
+  html += '<div class="kpis">' + (showBud ? '' : fcKpi(qName('p10'), ka.p10, false, (planningV2 ? '従来モデル：' : '') + qTip('p10') + '（年度合計）', false, lv ? { after: lvBand } : null))
+    + (planningV2 ? fcKpi('月次予測の合計', planning.annualTarget, true, '月次予測の合計', false)
+      : fcKpi(qName('p50'), planning ? planning.annualTarget : ka.p50, !showBud, (lv ? fcLiveMidHead(lv) : qTip('p50')) + '（年度合計）', false, lv ? { after: fcLiveTip(lv, annual, lvBand) }
+        : al ? { after: fcAlignedTip(al, sh.reach, !!(d.plan && d.plan.frozen) || !!(v.plan && v.plan.frozen)) } : null))
+    + (showBud ? '' : fcKpi(qName('p90'), ka.p90, false, (planningV2 ? '従来モデル：' : '') + qTip('p90') + '（年度合計）', false, lv ? { after: lvBand } : null))
     + (showBud ? fcKpi('最終予算', sec.annual.final, true, '採用予測と上乗せの年度合計' + fcFinalReachTip(sh))
       + fcKpi('上乗せ', sec.annual.uplift, false, '採用予測に足した分の年度合計（挑戦の分）', true) + fcReachKpi(sh) : '') + '</div>'
     + (showBud ? fcBudgetGauge(ka, sec.annual.final, sh) : '');
@@ -3014,10 +3022,10 @@ function fcMonthlyTab(d, v, mode){
   var cell = function(m, k){ var x = bd[m.row]; var val = x && x[k] !== undefined ? x[k] : m[k];
     return canBudget ? '<input class="inp cell num" type="text" inputmode="numeric" value="' + esc(fcYenIn(val)) + '" onfocus="fcNumFocus(this)" onblur="fcNumBlur(this)" oninput="fcBudget(' + m.row + ',\'' + k + '\',this.value)" aria-label="' + esc(m.month) + (k === 'adopted' ? ' 採用予測' : ' 上乗せ') + '">' : yen(val); };
   var chart = chartLine([{ label: planning ? '月次予測' : qName('p50'), values: planning ? planning.points : ms.map(function(m){ return m.p50; }) }].concat(showBud ? [{ label: '最終予算', values: ms.map(function(m){ return m.final; }), tone: 'navy' }] : []),
-    { x: ms.map(function(m){ return fcMon(m.month); }), band: ms.map(function(m){ return { lo: m.p10, hi: m.p90 }; }), bandLabel: qName('p10') + '〜' + qName('p90'), yFmt: yenShort, h: 280, label: showBud ? '月ごとの中心と最終予算' : '月ごとの見通し' });
+    { x: ms.map(function(m){ return fcMon(m.month); }), band: ms.map(function(m){ return { lo: m.p10, hi: m.p90 }; }), bandLabel: planningV2 ? '従来モデルの幅' : qName('p10') + '〜' + qName('p90'), yFmt: yenShort, h: 280, label: showBud ? '月ごとの中心と最終予算' : '月ごとの見通し' });
   var bud = function(m, total){ return !showBud ? '' : total ? '<td class="num">' + yen(m.adopted) + '</td><td class="num">' + yen(m.uplift) + '</td><td class="num">' + yen(m.final) + '</td>' + (canBudget ? '<td></td>' : '')
     : '<td class="num">' + cell(m, 'adopted') + '</td><td class="num">' + cell(m, 'uplift') + '</td><td class="num">' + yen(m.final) + '</td>' + (canBudget ? '<td>' + fcRowSave('fcSaveBudget(' + m.row + ')', !!bd[m.row] && !S.fc.budProb) + '</td>' : ''); };
-  var tot = function(k){ return '<td class="num"' + (lv ? ' data-tip="' + esc(fcLiveRowTip(lv, annual)) + '"' : '') + '>' + yen(planning && k === 'p50' ? planning.annualTarget : (lv || sec.annual)[k]) + '</td>'; };
+  var tot = function(k){ return '<td class="num"' + (planningV2 && k === 'p50' ? ' data-tip="月次予測の合計"' : lv ? ' data-tip="' + esc(fcLiveRowTip(lv, annual)) + '"' : '') + '>' + yen(planning && k === 'p50' ? planning.annualTarget : (lv || sec.annual)[k]) + '</td>'; };
   // 列: 予測結果 = 月・下振れ・月次予測（無ければ中心）・上振れ / 予算策定 = 月・中心・採用予測・上乗せ（入れる欄。金額の 1 マス YEN_COL）・最終予算
   var table = '<table class="tbl scroll' + (canBudget ? ' edit' : '') + '"><colgroup><col style="width:96px">' + (showBud ? '<col><col style="width:' + YEN_COL + 'px"><col style="width:' + YEN_COL + 'px"><col>' + (canBudget ? '<col style="width:144px">' : '') : '<col><col><col>') + '</colgroup>'
     + '<thead><tr><th>月</th>' + (showBud ? qTh('p50') + '<th class="num" data-tip="予算のもとにする予測（月ごと）">採用予測</th><th class="num" data-tip="採用予測に足す分（マイナスもできます）">上乗せ</th><th class="num" data-tip="採用予測 + 上乗せ">最終予算</th>' + (canBudget ? '<th></th>' : '') : qTh('p10') + (planning ? '<th class="num" data-tip="' + esc(planningTip) + '">月次予測</th>' : qTh('p50')) + qTh('p90')) + '</tr></thead><tbody>'
@@ -3027,7 +3035,7 @@ function fcMonthlyTab(d, v, mode){
     + '</tbody></table>';
   // 確率で決める・保存は見出しの右（表の下に浮かせない。2026-10-16 村井さん）
   var ctl = canBudget ? '<span class="fc-insave">' + (dirty ? '<span class="chip warn">未保存</span>' : '') + (closed ? '' : fcProbSel(d)) + '</span>' : '';   // 保存は行の横
-  html += '<div class="card"><div class="card-head"><h2>' + (showBud ? '月ごとの予算' : '月ごとの見通し') + tip('帯 = 80% の幅' + (showBud ? '・最終予算 = 採用予測 + 上乗せ' : '') + (planning ? '\n' + planningTip + '\n月次予測の合計は年間の中心額。下振れ・上振れは年度で計算した値です' : '\n' + fcAnnualHeadTip(lv))) + '</h2>' + ctl + '</div>'
+  html += '<div class="card"><div class="card-head"><h2>' + (showBud ? '月ごとの予算' : '月ごとの見通し') + tip((planningV2 ? '帯 = 従来モデルの80%の幅' : '帯 = 80% の幅') + (showBud ? '・最終予算 = 採用予測 + 上乗せ' : '') + (planning ? '\n' + planningTip + (planningV2 ? '\n月次予測の合計と年度中央値は異なります。下振れ・上振れは年度で計算した値です' : '\n月次予測の合計は年間の中心額。下振れ・上振れは年度で計算した値です') : '\n' + fcAnnualHeadTip(lv))) + '</h2>' + ctl + '</div>'
     + chartOrTable(cv, chart, table)
     + (planning ? '<details class="mt12"><summary class="note">中央値を見る</summary><div class="tblwrap mt8"><table class="tbl scroll"><colgroup><col style="width:96px"><col></colgroup><thead><tr><th>月</th><th class="num" data-tip="各月の売上を何度も試して出した真ん中の値">中央値</th></tr></thead><tbody>'
       + ms.map(function(m){ return '<tr><td>' + esc(m.month) + '</td><td class="num">' + yen(m.p50) + '</td></tr>'; }).join('')

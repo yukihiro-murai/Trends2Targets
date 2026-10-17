@@ -70,7 +70,7 @@ function appForecastSeed_(plan, forecastInputHash, engine) {
  * 種に APP_VERSION が入るので、版を上げた後の最初の予測は、同じ入力でも数字が少し動く（版 10 の手元の試しで年間の中心 −0.56%）
  */
 const APP_FORECAST_SEED_RULE = 'INPUT_V1';
-const APP_FORECAST_FIXES = ['HISTORY_ANNUAL_ANCHOR_V1', 'HISTORY_SPOT_TIMING_V1', 'HISTORY_MONTHLY_POINT_V1'];
+const APP_FORECAST_FIXES = ['HISTORY_ANNUAL_ANCHOR_V1', 'HISTORY_SPOT_TIMING_V1', 'HISTORY_MONTHLY_POINT_V1', 'HISTORY_MONTHLY_POINT_V2'];
 
 /**
  * 計画用月額の小さな控えだけを受け取る。中央値・予測帯とは別で、旧回や不完全な控えを補完しない。
@@ -84,10 +84,12 @@ function appForecastPlanningOf_(raw, fy, annualRawP50) {
   const finite = v => typeof v === 'number' && isFinite(v);
   const integer = v => finite(v) && Number.isSafeInteger(v) && v >= 0;
   const year = Number(fy);
-  if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 'HISTORY_MONTHLY_POINT_V1' || value.applied !== true ||
+  const v1 = value && value.version === 'HISTORY_MONTHLY_POINT_V1', v2 = value && value.version === 'HISTORY_MONTHLY_POINT_V2';
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (!v1 && !v2) || value.applied !== true ||
       !Number.isInteger(year) || year < 1000 || year > 9998 || typeof value.method !== 'string' || !value.method.trim() || value.method.length > 120 ||
-      !finite(value.annualRawP50) || value.annualRawP50 < 0 || !integer(value.annualTarget) || value.annualTarget !== Math.round(value.annualRawP50) ||
-      !finite(annualRawP50) || annualRawP50 < 0 || value.annualTarget !== Math.round(annualRawP50) ||
+      !finite(value.annualRawP50) || value.annualRawP50 < 0 || !integer(value.annualTarget) ||
+      (v1 && value.annualTarget !== Math.round(value.annualRawP50)) || (v2 && value.annualBasis !== 'sum_monthly_points') ||
+      !finite(annualRawP50) || annualRawP50 < 0 || (v1 && value.annualTarget !== Math.round(annualRawP50)) ||
       Math.abs(value.annualRawP50 - annualRawP50) > Math.max(1e-6, Math.abs(annualRawP50) * 1e-12) ||
       typeof value.trainingThroughYm !== 'string' || !/^\d{4}\/(0[1-9]|1[0-2])$/.test(value.trainingThroughYm) || value.trainingThroughYm >= year + '/04' ||
       !Array.isArray(value.months) || value.months.length !== 12) return null;
@@ -105,7 +107,7 @@ function appForecastPlanningOf_(raw, fy, annualRawP50) {
     total += m.point; shares += m.share; means += m.mean;
   }
   if (!Number.isSafeInteger(total) || total !== value.annualTarget || !isFinite(means) ||
-      (value.annualTarget > 0 && !(means > 0)) ||
+      (v1 && value.annualTarget > 0 && !(means > 0)) ||
       !(Math.abs(shares - 1) <= 1e-8 || (value.annualTarget === 0 && Math.abs(shares) <= 1e-8))) return null;
   const out = { version: value.version, applied: true, method: value.method.trim(), annualRawP50: value.annualRawP50,
     annualTarget: value.annualTarget, trainingThroughYm: value.trainingThroughYm, months: expected.map(ym => byYm[ym]) };
@@ -119,7 +121,37 @@ function appForecastPlanningOf_(raw, fy, annualRawP50) {
     if (!both || (isFinite(sum) && Math.abs(value.baseWeight - weight) <= 1e-9)) out.baseWeight = value.baseWeight;
   }
   if (['mc_base_mean', 'last12_base'].indexOf(value.baseProfileBasis) >= 0) out.baseProfileBasis = value.baseProfileBasis;
-  if (value.annualBasis === 'annual_p50_rounded_yen') out.annualBasis = value.annualBasis;
+  if (v1 && value.annualBasis === 'annual_p50_rounded_yen') out.annualBasis = value.annualBasis;
+  if (v2) {
+    // V2の年度計画額は月額合計。旧年度P50/MC平均が0でも、履歴から出した正の月額を消さない。
+    out.annualBasis = 'sum_monthly_points';
+    const ym = s => typeof s === 'string' && /^\d{4}\/(0[1-9]|1[0-2])$/.test(s);
+    if (ym(value.cleanHistoryStartYm) && Number(value.cleanHistoryStartYm.slice(0, 4)) >= 1000 && value.cleanHistoryStartYm <= value.trainingThroughYm) out.cleanHistoryStartYm = value.cleanHistoryStartYm;
+    if (Array.isArray(value.historyYearsUsed) && value.historyYearsUsed.length >= 1 && value.historyYearsUsed.length <= 3 &&
+        value.historyYearsUsed.every((y, i, a) => Number.isInteger(y) && y >= 1000 && y < year && (!i || y > a[i - 1]) &&
+          (!out.cleanHistoryStartYm || y + '/04' >= out.cleanHistoryStartYm) && (y + 1) + '/03' <= value.trainingThroughYm)) {
+      out.historyYearsUsed = value.historyYearsUsed.slice();
+    }
+    const allowed = { basePointBasis: ['mc_base_p50', 'history_month_median'], spotPointBasis: ['history_month_median', 'history_quarter_median'],
+      baseFallback: ['none', 'monthly_mean'], spotFallback: ['none', 'monthly_mean', 'quarter_mean'],
+      zeroRoundedFallback: ['none', 'prior12_component_profile'] };
+    Object.keys(allowed).forEach(k => { if (allowed[k].indexOf(value[k]) >= 0) out[k] = value[k]; });
+    if (integer(value.spotPositiveMonths24) && value.spotPositiveMonths24 <= 24) out.spotPositiveMonths24 = value.spotPositiveMonths24;
+    if (integer(value.spotQuarterPhase) && value.spotQuarterPhase >= 1 && value.spotQuarterPhase <= 3) out.spotQuarterPhase = value.spotQuarterPhase;
+    if (typeof value.inactive === 'boolean' && (!value.inactive || value.annualTarget === 0)) out.inactive = value.inactive;
+    // 発生月の再現性は一組の任意根拠。欠けた件数や別年度の重みを混ぜて表示しない。
+    const timingKeys = ['timingHeldoutFy', 'timingTrainingYears', 'timingSupport', 'timingHits', 'spotTimingWeight', 'timingRescue', 'timingStatus'];
+    const n = value.timingSupport, h = value.timingHits;
+    if (value.timingHeldoutFy === year - 1 && Array.isArray(value.timingTrainingYears) &&
+        value.timingTrainingYears.length >= 1 && value.timingTrainingYears.length <= 2 &&
+        value.timingTrainingYears.every((y, i, a) => Number.isInteger(y) && y >= 1000 && y <= year - 2 && (!i || y > a[i - 1])) &&
+        integer(n) && n <= 12 && integer(h) && h <= n && finite(value.spotTimingWeight) &&
+        Math.abs(value.spotTimingWeight - (h + 1) / (n + 2)) <= 1e-12 &&
+        ['none', 'inactive', 'prior12_weighted_profile', 'prior12_unweighted_profile'].indexOf(value.timingRescue) >= 0 &&
+        value.timingStatus === (n === 0 ? 'prior_half_no_support' : 'beta11_calendar_support_shrink')) {
+      timingKeys.forEach(k => { out[k] = Array.isArray(value[k]) ? value[k].slice() : value[k]; });
+    }
+  }
   return appUtf8Bytes_(JSON.stringify(out)) <= 4000 ? out : null;
 }
 

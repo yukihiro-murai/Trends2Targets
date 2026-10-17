@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.6-dev、SHA-256 d31a2efed12e26bb60bcdf7f1fc9d3fbcbfb1fc4902251b7439b8015a916cf77）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.7-dev、SHA-256 c430e2e2f75741abbb0ae733136ed4e843178b3dc05d834ccd0e07aa0c54bba0）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,9 +31,9 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.6-dev';
-// FY2024の比較で選ぶ月次点予測。P50/予測帯とは別の年額配分として保存する。
-const HISTORY_MONTHLY_POINT_METHOD = 'BASE_MC_SPOT_EWMA24';
+const VERSION = '2.7.7-dev';
+// FY2024で固定し既知のFY2025/FY2026上期で確認。月点の合計は年度P50とは別。
+const HISTORY_MONTHLY_POINT_METHOD = 'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -4949,12 +4949,163 @@ function allocateAnnualYen_(annual, weights) {
   return { points, shares };
 }
 
-/**
- * 年度中心をBASE/SPOTへ分けて配分する点予測。月中央値や確率帯は変更しない。
- * SPOTの履歴のない月を均等配分で埋めず、BASEは既存MCの平均形状を使う。
- */
+/** 点予測だけの中央値。固定検証と同じ加重型補間で、円配分の端数tieを保つ。 */
+function historyMonthlyPointMedian_(a) {
+  if (!Array.isArray(a) || !a.length || a.some(v => typeof v !== 'number' || !isFinite(v))) throw new Error('月次予測の中央値入力が不正です。');
+  const sorted = a.slice().sort((x, y) => x - y), pos = (sorted.length - 1) / 2, i = Math.floor(pos), f = pos - i;
+  return sorted[i] * (1 - f) + sorted[Math.min(i + 1, sorted.length - 1)] * f;
+}
+
+/** 月額の推定値を円丸めする。年度の分位点へ再スケールせず、元の端数順位を保つ。 */
+function roundMonthlyPointYen_(raw) {
+  if (!Array.isArray(raw) || raw.length !== 12 || raw.some(v => typeof v !== 'number' || !isFinite(v) || v < 0)) {
+    throw new Error('月次予測の推定額が不正です。');
+  }
+  const total = sumArr_(raw), annualTarget = Math.round(total);
+  if (!isFinite(total) || !Number.isSafeInteger(annualTarget) || annualTarget < 0) throw new Error('月次予測の合計が不正です。');
+  const points = raw.map(Math.floor), remain = annualTarget - sumArr_(points);
+  if (!Number.isSafeInteger(remain) || remain < 0 || remain > 12) throw new Error('月次予測の円丸めに失敗しました。');
+  const order = raw.map((v, i) => ({ i, fraction: v - points[i] })).sort((a, b) => b.fraction - a.fraction || a.i - b.i);
+  for (let i = 0; i < remain; i++) points[order[i].i]++;
+  return { points, annualTarget, shares: total > 0 ? raw.map(v => v / total) : new Array(12).fill(0) };
+}
+
+/** 直前年を検証し、さらに前の1～2年だけで月位置の再現性を測る。MC/乱数/対象年度実績は使わない。 */
+function historySpotTimingReliability_(trainingYears, heldout, heldoutFy) {
+  if (!Array.isArray(trainingYears) || trainingYears.length < 1 || trainingYears.length > 2 ||
+      trainingYears.some(a => !Array.isArray(a) || a.length !== 12 || a.some(v => typeof v !== 'number' || !isFinite(v))) ||
+      !Array.isArray(heldout) || heldout.length !== 12 || heldout.some(v => typeof v !== 'number' || !isFinite(v))) {
+    throw new Error('SPOT月位置の過去検証履歴が不正です。');
+  }
+  const latest = trainingYears[trainingYears.length - 1], net = sumArr_(latest), cap = Math.max(0, net);
+  if (!isFinite(net)) throw new Error('SPOT月位置の成分年額が不正です。');
+  const flat = [].concat.apply([], trainingYears), dense = flat.filter(v => v > 0).length > flat.length / 2;
+  let raw = new Array(12).fill(0);
+  if (net > 0) {
+    if (dense) {
+      raw = raw.map((_, m) => historyMonthlyPointMedian_(trainingYears.map(a => Math.max(0, a[m]))));
+      if (sumArr_(raw) === 0) raw = raw.map((_, m) => meanArr_(trainingYears.map(a => Math.max(0, a[m]))));
+    } else {
+      const quarters = trainingYears.map(a => [0, 1, 2, 3].map(q => Math.max(0, sumArr_(a.slice(q * 3, q * 3 + 3)))));
+      let q = [0, 1, 2, 3].map(i => historyMonthlyPointMedian_(quarters.map(a => a[i])));
+      if (sumArr_(q) === 0) q = q.map((_, i) => meanArr_(quarters.map(a => a[i])));
+      q.forEach((v, i) => { raw[i * 3 + 2] = v; });
+    }
+  }
+  const total = sumArr_(raw), scale = cap <= 0 ? 0 : total > 0 ? Math.min(1, cap / total) : 1;
+  let allocation = roundMonthlyPointYen_(raw.map(v => v * scale));
+  if (allocation.annualTarget === 0 && net >= 1) {
+    const profile = latest.map(v => Math.max(0, v)), ptotal = sumArr_(profile), factor = ptotal > 0 ? Math.min(1, cap / ptotal) : 1;
+    allocation = roundMonthlyPointYen_(profile.map(v => v * factor));
+  }
+  const support = allocation.points.filter(v => v > 0).length;
+  const hits = allocation.points.filter((v, m) => v > 0 && heldout[m] > 0).length;
+  // Beta(1,1)による追加縮小。確率校正や条件付き金額の期待値とは呼ばない。
+  return { heldoutFy, support, hits, weight: (hits + 1) / (support + 2) };
+}
+
+/** 分類の揃う履歴窓でBASE/SPOTの点推定を分け、過去の月位置の再現性でSPOTを縮める。 */
+function estimateHistoryMonthlyPoint_(months, history, opsMatrix, method) {
+  const result = { applied: false, reason: 'invalid_point_inputs' };
+  const base = history && history.baseSeries48 || [], spot = history && history.spotSeries48 || [];
+  const headers = history && history.headerMonths || [];
+  const spec = String(method || '') === 'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING' ? ['fixed', 'BASE_MC_P50', '3'] : null;
+  const date = v => v && typeof v.getTime === 'function' && isFinite(v.getTime());
+  if (!spec || !Array.isArray(months) || months.length !== 12 || months.some(v => !date(v)) || months[0].getMonth() !== 3 ||
+      base.length < 24 || spot.length !== base.length || headers.length !== base.length ||
+      headers.some((h, i) => !date(h) || (i && fmtYM_(h) !== fmtYM_(addMonths_(headers[i - 1], 1))))) return result;
+  const fy = months[0].getFullYear(), phase = Number(spec[2]);
+  if (months.some((m, i) => fmtYM_(m) !== fmtYM_(addMonths_(months[0], i)))) return result;
+  const last12Base = base.slice(-12), last12Spot = spot.slice(-12);
+  if (last12Base.concat(last12Spot).some(v => typeof v !== 'number' || !isFinite(v)) ||
+      !date(headers[headers.length - 1]) || fmtYM_(headers[headers.length - 1]) !== (fy + '/03')) return result;
+  const years = [], baseYears = [], spotYears = [];
+  // 2022/04以降を分類の概ね揃う窓とする品質上の仮定。厳密な導入日や当時の分類版の証明ではない。
+  for (let y = Math.max(2022, fy - 3); y < fy; y++) {
+    const by = [], sy = [];
+    let complete = true;
+    for (let m = 0; m < 12; m++) {
+      const expected = fmtYM_(new Date(y, 3 + m, 1));
+      const indexes = [];
+      headers.forEach((h, i) => { if (date(h) && fmtYM_(h) === expected) indexes.push(i); });
+      if (indexes.length !== 1) { complete = false; break; }
+      const i = indexes[0];
+      if (typeof base[i] !== 'number' || !isFinite(base[i]) || typeof spot[i] !== 'number' || !isFinite(spot[i])) return result;
+      by.push(base[i]); sy.push(spot[i]);
+    }
+    // 最古の不完全年度を観測ゼロで埋めず、完全な直近2～3年度だけを使う。
+    if (complete) { years.push(y); baseYears.push(by); spotYears.push(sy); }
+  }
+  if (years.length < 2) { result.reason = 'insufficient_clean_history'; return result; }
+  const bNet12 = sumArr_(last12Base), sNet12 = sumArr_(last12Spot);
+  if (![bNet12, sNet12, bNet12 + sNet12].every(isFinite)) return result;
+  const inactive = bNet12 + sNet12 <= 0;
+  const positiveMonths = spot.slice(-24).filter(v => v > 0).length;
+  const dense = positiveMonths > 12;
+  const basePointBasis = 'mc_base_p50';
+  const spotPointBasis = dense ? 'history_month_median' : 'history_quarter_median';
+  let baseFallback = 'none', spotFallback = 'none';
+  let b = opsMatrix.map(historyMonthlyPointMedian_);
+  if (!inactive && sumArr_(b) === 0 && bNet12 > 0) {
+    b = months.map((_, m) => meanArr_(baseYears.map(a => Math.max(0, a[m])))); baseFallback = 'monthly_mean';
+  }
+  let s = new Array(12).fill(0);
+  if (dense) {
+    s = months.map((_, m) => historyMonthlyPointMedian_(spotYears.map(a => Math.max(0, a[m]))));
+    if (!inactive && sumArr_(s) === 0 && sNet12 > 0) {
+      s = months.map((_, m) => meanArr_(spotYears.map(a => Math.max(0, a[m])))); spotFallback = 'monthly_mean';
+    }
+  } else {
+    const quarters = spotYears.map(a => [0, 1, 2, 3].map(q => Math.max(0, sumArr_(a.slice(q * 3, q * 3 + 3)))));
+    let q = [0, 1, 2, 3].map(i => historyMonthlyPointMedian_(quarters.map(a => a[i])));
+    if (!inactive && sumArr_(q) === 0 && sNet12 > 0) {
+      q = [0, 1, 2, 3].map(i => meanArr_(quarters.map(a => a[i]))); spotFallback = 'quarter_mean';
+    }
+    q.forEach((v, i) => { s[i * 3 + phase - 1] = v; });
+  }
+  // 過去の大口を平均で持ち戻しても直近の各成分net年額を超えて増やさない。
+  const capComponent = (a, net) => {
+    const sum = sumArr_(a), cap = Math.max(0, net);
+    if (!isFinite(sum) || !isFinite(cap)) throw new Error('成分の上限が不正です。');
+    const scale = cap > 0 && sum > 0 ? Math.min(1, cap / sum) : 0;
+    return a.map(v => v * scale);
+  };
+  b = capComponent(b, bNet12); s = capComponent(s, sNet12);
+  if (inactive) { b = new Array(12).fill(0); s = new Array(12).fill(0); }
+  let raw = b.map((v, m) => v + s[m]);
+  if (raw.some(v => !isFinite(v) || v < 0)) return result;
+  let allocation = roundMonthlyPointYen_(raw), zeroRoundedFallback = 'none';
+  // 円未満のMC残差を12月の見込額にしない。丸め後全0なら、直近年の認識済み月額へ戻す。
+  // 最低1円を足す処理ではなく、返品を含む成分netを上限にした実績プロフィールを使う。
+  if (allocation.annualTarget === 0 && bNet12 + sNet12 >= 1) {
+    b = capComponent(last12Base.map(v => Math.max(0, v)), bNet12);
+    s = capComponent(last12Spot.map(v => Math.max(0, v)), sNet12);
+    raw = b.map((v, m) => v + s[m]); allocation = roundMonthlyPointYen_(raw);
+    zeroRoundedFallback = 'prior12_component_profile';
+  }
+  const timing = historySpotTimingReliability_(spotYears.slice(0, -1).slice(-2), spotYears[spotYears.length - 1], years[years.length - 1]);
+  s = s.map(v => v * timing.weight);
+  raw = b.map((v, m) => v + s[m]); allocation = roundMonthlyPointYen_(raw);
+  let timingRescue = inactive ? 'inactive' : 'none';
+  if (allocation.annualTarget === 0 && bNet12 + sNet12 >= 1) {
+    b = capComponent(last12Base.map(v => Math.max(0, v)), bNet12);
+    const profileSpot = capComponent(last12Spot.map(v => Math.max(0, v)), sNet12);
+    s = profileSpot.map(v => v * timing.weight);
+    raw = b.map((v, m) => v + s[m]); allocation = roundMonthlyPointYen_(raw); timingRescue = 'prior12_weighted_profile';
+    if (allocation.annualTarget === 0) {
+      s = profileSpot; raw = b.map((v, m) => v + s[m]); allocation = roundMonthlyPointYen_(raw); timingRescue = 'prior12_unweighted_profile';
+    }
+  }
+  return Object.assign(result, allocation, { applied: true, reason: inactive ? 'inactive_or_nonpositive_prior12_net' : '',
+    cleanHistoryStartYm: years[0] + '/04', historyYearsUsed: years, basePointBasis, spotPointBasis,
+    spotPositiveMonths24: positiveMonths, spotQuarterPhase: phase, baseFallback, spotFallback, zeroRoundedFallback, inactive,
+    timingHeldoutFy: timing.heldoutFy, timingTrainingYears: years.slice(0, -1).slice(-2), timingSupport: timing.support, timingHits: timing.hits,
+    spotTimingWeight: timing.weight, timingRescue, timingStatus: timing.support === 0 ? 'prior_half_no_support' : 'beta11_calendar_support_shrink' });
+}
+
+/** 月次の見込額と合計。従来の月・年中央値はリスクの統計量として別に保持する。 */
 function buildHistoryMonthlyPlanning_(mixed, months, history, opt) {
-  const meta = { version: 'HISTORY_MONTHLY_POINT_V1', method: HISTORY_MONTHLY_POINT_METHOD, applied: false, reason: 'history_only_unavailable' };
+  const meta = { version: 'HISTORY_MONTHLY_POINT_V2', method: HISTORY_MONTHLY_POINT_METHOD, applied: false, reason: 'history_only_unavailable' };
   const d = mixed && mixed.diagnostics || {}, anchor = d.historyAnnualAnchor || {};
   if (!(d.historySpotTiming && d.historySpotTiming.eligible)) { meta.reason = anchor.fallbackReason || meta.reason; return meta; }
   if (anchor.componentBasis === 'BASE') { meta.reason = 'background_spot_disabled'; return meta; }
@@ -4962,36 +5113,28 @@ function buildHistoryMonthlyPlanning_(mixed, months, history, opt) {
   if (opt.closedMonthMode === 'actual' && (opt.sourceByMonth || []).some(v => v === 'actual_closed')) {
     meta.reason = 'closed_month_actual_view'; return meta;
   }
-  const base = history && history.baseSeries48 || [], spot = history && history.spotSeries48 || [];
   const matrix = d.totalCalibratedSimByMonth, opsMatrix = d.quantOpsSimByMonth;
-  if (!Array.isArray(months) || months.length !== 12 || base.length < 24 || spot.length < 24 ||
-      base.slice(-24).concat(spot.slice(-24)).some(v => typeof v !== 'number' || !isFinite(v)) ||
-      !Array.isArray(matrix) || matrix.length !== 12 || !Array.isArray(opsMatrix) || opsMatrix.length !== 12) {
-    meta.reason = 'invalid_point_inputs'; return meta;
+  if (!Array.isArray(matrix) || matrix.length !== 12 || !Array.isArray(opsMatrix) || opsMatrix.length !== 12) {
+    meta.reason = 'invalid_point_paths'; return meta;
   }
   const n = Array.isArray(matrix[0]) ? matrix[0].length : 0;
   if (!n || matrix.concat(opsMatrix).some(a => !Array.isArray(a) || a.length !== n || a.some(v => typeof v !== 'number' || !isFinite(v) || v < 0))) {
     meta.reason = 'invalid_point_paths'; return meta;
   }
-  const annualRawP50 = percentile_(aggregateAnnualSim_(matrix), 0.5), annualTarget = Math.round(annualRawP50);
-  if (!isFinite(annualRawP50) || annualRawP50 < 0 || !Number.isSafeInteger(annualTarget)) { meta.reason = 'invalid_point_annual'; return meta; }
-  const recentBase = base.slice(-12).map(v => Math.max(0, v)), recentSpot = spot.slice(-12).map(v => Math.max(0, v));
-  const previousSpot = spot.slice(-24, -12).map(v => Math.max(0, v));
-  const b = sumArr_(recentBase), s = sumArr_(recentSpot);
-  if (b + s === 0 && annualTarget > 0) { meta.reason = 'no_prior12_positive_sales'; return meta; }
-  const normalized = a => { const sum = sumArr_(a); return sum > 0 ? a.map(v => v / sum) : new Array(12).fill(1 / 12); };
-  const opsMean = opsMatrix.map(meanArr_), means = matrix.map(meanArr_);
-  if (opsMean.concat(means).some(v => !isFinite(v))) { meta.reason = 'invalid_point_mean'; return meta; }
-  const useBaseMean = sumArr_(opsMean) >= 1;
-  const baseShare = normalized(useBaseMean ? opsMean : recentBase);
-  // FY2024で固定3候補から選んだ同月形状。直近年2、前々年1。月次netの正部分を使う。
-  const spotShape = recentSpot.map((v, i) => (2 * v + previousSpot[i]) / 3);
-  const spotShare = normalized(spotShape), alpha = b + s > 0 ? b / (b + s) : 0;
-  const allocation = allocateAnnualYen_(annualTarget, baseShare.map((v, i) => alpha * v + (1 - alpha) * spotShare[i]));
-  return Object.assign(meta, { applied: true, reason: '', annualRawP50, annualTarget, trainingThroughYm: anchor.trainingThroughYm,
-    componentBasis: 'positive_month_net_BASE_SPOT_last12', baseAnnualPositive: b, spotAnnualPositive: s, baseWeight: alpha,
-    baseProfileBasis: useBaseMean ? 'mc_base_mean' : 'last12_base', annualBasis: 'annual_p50_rounded_yen',
-    months: months.map((m, i) => ({ ym: fmtYM_(m), point: allocation.points[i], share: allocation.shares[i], mean: means[i] })) });
+  const annualRawP50 = percentile_(aggregateAnnualSim_(matrix), 0.5), means = matrix.map(meanArr_);
+  if (!isFinite(annualRawP50) || annualRawP50 < 0 || means.some(v => !isFinite(v))) { meta.reason = 'invalid_point_annual'; return meta; }
+  let point;
+  try { point = estimateHistoryMonthlyPoint_(months, history, opsMatrix, HISTORY_MONTHLY_POINT_METHOD); }
+  catch (e) { Logger.log('月次点予測の数値検証で未適用: ' + String(e && e.message || e)); meta.reason = 'invalid_point_amounts'; return meta; }
+  if (!point.applied) { meta.reason = point.reason; return meta; }
+  return Object.assign(meta, { applied: true, reason: point.reason, annualRawP50, annualTarget: point.annualTarget,
+    trainingThroughYm: anchor.trainingThroughYm, annualBasis: 'sum_monthly_points',
+    cleanHistoryStartYm: point.cleanHistoryStartYm, historyYearsUsed: point.historyYearsUsed, basePointBasis: point.basePointBasis,
+    spotPointBasis: point.spotPointBasis, spotPositiveMonths24: point.spotPositiveMonths24, spotQuarterPhase: point.spotQuarterPhase,
+    baseFallback: point.baseFallback, spotFallback: point.spotFallback, zeroRoundedFallback: point.zeroRoundedFallback, inactive: point.inactive,
+    timingHeldoutFy: point.timingHeldoutFy, timingTrainingYears: point.timingTrainingYears, timingSupport: point.timingSupport, timingHits: point.timingHits,
+    spotTimingWeight: point.spotTimingWeight, timingRescue: point.timingRescue, timingStatus: point.timingStatus,
+    months: months.map((m, i) => ({ ym: fmtYM_(m), point: point.points[i], share: point.shares[i], mean: means[i] })) });
 }
 
 function forecastMonteCarloMixed_(model, opt) {
@@ -11365,6 +11508,9 @@ function webAuditLogUrl_() {
     runForecastFYCore_: typeof runForecastFYCore_ === 'undefined' ? undefined : runForecastFYCore_,
     buildHistoryMonthlyPlanning_: typeof buildHistoryMonthlyPlanning_ === 'undefined' ? undefined : buildHistoryMonthlyPlanning_,
     allocateAnnualYen_: typeof allocateAnnualYen_ === 'undefined' ? undefined : allocateAnnualYen_,
+    roundMonthlyPointYen_: typeof roundMonthlyPointYen_ === 'undefined' ? undefined : roundMonthlyPointYen_,
+    estimateHistoryMonthlyPoint_: typeof estimateHistoryMonthlyPoint_ === 'undefined' ? undefined : estimateHistoryMonthlyPoint_,
+    historySpotTimingReliability_: typeof historySpotTimingReliability_ === 'undefined' ? undefined : historySpotTimingReliability_,
     HISTORY_MONTHLY_POINT_METHOD: typeof HISTORY_MONTHLY_POINT_METHOD === 'undefined' ? undefined : HISTORY_MONTHLY_POINT_METHOD,
     TRI_METHODS: typeof TRI_METHODS === 'undefined' ? undefined : TRI_METHODS,
     TRI_PRIOR_WEIGHTS: typeof TRI_PRIOR_WEIGHTS === 'undefined' ? undefined : TRI_PRIOR_WEIGHTS,
@@ -11375,7 +11521,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: 'd31a2efed12e26bb60bcdf7f1fc9d3fbcbfb1fc4902251b7439b8015a916cf77',
+    SOURCE_SHA256: 'c430e2e2f75741abbb0ae733136ed4e843178b3dc05d834ccd0e07aa0c54bba0',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

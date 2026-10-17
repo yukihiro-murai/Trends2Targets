@@ -6,6 +6,9 @@ const months = Array.from({ length: 12 }, (_, i) => `${i < 9 ? 2026 : 2027}/${St
 const point = () => ({ version: 'HISTORY_MONTHLY_POINT_V1', applied: true, method: 'TEST_EXPECTATION_SHARE',
   annualRawP50: 1000.4, annualTarget: 1000, trainingThroughYm: '2026/03',
   months: months.map((ym, i) => ({ ym, point: i < 4 ? 84 : 83, share: 1 / 12, mean: 100 + i })) });
+const pointV2 = () => ({ version: 'HISTORY_MONTHLY_POINT_V2', applied: true, method: 'TEST_HISTORY_COMPONENT_POINT',
+  annualRawP50: 1000.4, annualTarget: 1200, annualBasis: 'sum_monthly_points', trainingThroughYm: '2026/03',
+  months: months.map(ym => ({ ym, point: 100, share: 1 / 12, mean: 0 })) });
 const SNAP = ['snapshot_id', 'run_date', 'client', 'target_month', 'scenario', 'base_pred', 'subjective_adj', 'ai_adj', 'deterministic_adj', 'final_pred',
   'confidence_interval_lower', 'confidence_interval_upper', 'key_factors_json', 'subjective_input_date', 'calibration_applied_json'];
 function book(env) {
@@ -20,18 +23,18 @@ function book(env) {
     FORECAST_SNAPSHOT: { values: [SNAP, ['OLD', new Date(2026, 2, 1), 'テスト製薬', '2026/04', 'neutral', 0, 0, 0, 0, 0, 0, 500, '{}', '', '{}']] },
   });
 }
-function stub(env, planning) {
+function stub(env, planning, annual = 1000.4) {
   env.run(`appLegacyEngine_ = function(svc) { return { WEB_UI_CONFIRMS_: {}, VERSION: 'planning-stub', SOURCE_SHA256: 'stub',
     runPhase1Forecast() {
       const ss = svc.SpreadsheetApp.getActiveSpreadsheet(), out = ss.getSheetByName('OUTPUT');
-      out.getRange(26, 1, 1, 4).setValues([['年度合計（予測）', 800, 1000.4, 1200]]);
+      out.getRange(26, 1, 1, 4).setValues([['年度合計（予測）', Math.min(800,__annual), __annual, Math.max(1200,__annual)]]);
       for (let i = 0; i < 12; i++) out.getRange(29+i, 1, 1, 9).setValues([[__months[i], 0, 0, 500, '', '', '', 0, '']]);
       const snap = ss.getSheetByName('FORECAST_SNAPSHOT');
       const sidecar = __point && __point.applied === true ? {monthly_point:{version:__point.version,method:__point.method,
         point:__point.months[0].point,share:__point.months[0].share,mean:__point.months[0].mean,annualTarget:__point.annualTarget}} : {};
       snap.getRange(snap.getLastRow()+1, 1, 1, 15).setValues([[svc.Utilities.getUuid(),new svc.Date(),'テスト製薬','2026/04','neutral',0,0,0,0,0,0,500,JSON.stringify(sidecar),'','{}']]);
       return __point === undefined ? undefined : {monthlyPlanning:__point};
-    } }; };`, { __point: planning, __months: months });
+    } }; };`, { __point: planning, __months: months, __annual: annual });
 }
 function imported(planning = point()) {
   const env = setUpEnv(), planId = env.seedPlan(book(env));
@@ -39,6 +42,7 @@ function imported(planning = point()) {
   return { env, planId };
 }
 function throughCalc(env, planId) {
+  delete env.props.APP_STAGE_MS;   // 既知の所要時間による段の直結を止め、保存前の引数を検査する
   const start = env.call('apiStartJob(__in)', { __in: { kind: 'FORECAST.RUN', payload: { planId } } });
   env.fireTriggers('triggerRunJob');
   env.fireTriggers('triggerRunJob');
@@ -161,6 +165,134 @@ for (const raw of [null, undefined, { version: 'HISTORY_MONTHLY_POINT_V1', appli
   assert.equal(clean({ ...raw, baseAnnualPositive: 1e308, spotAnnualPositive: 1e308 }).baseWeight, undefined, '成分合計のoverflowを比率に使わない');
   assert.equal(clean({ ...raw, baseProfileBasis: 'last12_base' }).baseProfileBasis, 'last12_base');
   assert.deepEqual(clean(point()), point(), '旧shapeへoptionalを補完しない');
+}
+
+// V2: 年額は12月の点予測合計。旧V1と旧年度P50をそのまま保持し、同じEngine/保存/API経路を通す。
+{
+  const { env, planId } = imported();
+  assert.equal(env.runJob('FORECAST.RUN', { planId }).status, 'DONE');
+  const v1row = env.table('FORECAST_RUNS')[0];
+  assert.deepEqual(latest(env, planId).planning, point());
+  const metadata = { cleanHistoryStartYm: '2022/04', historyYearsUsed: [2023, 2024, 2025],
+    basePointBasis: 'mc_base_p50', spotPointBasis: 'history_quarter_median', spotPositiveMonths24: 6,
+    spotQuarterPhase: 3, baseFallback: 'none', spotFallback: 'quarter_mean', zeroRoundedFallback: 'prior12_component_profile', inactive: false };
+  const expected = { ...pointV2(), ...metadata }, raw = { ...expected, paths: Array(1000).fill(Array(12).fill(1)) };
+  stub(env, raw);
+  const { start, job } = throughCalc(env, planId);
+  assert.deepEqual(job.payload.planning, expected);
+  assert.ok(Buffer.byteLength(JSON.stringify(job.payload.planning)) <= 4000);
+  env.fireTriggers('triggerRunJob');
+  assert.equal(env.call('apiJobStatus(__in)', { __in: { jobId: start.jobId } }).status, 'DONE');
+  const runs = env.table('FORECAST_RUNS'), v2row = runs[1];
+  assert.deepEqual(runs[0], v1row, '既存V1を新しい年度定義で書き換えない');
+  assert.deepEqual(JSON.parse(v2row.planning_json), expected);
+  assert.deepEqual(latest(env, planId).planning, expected);
+  assert.equal(latest(env, planId).latest.annual_p50, 1000.4, '旧年度P50と計画年額1200を別に保持');
+  assert.ok(latest(env, planId).monthly.every(m => m.p50 === 0), '月P50をV2点予測で書き換えない');
+  assert.ok(env.table('LAYER_EFFECTS').every(r => Number(r.final_p50) === 0));
+  assert.equal(JSON.parse(env.table('ENG_FORECAST_SNAPSHOT').at(-1).key_factors_json).monthly_point.version, 'HISTORY_MONTHLY_POINT_V2');
+  const budgets = env.run('appWorkScratch_(appPlanOf_(__p)).getSheetByName("OUTPUT").getRange(29,8,12,2).getValues()', { __p: planId });
+  assert.ok(budgets.every(r => r[0] === 80 && r[1] === 5));
+  const journal = Object.values(env.files).filter(f => /Journal_/.test(f.name)).map(f => JSON.parse(f.content))
+    .find(j => j.ops.some(o => o.table === 'FORECAST_RUNS' && o.rows.some(r => r.run_id === v2row.run_id)));
+  assert.deepEqual(journal.ops.find(o => o.table === 'FORECAST_RUNS').rows[0].planning_json, expected);
+  assert.ok(JSON.parse(v2row.fixes_json).includes('HISTORY_MONTHLY_POINT_V1'));
+  assert.ok(JSON.parse(v2row.fixes_json).includes('HISTORY_MONTHLY_POINT_V2'));
+  const clean = value => env.call('appForecastPlanningOf_(__raw,2026,1000.4)', { __raw: value });
+  for (const [key, value] of [['cleanHistoryStartYm', '2026/04'], ['historyYearsUsed', [2024,2024]],
+    ['basePointBasis', { raw: [] }], ['spotPointBasis', ' '], ['spotPositiveMonths24', 25], ['spotQuarterPhase', 0],
+    ['baseFallback', []], ['spotFallback', 'x'.repeat(101)], ['zeroRoundedFallback', 'one_yen_floor'], ['inactive', 'true']]) {
+    const out = clean({ ...expected, [key]: value });
+    assert.ok(out && !(key in out), 'V2の不正optionalを除外: ' + key);
+  }
+  for (const years of [[2026], [2021,2024], [2023,2022], [], [2022,2023,2024,2025], ['2024']]) {
+    assert.equal(clean({ ...expected, historyYearsUsed: years }).historyYearsUsed, undefined, JSON.stringify(years));
+  }
+  assert.deepEqual(clean(pointV2()), pointV2(), 'optionalを必須にしない');
+  assert.equal(clean({ ...expected, zeroRoundedFallback: 'none' }).zeroRoundedFallback, 'none');
+  const sh = env.data().getSheetByName('FORECAST_RUNS'), col = sh.rows[0].indexOf('planning_json');
+  const newer = [...sh.rows[2]]; newer[0] = 'INVALID-V2'; newer[sh.rows[0].indexOf('finished_at')] = '9999-01-01';
+  for (const value of [
+    {...pointV2(),version:'OTHER'}, {...pointV2(),version:'HISTORY_MONTHLY_POINT_V1'},
+    {...pointV2(),annualBasis:'annual_p50_rounded_yen'}, {...pointV2(),annualBasis:undefined},
+    {...pointV2(),annualTarget:1199}, {...pointV2(),annualRawP50:1001},
+    {...pointV2(),months:pointV2().months.slice(1)},
+    {...pointV2(),months:pointV2().months.map((m,i,a)=>i===1?a[0]:m)},
+    {...pointV2(),months:pointV2().months.map(m=>({...m,share:0}))},
+    {...pointV2(),months:pointV2().months.map((m,i)=>i?m:{...m,mean:-1})},
+  ]) {
+    newer[col] = JSON.stringify(value); sh.rows[3] = [...newer];
+    env.run('APP_STORE_CACHE_={};appBumpGen_();');
+    assert.equal(latest(env, planId).planning, null, '不正な最新V2から過去のV1/V2を補完しない');
+  }
+}
+
+// 旧annualP50/MC平均0でも、履歴由来のV2正額は保存する。inactiveの0も独立年額として正当。
+{
+  const positive = { ...pointV2(), annualRawP50: 0 }, { env, planId } = imported();
+  stub(env, positive, 0);
+  assert.equal(env.runJob('FORECAST.RUN', { planId }).status, 'DONE');
+  assert.deepEqual(latest(env, planId).planning, positive);
+  assert.equal(latest(env, planId).latest.annual_p50, 0);
+  assert.equal(env.run('appForecastPlanningOf_(__raw,2026,0)', { __raw: { ...positive, version:'HISTORY_MONTHLY_POINT_V1' } }), null, 'V1の年度一致条件は緩めない');
+  const inactive = { ...pointV2(), annualTarget: 0, inactive: true,
+    months: pointV2().months.map(m => ({ ...m, point: 0, share: 0 })) };
+  assert.deepEqual(env.call('appForecastPlanningOf_(__raw,2026,1000.4)', { __raw: inactive }), inactive);
+  stub(env, inactive);
+  assert.equal(env.runJob('FORECAST.RUN', { planId }).status, 'DONE');
+  assert.deepEqual(latest(env, planId).planning, inactive);
+}
+
+// V5の任意根拠は一組で保持する。件数・時点・重みの一部だけを控えへ残さない。
+{
+  const { env, planId } = imported();
+  const timing = { timingHeldoutFy: 2025, timingTrainingYears: [2023, 2024], timingSupport: 4, timingHits: 1,
+    spotTimingWeight: 2 / 6, timingRescue: 'none', timingStatus: 'beta11_calendar_support_shrink' };
+  const expected = { ...pointV2(), ...timing };
+  stub(env, { ...expected, paths: Array(1000).fill(Array(12).fill(1)) });
+  const { start, job } = throughCalc(env, planId);
+  assert.deepEqual(job.payload.planning, expected, 'Engineから計算段へcompact timing群を保持');
+  assert.ok(Buffer.byteLength(JSON.stringify(job.payload.planning)) <= 4000);
+  env.fireTriggers('triggerRunJob');
+  assert.equal(env.call('apiJobStatus(__in)', { __in: { jobId: start.jobId } }).status, 'DONE');
+  const row = env.table('FORECAST_RUNS')[0];
+  assert.deepEqual(JSON.parse(row.planning_json), expected);
+  assert.deepEqual(latest(env, planId).planning, expected, '同じ保存の控えからAPIへtiming群を返す');
+  assert.equal(latest(env, planId).latest.annual_p50, 1000.4);
+  assert.ok(latest(env, planId).monthly.every(m => m.p50 === 0), 'SPOT重みを旧P50へ適用しない');
+  const clean = value => env.call('appForecastPlanningOf_(__raw,2026,1000.4)', { __raw: value });
+  const timingKeys = Object.keys(timing);
+  const bad = [];
+  for (const key of timingKeys) { const missing = { ...expected }; delete missing[key]; bad.push([key + ' missing', missing]); }
+  for (const [key, value] of [
+    ['timingHeldoutFy', 2026], ['timingHeldoutFy', 2024], ['timingHeldoutFy', '2025'],
+    ['timingTrainingYears', []], ['timingTrainingYears', [2025]], ['timingTrainingYears', [2024,2024]],
+    ['timingTrainingYears', [2024,2023]], ['timingTrainingYears', [2022,2023,2024]], ['timingTrainingYears', ['2024']],
+    ['timingTrainingYears', [999]], ['timingTrainingYears', [2023.5]],
+    ['timingSupport', -1], ['timingSupport', 13], ['timingSupport', 1.5], ['timingSupport', '4'],
+    ['timingHits', -1], ['timingHits', 5], ['timingHits', 1.5], ['timingHits', Infinity],
+    ['spotTimingWeight', Infinity], ['spotTimingWeight', NaN], ['spotTimingWeight', -1],
+    ['spotTimingWeight', .5], ['spotTimingWeight', 2 / 6 + 2e-12], ['spotTimingWeight', '0.3333333333333333'],
+    ['timingRescue', 'minimum_one_yen'], ['timingStatus', 'prior_half_no_support'],
+  ]) bad.push([key + ':' + JSON.stringify(value), { ...expected, [key]: value }]);
+  for (const [label, raw] of bad) {
+    const out = clean(raw);
+    assert.deepEqual(out, pointV2(), '不正なtiming群のみ全除外、点予測は保持: ' + label);
+  }
+  assert.deepEqual(clean({ ...point(), ...timing }), point(), '旧V1へV5の根拠を追加しない');
+  assert.deepEqual(clean(pointV2()), pointV2(), '従来の汎用V2にtiming群を必須にしない');
+  assert.equal(clean({ ...expected, spotTimingWeight: 2 / 6 + 5e-13 }).spotTimingWeight, 2 / 6 + 5e-13);
+  const prior = { ...expected, timingTrainingYears: [2024], timingSupport: 0, timingHits: 0, spotTimingWeight: .5,
+    timingStatus: 'prior_half_no_support' };
+  assert.deepEqual(clean(prior), prior, '1年warmupとsupport0の明示的priorを保持');
+  assert.deepEqual(clean({ ...prior, timingHits: 1 }), pointV2(), 'support0のhitは不正');
+  for (const timingRescue of ['none', 'inactive', 'prior12_weighted_profile', 'prior12_unweighted_profile']) {
+    assert.equal(clean({ ...expected, timingRescue }).timingRescue, timingRescue);
+  }
+  const sh = env.data().getSheetByName('FORECAST_RUNS'), col = sh.rows[0].indexOf('planning_json');
+  sh.rows[1][col] = JSON.stringify({ ...expected, timingHeldoutFy: 2026 });
+  env.run('APP_STORE_CACHE_={};appBumpGen_();');
+  assert.deepEqual(latest(env, planId).planning, pointV2(), 'APIも不正timing群を全除外して有効な点予測を返す');
 }
 
 // 月行保存で止まっても、計画値と同じrunの控えから一度だけ復旧する。
