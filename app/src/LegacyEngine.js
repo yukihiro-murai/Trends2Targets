@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.2-dev、SHA-256 7d73a63067712fbfe7f795c98cab6dcbc229a23c1eabe2967ba6b8bf7b728143）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.3-dev、SHA-256 c29df7713efcb7c19690a4bb3466d02d5f27a2c5c20c34fb78481a48026eabaa）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,7 +31,7 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.2-dev';
+const VERSION = '2.7.3-dev';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
 const MENU_NAME = 'Forecast Agent';
 // v2（2026-10-04）: 実績の締まった月の記録（予測 = 実績）は検証に使わない。P10/P90 はクライアントごとに引く
@@ -742,6 +742,21 @@ function runForecastFYCore_(fy, clientName) {
     lmdiEnabled,
     effects: learnedEffects
   });
+
+  // BASE がない月の背景 SPOT は、ゼロを含む履歴分布から推定する。
+  // 期待額を P10/P50/P90 に定額加算すると、空主観でも客観と混合の幅が違ってしまう。
+  // 同じ標本の BASE + 背景 SPOT から客観の分位点も取り直す（既知案件は含めない）。
+  if ((spotBgModel.historyBasedByMonth || []).some(Boolean)) {
+    // DLM shadow の比較用 opsQuantOnly（期待額を加えた旧Ops参照）は残す。
+    quantOnly = { p10: quantOnly.p10.slice(), p50: quantOnly.p50.slice(), p90: quantOnly.p90.slice() };
+    const d = mixed.diagnostics;
+    const empirical = quantilesFromSimByMonth_(d.quantOpsSimByMonth.map((arr, i) =>
+      arr.map((v, s) => Number(v || 0) + Number(d.bgSpotSimByMonth[i][s] || 0))));
+    spotBgModel.historyBasedByMonth.forEach((yes, i) => {
+      if (!yes) return;
+      ['p10', 'p50', 'p90'].forEach(k => { quantOnly[k][i] = empirical[k][i]; objOnly[k][i] = empirical[k][i]; });
+    });
+  }
 
   const opinionsSummaryTop = summarizeOpinionsTop_(opinions);
   const opinionsSummaryByMonth = summarizeOpinionsByMonth_(opinions, months);
@@ -3729,9 +3744,17 @@ function fitSpotRecurringModel_(spotSeries48, seriesStart, lastClosedMonthStart,
   const expectedByMonth = new Array(12).fill(0);
   const occurrenceProbByMonth = new Array(12).fill(0.10);
   const severitySamplesByMonth = Array.from({ length: 12 }, () => [0]);
+  const severityWeightsByMonth = new Array(12).fill(null);
+  const historyBasedByMonth = new Array(12).fill(false);
+  const yearWeights = [
+    isFinite(cfg.seasonalYearWeightY1) ? cfg.seasonalYearWeightY1 : SEASONAL_YEAR_WEIGHT_Y1,
+    isFinite(cfg.seasonalYearWeightY2) ? cfg.seasonalYearWeightY2 : SEASONAL_YEAR_WEIGHT_Y2,
+    isFinite(cfg.seasonalYearWeightY3) ? cfg.seasonalYearWeightY3 : SEASONAL_YEAR_WEIGHT_Y3,
+    isFinite(cfg.seasonalYearWeightY4) ? cfg.seasonalYearWeightY4 : SEASONAL_YEAR_WEIGHT_Y4
+  ];
 
   if (src.length === 0) {
-    return { expectedByMonth, occurrenceProbByMonth, severitySamplesByMonth };
+    return { expectedByMonth, occurrenceProbByMonth, severitySamplesByMonth, severityWeightsByMonth, historyBasedByMonth };
   }
 
   const closedIdx = [];
@@ -3762,6 +3785,26 @@ function fitSpotRecurringModel_(spotSeries48, seriesStart, lastClosedMonthStart,
     const filtered = vals.filter(v => v <= spikeThr);
     const used = filtered.length ? filtered : vals;
 
+    // BASE 上限が 0 のために、実在する SPOT 履歴まで全額消さない。
+    // BASE がある月は従来の上限式、capRate=0（意図した無効化）も維持する。
+    // BASE がない月だけ同月の確定履歴を使い、売上ゼロの年も発生率の分母に含める。
+    // BASE への補助用の縮小率は使わず、発生率と発生時の金額抽選に同じ年重みを使う。
+    if (Number(baseRef[m] || 0) <= 0 && capRate > 0) {
+      const observations = closedIdx.filter(idx => idx % 12 === m).map(idx => ({
+        value: Number(src[idx] || 0),
+        weight: Math.max(0, Number(yearWeights[Math.max(0, 3 - Math.floor((src.length - 1 - idx) / 12))] || 0))
+      }));
+      const events = observations.filter(x => isFinite(x.value) && x.value > 0 && x.value <= spikeThr && x.weight > 0);
+      const denominator = observations.reduce((s, x) => s + x.weight, 0);
+      const eventWeight = events.reduce((s, x) => s + x.weight, 0);
+      historyBasedByMonth[m] = true;
+      occurrenceProbByMonth[m] = denominator > 0 ? eventWeight / denominator : 0;
+      severitySamplesByMonth[m] = events.map(x => x.value);
+      severityWeightsByMonth[m] = events.map(x => x.weight);
+      expectedByMonth[m] = denominator > 0 ? events.reduce((s, x) => s + x.value * x.weight, 0) / denominator : 0;
+      continue;
+    }
+
     const monthAvg = avg_(used);
     const bg = Math.max(monthAvg * shrink, monthAvg * floorRate);
     const cap = Math.max(0, Number(baseRef[m] || 0) * capRate);
@@ -3774,7 +3817,7 @@ function fitSpotRecurringModel_(spotSeries48, seriesStart, lastClosedMonthStart,
     if (!severitySamplesByMonth[m].length) severitySamplesByMonth[m] = [expectedByMonth[m]];
   }
 
-  return { expectedByMonth, occurrenceProbByMonth, severitySamplesByMonth };
+  return { expectedByMonth, occurrenceProbByMonth, severitySamplesByMonth, severityWeightsByMonth, historyBasedByMonth };
 }
 
 function readDevSpotProjects12Months_(fy) {
@@ -3818,6 +3861,16 @@ function sampleSpotBackgroundAmount_(spotModel, monthIdx, suppressRate) {
   const occ = Number((spotModel && spotModel.occurrenceProbByMonth && spotModel.occurrenceProbByMonth[monthIdx]) || 0);
   if (Math.random() > Math.max(0, Math.min(1, occ * (isFinite(suppressRate) ? suppressRate : 1)))) return 0;
   const samples = (spotModel && spotModel.severitySamplesByMonth && spotModel.severitySamplesByMonth[monthIdx]) || [0];
+  const weights = spotModel && spotModel.severityWeightsByMonth && spotModel.severityWeightsByMonth[monthIdx];
+  if (weights && weights.length === samples.length) {
+    const total = weights.reduce((s, w) => s + Number(w || 0), 0);
+    let target = Math.random() * total;
+    for (let i = 0; i < samples.length; i++) {
+      target -= Number(weights[i] || 0);
+      if (target < 0) return Math.max(0, Number(samples[i] || 0));
+    }
+    return 0;
+  }
   const picked = Number(samples[Math.floor(Math.random() * samples.length)] || 0);
   return Math.max(0, picked);
 }
@@ -11108,7 +11161,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: '7d73a63067712fbfe7f795c98cab6dcbc229a23c1eabe2967ba6b8bf7b728143',
+    SOURCE_SHA256: 'c29df7713efcb7c19690a4bb3466d02d5f27a2c5c20c34fb78481a48026eabaa',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }
