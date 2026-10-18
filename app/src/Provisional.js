@@ -367,3 +367,78 @@ function appProvisionalAfterJob_(job, status) {
     appProvisionalApplyTerminal_(st, job, status); appProvisionalAdvance_(st, ctx); return st;
   });
 }
+
+/** Owner-invoked accelerator; no recurring trigger or policy change.
+ * Admission budget only: native appRunJob_ cannot be interrupted mid-stage.
+ */
+function appProvisionalRunNowAdmission_(job, elapsedMs, times) {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return { ok: false, reason: 'CLOCK_CHANGED' };
+  const past = times && times[appJobStageKey_(job)];
+  if (!Array.isArray(past) || !past.length || past.length > 3 ||
+      past.some(v => typeof v !== 'number' || !Number.isFinite(v) || v < 0)) return { ok: false, reason: 'UNKNOWN_STAGE_TIME' };
+  const needMs = Math.max.apply(null, past) * 1.5 + 30000;
+  return { ok: Number.isFinite(needMs) && elapsedMs + needMs <= 240000,
+    reason: Number.isFinite(needMs) && elapsedMs + needMs <= 240000 ? '' : 'BUDGET', needMs: needMs };
+}
+
+/** Select only the current frontier of the original batch, never a global queue. */
+function appProvisionalRunNowFrontier_(ctx, batchId) {
+  const st = appProvisionalState_();
+  if (!st || st.id !== batchId) return { reason: 'BATCH_CHANGED' };
+  if (!st.active) return { reason: 'BATCH_FINISHED' };
+  if (st.requestedBy !== ctx.actor) return { reason: 'OWNER_CHANGED' };
+  const cur = st.current;
+  if (!cur || !cur.rootJobId || !cur.intentId) return { reason: 'NO_CURRENT_INTENT' };
+  const item = appProvisionalItem_(st, cur.index);
+  if (item.status !== 'RUNNING' || item.stage !== cur.stage) return { reason: 'INTENT_MISMATCH' };
+  const root = appJobGet_(cur.rootJobId), chain = appProvisionalChain_(cur.rootJobId), job = chain.job;
+  if (!root || !job) return { reason: chain.reason || 'MISSING_JOB' };
+  if (job.status !== 'QUEUED') return { reason: job.status === 'RUNNING' ? 'CURRENT_RUNNING' : 'CURRENT_TERMINAL' };
+  const allowed = { CREATE: ['PLAN.CREATE', 'PLAN.CREATE_SAVE'], IMPORT: ['PLAN.RUN', 'PLAN.RUN_CALC', 'PLAN.RUN_SAVE'],
+    AGGREGATE: ['PLAN.RUN', 'PLAN.RUN_CALC', 'PLAN.RUN_SAVE'], FORECAST: ['FORECAST.RUN', 'FORECAST.RUN_CALC', 'FORECAST.RUN_SAVE'] };
+  const action = cur.stage === 'IMPORT' ? 'IMPORT.SALES' : cur.stage === 'AGGREGATE' ? 'SALES.AGGREGATE' : '';
+  const matches = j => j && j.requestedBy === st.requestedBy && j.payload && j.payload.provisionalBatchId === batchId &&
+    j.payload.provisionalIndex === cur.index && j.payload.provisionalStage === cur.stage && j.payload.provisionalIntentId === cur.intentId;
+  if (!allowed[cur.stage] || allowed[cur.stage].indexOf(job.kind) < 0 || root.kind !== cur.kind ||
+      (root.payload && root.payload.action || '') !== cur.action || (job.payload && job.payload.action || '') !== action ||
+      !matches(root) || !matches(job) || appProvisionalRootId_(job) !== cur.rootJobId) return { reason: 'INTENT_MISMATCH' };
+  if (appProvisionalBusy_().some(j => j.id !== job.id) ||
+      appJobList_().some(j => j.id !== job.id && j.status === 'RUNNING')) return { reason: 'COMPETING_JOB' };
+  return { job: job, index: cur.index, stage: cur.stage, intentId: cur.intentId };
+}
+
+function appProvisionalRunNow_(ctx) {
+  ctx = appProvisionalRequireOwner_(ctx);
+  const startedMs = Date.now(), initial = appProvisionalState_();
+  const out = { batchId: initial ? initial.id : '', admissionBudgetMs: 240000, ran: [], cleanupErrors: [], stoppedBecause: '', elapsedMs: 0 };
+  if (!initial || !initial.active) { out.stoppedBecause = 'BATCH_INACTIVE'; return out; }
+  if (initial.requestedBy !== ctx.actor) throw new Error('始めた所有者として実行してください。');
+  for (let count = 0; count < 64; count++) {
+    const selected = appProvisionalRunNowFrontier_(ctx, out.batchId);
+    if (!selected.job) { out.stoppedBecause = selected.reason; break; }
+    const admission = appProvisionalRunNowAdmission_(selected.job, Date.now() - startedMs, appJobStageTimes_());
+    if (!admission.ok) { out.stoppedBecause = admission.reason; out.nextNeedMs = admission.needMs || null; break; }
+    const job = selected.job;
+    let result;
+    try { result = appRunJob_(job.id); }
+    catch (e) { out.stoppedBecause = 'RUN_ERROR'; out.error = String(e && e.message || e).slice(0, 240); break; }
+    if (!result || result.skipped) { out.stoppedBecause = 'CLAIMED_ELSEWHERE'; break; }
+    out.ran.push({ jobId: job.id, kind: job.kind, index: selected.index, stage: selected.stage,
+      intentId: selected.intentId, status: result.status, nextJobId: result.nextJobId || '', estimatedMs: admission.needMs });
+    // Delete only this completed invocation's own native trigger, after claim.
+    // On claim failure the queued trigger stays scheduled; native claims are atomic.
+    try {
+      ScriptApp.getProjectTriggers().forEach(t => {
+        if (job.triggerUid && t.getHandlerFunction() === 'triggerRunJob' && String(t.getUniqueId()) === String(job.triggerUid)) ScriptApp.deleteTrigger(t);
+      });
+    } catch (e) { out.cleanupErrors.push({ jobId: job.id, error: String(e && e.message || e).slice(0, 160) }); out.stoppedBecause = 'CLEANUP_ERROR'; break; }
+    if (result.status !== 'DONE') { out.stoppedBecause = 'JOB_FAILED'; break; }
+    if (!result.nextJobId) {
+      const stored = appJobGetResult_(job.id);
+      if (stored.found && stored.value && stored.value.needConfirm) { out.stoppedBecause = 'CONFIRM'; break; }
+    }
+    if (count === 63) out.stoppedBecause = 'ITERATION_LIMIT';
+  }
+  out.elapsedMs = Date.now() - startedMs;
+  return out;
+}
