@@ -14,7 +14,7 @@
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.8-dev';
+const VERSION = '2.7.9-dev';
 // FY2024で固定し既知のFY2025/FY2026上期で確認。月点の合計は年度P50とは別。
 const HISTORY_MONTHLY_POINT_METHOD = 'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
@@ -6520,6 +6520,7 @@ function refreshManualInputSheets_(fy) {
 
 function writeRowsInChunks_(sh, startRow, startCol, rows, chunkSize) {
   if (!rows || !rows.length) return;
+  ensureSheetHasRows_(sh, startRow + rows.length - 1);
   const size = Math.max(1, Number(chunkSize) || 2000);
   for (let i = 0; i < rows.length; i += size) {
     const chunk = rows.slice(i, i + size);

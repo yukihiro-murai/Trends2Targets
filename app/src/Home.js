@@ -63,6 +63,8 @@ function appHomeData_(ctx, fyAsked) {
   return {
     fy: fy, thisFy: thisFy, fyOptions: appHomeFyOptions_(),
     plans: plans.map(p => ({ planId: p.planId, clientName: p.clientName, fy: String(p.fy), p10: p.p10, p50: p.p50, p90: p.p90, prevP50: p.prevP50, budget: p.budget, mape: p.mape,
+      forecastPointAnnual: p.forecastPointAnnual, forecastPointProvisional: !!p.forecastPointProvisional,
+      previousForecastPointAnnual: p.previousForecastPointAnnual,
       mapeMonths: p.mapeMonths, runs: p.runs, lastRunAt: p.lastRunAt, stepErrors: p.stepErrors, stepsDone: p.stepsDone, stepsTotal: p.stepsTotal,
       officialNo: p.officialNo, officialFinal: p.officialFinal, pendingNo: p.pendingNo,
       actualYtd: p.actualYtd, actualMonths: p.actualMonths, forecastYtd: p.forecastYtd, rangeOut: p.rangeOut, rangeN: p.rangeN,

@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.8-dev、SHA-256 0cb6028ef7b63cfb20b72679a5d82a71d9908632dfa6240f59f5e9ffe0e2f364）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.9-dev、SHA-256 c4d53677246305114707da1941b27b2cc3df26e35c049cbe69291a2cbf746cd1）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,7 +31,7 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.8-dev';
+const VERSION = '2.7.9-dev';
 // FY2024で固定し既知のFY2025/FY2026上期で確認。月点の合計は年度P50とは別。
 const HISTORY_MONTHLY_POINT_METHOD = 'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
@@ -6537,6 +6537,7 @@ function refreshManualInputSheets_(fy) {
 
 function writeRowsInChunks_(sh, startRow, startCol, rows, chunkSize) {
   if (!rows || !rows.length) return;
+  ensureSheetHasRows_(sh, startRow + rows.length - 1);
   const size = Math.max(1, Number(chunkSize) || 2000);
   for (let i = 0; i < rows.length; i += size) {
     const chunk = rows.slice(i, i + size);
@@ -12790,7 +12791,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: '0cb6028ef7b63cfb20b72679a5d82a71d9908632dfa6240f59f5e9ffe0e2f364',
+    SOURCE_SHA256: 'c4d53677246305114707da1941b27b2cc3df26e35c049cbe69291a2cbf746cd1',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }
