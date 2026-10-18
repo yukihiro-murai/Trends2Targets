@@ -2973,7 +2973,12 @@ function fcMonthlyPlanning(p, ms, annual, shown){
     if (!k || seen[k] || !Object.prototype.hasOwnProperty.call(byMonth, k)) { valid = false; return null; }
     seen[k] = true; return byMonth[k];
   });
-  var provisional = p.method === 'W_COMPONENT_EVENT_HALF_SHAPE_BLEND';
+  var acceptedRevisionMethods = ['BB_EQUAL_WEIGHT_W_AA_COMBINATION'];
+  var approvedRevision = acceptedRevisionMethods.indexOf(p.method) >= 0 && p.provisional === true && typeof p.pointPolicySha256 === 'string'
+    && /^[a-f0-9]{64}$/.test(p.pointPolicySha256) && typeof p.pointPolicySourceSha256 === 'string'
+    && /^[a-f0-9]{64}$/.test(p.pointPolicySourceSha256);
+  var provisional = p.method === 'W_COMPONENT_EVENT_HALF_SHAPE_BLEND' || approvedRevision;
+  if (p.provisional === true && !provisional) return null;
   if (provisional && (p.provisional !== true || p.validationStatus !== 'in_progress')) return null;
   return valid && sum === p.annualTarget ? Object.assign({ version: p.version, points: points, annualTarget: p.annualTarget }, provisional ? { provisional: true } : {}) : null;
 }

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {setUpEnv} from './gas-mock.mjs';
 
-const METHOD='W_COMPONENT_EVENT_HALF_SHAPE_BLEND',env=setUpEnv();
+const METHOD='W_COMPONENT_EVENT_HALF_SHAPE_BLEND',ACTIVE='BB_EQUAL_WEIGHT_W_AA_COMBINATION',env=setUpEnv();
 const r=env.call(`(() => {
  const fy=2026,asOf=new Date('2026-04-06T12:00:00+09:00').getTime();
  const e=appLegacyEngine_(appLegacyServices_({}, {asOfMs:asOf}));
@@ -40,7 +40,7 @@ const r=env.call(`(() => {
   try{e.appHistoryProvisionalForecast_(h,fy);}catch(err){rejected++;}
  }
  const randomIndependent=appWithSeededRandom_('provisional-no-rng',()=>{e.appHistoryProvisionalForecast_(rows,fy);return Math.random();})===appWithSeededRandom_('provisional-no-rng',()=>Math.random());
- return {off:off.p,on:on.p,riskZero,helper:{method:helper.method,points:helper.points,total:helper.total,halfTargets:helper.halfTargets,applied:helper.applied,mode:helper.mode},compact,
+ return {engineSource:e.SOURCE_SHA256,off:off.p,on:on.p,riskZero,helper:{method:helper.method,points:helper.points,total:helper.total,halfTargets:helper.halfTargets,applied:helper.applied,mode:helper.mode},compact,
   mcExact:JSON.stringify(off.mixed)===JSON.stringify(on.mixed),tailExact:off.tail===on.tail,inputUnchanged:before===JSON.stringify(rows),pathsUnchanged:off.unchanged&&on.unchanged,
   oldOffPoints:oldPoint.points,disabled,inactive:{points:inactive.points,total:inactive.total},negative:{points:negative.points,total:negative.total},tiny:{points:tiny.points,total:tiny.total,net:tiny.net12},
   credited:{net:credited.net12,total:credited.total},rejected,randomIndependent};
@@ -50,7 +50,7 @@ assert.ok(r.helper.points.slice(0,6).some(v=>v>0),'疎履歴でも過去上期�
 assert.ok(r.helper.total>0);
 assert.equal(r.helper.applied,false,'形状を変えない完全S分岐を検証する合成例');
 assert.equal(r.on.applied,true,'内部shapeの未適用と計画値の有効性を混同しない');
-assert.equal(r.on.provisional,true);assert.equal(r.on.validationStatus,'in_progress');assert.equal(r.on.method,METHOD);
+assert.equal(r.on.provisional,true);assert.equal(r.on.validationStatus,'in_progress');assert.equal(r.on.method,ACTIVE);
 assert.deepEqual(r.on.months.map(m=>m.point),r.helper.points);
 assert.deepEqual(r.on.halfTargets,[r.helper.points.slice(0,6).reduce((s,v)=>s+v,0),r.helper.points.slice(6).reduce((s,v)=>s+v,0)]);
 assert.equal(r.on.annualTarget,r.helper.total);assert.equal(r.on.annualBasis,'sum_monthly_points');
@@ -69,7 +69,7 @@ assert.equal(r.credited.net,10);assert.ok(r.credited.total>0,'返品後の成分
 assert.equal(r.rejected,6,'期間・重複・未来・非有限・不足・unsafe額を拒否');
 
 // V2保存validator: 新しい暫定根拠を保ち、不正な半期額を隠して受理しない。
-const valid=env.call('appForecastPlanningOf_(__p,2026,0)',{__p:r.riskZero});
+const valid=env.call('appPointNativePlanning_(__p,{sourceSha256:__sha},2026,0)',{__p:r.riskZero,__sha:r.engineSource});
 assert.ok(valid);assert.equal(valid.provisional,true);assert.equal(valid.validationStatus,'in_progress');
 assert.equal(valid.annualTarget,r.riskZero.annualTarget);assert.deepEqual(valid.halfTargets,r.riskZero.halfTargets);
 assert.ok(Buffer.byteLength(JSON.stringify(valid),'utf8')<=4000);
@@ -93,10 +93,10 @@ function fixtureBook(e){
 for(const measure of[true,false]){
  const e=setUpEnv(),planId=e.seedPlan(fixtureBook(e));
  if(measure)e.task('setPlanPurpose(__in)',{__in:{planId,purpose:'MEASURE'}});
- e.run(`var __seenProvisional=[];appLegacyEngine_=function(svc){return{WEB_UI_CONFIRMS_:{},VERSION:'synthetic-provisional-io',SOURCE_SHA256:'test',runPhase1Forecast(opt){
+ e.run(`var __seenProvisional=[];appLegacyEngine_=function(svc){return{WEB_UI_CONFIRMS_:{},VERSION:'synthetic-provisional-io',SOURCE_SHA256:__engineSource,runPhase1Forecast(opt){
   __seenProvisional.push(opt.provisionalHistoryPoint===true);const p=opt.provisionalHistoryPoint?__planning:null,ss=svc.SpreadsheetApp.getActiveSpreadsheet(),sh=ss.getSheetByName('FORECAST_SNAPSHOT');
   sh.getRange(sh.getLastRow()+1,1,1,15).setValues([[svc.Utilities.getUuid(),new svc.Date(),'合成暫定製薬','2026/04','neutral',0,0,0,0,0,0,500,JSON.stringify(p?{monthly_point:{version:p.version,method:p.method,point:p.months[0].point,annualTarget:p.annualTarget}}:{}),'','{}']]);
-  return{monthlyPlanning:p};}};};`,{__planning:valid});
+  return{monthlyPlanning:p};}};};`,{__planning:valid,__engineSource:r.engineSource});
  const done=e.runJob('FORECAST.RUN',{planId});assert.equal(done.status,'DONE',done.error);
  const latest=e.call('apiForecastLatest(__in)',{__in:{planId}}),runs=e.table('FORECAST_RUNS');
  assert.deepEqual(e.call('__seenProvisional'),[measure],'MEASUREだけが明示opt-in');

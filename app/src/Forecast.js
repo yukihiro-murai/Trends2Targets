@@ -167,6 +167,11 @@ function appForecastPlanningOf_(raw, fy, annualRawP50) {
       provisionalMode: value.provisionalMode });
     if (typeof value.provisionalRescue === 'string' && /^[A-Za-z0-9_]{1,120}$/.test(value.provisionalRescue)) out.provisionalRescue = value.provisionalRescue;
   }
+  if (appPointPolicy_(out.method) || (value.provisional === true && out.method !== 'W_COMPONENT_EVENT_HALF_SHAPE_BLEND')) {
+    const extra = appPointPlanningExtras_(value, out, year);
+    if (!extra) return null;
+    Object.assign(out, extra);
+  }
   return appUtf8Bytes_(JSON.stringify(out)) <= 4000 ? out : null;
 }
 
@@ -217,7 +222,8 @@ function appForecastRunCalc_(ctx, p) {
       provisionalHistoryPoint: appPlanIsMeasure_(plan) });   // 追加入力なしの計画には履歴のみの暫定月額を保存する。入力の値は変更しない
     if (!run.ok) return { needConfirm: run.needConfirm, planId: plan.plan_id, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
     const headline = appForecastHeadline_(scratch);
-    const planning = appForecastPlanningOf_(run.planning, plan.fy, headline && headline.annual && headline.annual.p50);
+    const planning = appForecastPlanningOf_(appPointNativePlanning_(run.planning, { sourceSha256: run.sourceSha256 }, plan.fy,
+      headline && headline.annual && headline.annual.p50), plan.fy, headline && headline.annual && headline.annual.p50);
     // 手法ごとの予測（素の回帰との比べ。Methods.js）: 統計の部分だけをもう一度動かす（計算用ブックは書き換えない。失敗しても予測は止めない）
     const methods = appMethodsLive_(ctx, plan, scratch, p, run.seed, tri.weights);
     const payload = Object.assign({}, p, { seed: run.seed, engine: { version: run.version, sourceSha256: run.sourceSha256 }, headline: headline, planning: planning,
@@ -361,9 +367,10 @@ function appForecastLatest_(planId) {
     .sort((a, b) => (a.finished_at < b.finished_at ? 1 : -1));
   const latest = runs[0] || null;
   const monthly = latest ? appReadTable_('FORECAST_MONTHLY').filter(m => m.run_id === latest.run_id).map(appStripRow_) : [];
+  const point = appPointRevisionResolve_(plan, latest, monthly);
   return {
     plan: { planId: plan.plan_id, clientName: clients[plan.client_id] || plan.client_label, fy: plan.fy },
-    latest: latest, monthly: monthly, planning: latest ? appForecastPlanningOf_(latest.planning_json, plan.fy, latest.annual_p50) : null,
+    latest: latest, monthly: monthly, planning: point.planning, rawPlanning: point.rawPlanning, pointRevision: point.revision,
     runs: runs.slice(0, 10).map(r => ({ runId: r.run_id, finishedAt: r.finished_at, actor: r.actor_email, p50: r.annual_p50 })),
     stored: appStoredHeadline_(plan.plan_id)
   };

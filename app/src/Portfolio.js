@@ -152,7 +152,8 @@ function appPortfolioData_() {
   appReadTable_('FORECAST_RUNS').filter(r => r.status === 'DONE').forEach(r => { (runs[r.plan_id] = runs[r.plan_id] || []).push(r); });
   const outRows = {};
   const clientOf = {};   // CONFIG!B2（計画のメーカーの名前。補正の行を選ぶ。同じ読み込みで）
-  appReadTable_('ENG_ROWS').filter(r => (r.sheet === 'OUTPUT' || r.sheet === 'CONFIG') && Number(r.col_from) === 1).forEach(s => {
+  const storedEngineRows = appReadTable_('ENG_ROWS');
+  storedEngineRows.filter(r => (r.sheet === 'OUTPUT' || r.sheet === 'CONFIG') && Number(r.col_from) === 1).forEach(s => {
     const n = Number(s.row_no);
     if (s.sheet === 'CONFIG') {
       if (n === 2) { const x = (JSON.parse(s.cells_json) || [])[1]; clientOf[s.plan_id] = x ? String(appCellDecode_(x.charAt(0) === 'f' ? 'e' : x.charAt(0), x.slice(1))).trim() : ''; }
@@ -212,6 +213,8 @@ function appPortfolioData_() {
     }
     return frozenFy[k];
   };
+  const pointSnapshot = { tables: { PLANS: plans, FORECAST_RUNS: [].concat.apply([], Object.keys(runs).map(k => runs[k])),
+    PLAN_ACTIONS: appReadTable_('PLAN_ACTIONS') }, engRows: storedEngineRows };
   const rows = plans.map(p => {
     const rs = (runs[p.plan_id] || []).sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at)) || b._row - a._row);
     const o = outRows[p.plan_id] || {};
@@ -224,7 +227,7 @@ function appPortfolioData_() {
     const stored = o[26] ? { p10: num(o[26][1]), p50: num(o[26][2]), p90: num(o[26][3]) } : {};
     const latest = rs[0] || null;
     const prev = rs[1] || null;
-    const point = latest ? appForecastPlanningOf_(latest.planning_json, p.fy, latest.annual_p50) : null;
+    const point = latest ? appPointRevisionResolve_(p, latest, null, pointSnapshot).planning : null;
     const prevPoint = prev ? appForecastPlanningOf_(prev.planning_json, p.fy, prev.annual_p50) : null;
     // 旧来の計算の年度合計（最新の予測の記録、無ければ OUTPUT の 26 行）。本番の計画でも記録はこのまま
     const legacy = { p10: latest ? latest.annual_p10 : stored.p10 === undefined ? null : stored.p10,

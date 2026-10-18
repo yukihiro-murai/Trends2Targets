@@ -255,7 +255,7 @@ function appPlanView_(ctx, planId) {
       minRole: APP_PLAN_ACTIONS[k].minRole, paused: APP_PLAN_ACTIONS[k].paused || appMeasureActionRefusal_(plan, k) })),
     recent: appReadTable_('PLAN_ACTIONS').filter(r => r.plan_id === plan.plan_id).map(appStripRow_)
       .sort((a, b) => (a.finished_at < b.finished_at ? 1 : -1)).slice(0, 10)
-      .map(r => ({ action: r.action, label: (APP_PLAN_ACTIONS[r.action] || {}).label || r.action, finishedAt: r.finished_at, actor: seesActors ? r.actor_email : '',
+      .map(r => ({ action: r.action, label: r.action === 'FORECAST.POINT_REFRESH' ? '予測の更新' : (APP_PLAN_ACTIONS[r.action] || {}).label || r.action, finishedAt: r.finished_at, actor: seesActors ? r.actor_email : '',
         changed: appParseJsonList_(r.changed_sheets_json) }))
   }, shown, { boot: appPlanViewBudgetDraft_(shown && shown.boot, plan) },
   { inputLog: appInputLogView_(ctx, plan) });   // 入力の記録は見る人ごと（InputLog.js。覚えておく中身には入れない）

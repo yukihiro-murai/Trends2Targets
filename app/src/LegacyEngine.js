@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.9-dev、SHA-256 c4d53677246305114707da1941b27b2cc3df26e35c049cbe69291a2cbf746cd1）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.10-dev、SHA-256 b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,7 +31,7 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.9-dev';
+const VERSION = '2.7.10-dev';
 // FY2024で固定し既知のFY2025/FY2026上期で確認。月点の合計は年度P50とは別。
 const HISTORY_MONTHLY_POINT_METHOD = 'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
@@ -5130,7 +5130,7 @@ function buildHistoryMonthlyPlanning_(mixed, months, history, opt) {
       const base = history && history.baseSeries48 || [], spot = history && history.spotSeries48 || [];
       if (headers.length !== base.length || base.length !== spot.length) throw new Error('Invalid provisional history dimensions');
       const rows = headers.map((m, i) => ({ ym: fmtYM_(m).replace('/', '-'), base: base[i], spot: spot[i] }));
-      const q = appHistoryProvisionalForecast_(rows, months[0].getFullYear());
+      const q = appHistoryCombinationForecast_(rows, months[0].getFullYear());
       // q.applied は月形状の再配分だけの印。完全Sを保持する疎な経路も、有効な月次点として保存する。
       return Object.assign(meta, { applied: true, reason: '', method: q.method,
         provisional: true, validationStatus: 'in_progress', annualRawP50, annualTarget: q.total,
@@ -11738,6 +11738,223 @@ function appHistoryProvisionalCompact_(q) {
   annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
 }
 
+
+// ===== 支持月による暫定点額（MCおよび完全Wの数値経路は維持） =====
+// Exact Z source c0fc0feebbcf67f8b6a6c3b0b9ce65df25df7d2380bd0f9d69cd7d85e6a46849; only module import/export syntax is adapted.
+function appHistorySupportFactory_(forecastW) {
+/** Fixed Z singleton: own calendar support shrinks complete W, with complete-W economic rescues. */
+
+const METHODS=Object.freeze({Z:'Z_CALENDAR_SUPPORT_SHRINK_W'});
+const MAX=Number.MAX_SAFE_INTEGER;
+const clone=v=>Array.isArray(v)?v.map(clone):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clone(x)])):v;
+const sum=a=>a.reduce((x,y)=>x+y,0),halfSums=p=>[sum(p.slice(0,6)),sum(p.slice(6))];
+const fiscalMonths=fy=>Array.from({length:12},(_,m)=>`${fy+Math.floor((m+3)/12)}-${String((m+3)%12+1).padStart(2,'0')}`);
+const same=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]);
+function contextOf(history,fy){
+ if(!Number.isInteger(fy)||fy<2024||fy>9999||!Array.isArray(history)||history.length>48||history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||r.ym>=`${fy}-04`||!Number.isFinite(r.base)||!Number.isFinite(r.spot)))throw Error('Invalid or future Z history');
+ const by=new Map(history.map(r=>[r.ym,r]));if(by.size!==history.length)throw Error('Duplicate Z history');
+ for(let i=1;i<history.length;i++){const[y,m]=history[i-1].ym.split('-').map(Number),next=`${y+Math.floor(m/12)}-${String(m%12+1).padStart(2,'0')}`;if(history[i].ym!==next)throw Error('Noncontinuous Z history');}
+ if(history.at(-1)?.ym!==`${fy}-03`)throw Error('Z history must end priorMarch');
+ if(!fiscalMonths(fy-1).every(ym=>by.has(ym))||!fiscalMonths(fy-2).every(ym=>by.has(ym)))throw Error('Incomplete Z prior24');
+ const clean=[];for(let y=2022;y<fy;y++)if(fiscalMonths(y).every(ym=>by.has(ym)))clean.push(y);
+ if(clean.length<2)throw Error('Insufficient Z clean FYs');
+ const latest=fiscalMonths(fy-1).map(ym=>by.get(ym)),baseNet12=sum(latest.map(r=>r.base)),spotNet12=sum(latest.map(r=>r.spot)),net12=baseNet12+spotNet12;
+ if(![baseNet12,spotNet12,net12].every(Number.isFinite))throw Error('Invalid Z prior net');
+ return{fy,by,baseNet12,spotNet12,net12,active:net12>0,profileYears:clean.slice(-3),historyStart:history[0].ym,historyEnd:history.at(-1).ym,observedMonths:history.length};
+}
+function validW(w,c){
+ if(!w||!Array.isArray(w.points)||w.points.length!==12||w.points.some(v=>!Number.isSafeInteger(v)||v<0)||!Number.isSafeInteger(w.total)||w.total<0||sum(w.points)!==w.total)throw Error('Invalid complete Z baseline W');
+ if(w.net12!==undefined&&w.net12!==c.net12||w.active!==undefined&&w.active!==c.active||w.fy!==undefined&&w.fy!==c.fy)throw Error('Complete Z W context mismatch');
+ if(c.net12>=1&&w.total<1||!c.active&&w.total!==0)throw Error('Complete Z W economic boundary');
+ if(typeof w.eligible!=='boolean'||typeof w.mode!=='string')throw Error('Missing complete Z W route metadata');
+ return w;
+}
+function safePoints(points){return Array.isArray(points)&&points.length===12&&points.every(v=>Number.isSafeInteger(v)&&v>=0)&&Number.isSafeInteger(sum(points))&&sum(points)<=MAX;}
+
+/** {w} is a synthetic-only complete-W injection; real runs omit it. No new Z calibration. */
+function forecastZ(history,fy,{w}={}){
+ const c=contextOf(history,fy),completeW=clone(validW(w??forecastW(history,fy),c)),baseline=completeW.points.slice();
+ const eligible=completeW.eligible===true&&completeW.mode==='validated_event_calendar';
+ const sourcePrefix={fy,historyStart:c.historyStart,historyEnd:c.historyEnd,observedMonths:c.observedMonths,cleanFYs:c.profileYears.slice(),nativeWUsesOriginalObservedHistory:true};
+ const common={method:METHODS.Z,kind:'Z',role:'fixed_singleton_adoption_candidate',fy,net12:c.net12,baseNet12:c.baseNet12,spotNet12:c.spotNet12,active:c.active,
+  completeW,wPoints12:baseline.slice(),baseWPoints:baseline.slice(),sourcePrefix,profileYears:c.profileYears.slice(),syntheticWOverride:w!==undefined,
+  eligible,baselineWShrinkEligible:eligible,weights:[],selectedFoldFYs:[],folds:[],profileRows:[],hits:[],reliability:[],monthProof:[],economicHalfRescues:[]};
+ const finish=(points,extra)=>({...common,...extra,points:points.slice(),points12:points.slice(),total:sum(points),halfTargets:halfSums(points),postRescuePoints:points.slice(),exactW:same(points,baseline)});
+ const fallback=(reason,detail=null)=>finish(baseline,{mode:'complete_W',applied:false,fallbackReason:reason,numericGuardDetail:detail,rescue:reason,preRescuePoints:baseline.slice(),preAnnualRescuePoints:baseline.slice()});
+ if(!eligible)return fallback('W_route_not_shrink_eligible');
+ try{
+  const profileRows=c.profileYears.map(year=>({fy:year,months:fiscalMonths(year).map(ym=>{const r=c.by.get(ym),rawTotal=r.base+r.spot;if(!Number.isFinite(rawTotal))throw Error('Nonfinite Z profile monthly TOTAL');return{ym,base:r.base,spot:r.spot,rawTotal,positive:rawTotal>0};})}));
+  const k=profileRows.length,hits=Array.from({length:12},(_,m)=>profileRows.reduce((h,r)=>h+(r.months[m].positive?1:0),0));
+  const reliability=hits.map(h=>h/k),monthProof=baseline.map((v,m)=>{
+   const r=reliability[m];if(!Number.isFinite(r)||r<0||r>1)throw Error('Invalid Z reliability');
+   const raw=v*r,point=hits[m]===k?v:Math.round(raw);
+   if(!Number.isFinite(raw)||raw<0||!Number.isSafeInteger(point)||point<0||point>v)throw Error('Unsafe Z support-shrunk point');
+   return{month:m,ym:fiscalMonths(fy)[m],h:hits[m],k,reliability:r,baselinePoint:v,raw,pointBeforeRescue:point};
+  });
+  common.profileRows=profileRows;common.hits=hits.slice();common.reliability=reliability.slice();common.monthProof=monthProof;
+  let points=monthProof.map(r=>r.pointBeforeRescue);if(!safePoints(points))throw Error('Unsafe Z pre-rescue points');
+  const preRescuePoints=points.slice(),halfRescues=[];
+  for(let h=0;h<2;h++)if(sum(points.slice(h*6,h*6+6))===0&&sum(baseline.slice(h*6,h*6+6))>0&&hits.slice(h*6,h*6+6).some(v=>v>0)){
+   points.splice(h*6,6,...baseline.slice(h*6,h*6+6));halfRescues.push(h);
+  }
+  common.economicHalfRescues=halfRescues.slice();const preAnnualRescuePoints=points.slice();let rescue=halfRescues.length?'economic_half_complete_W':'none';
+  if(sum(points)===0&&c.net12>=1){points=baseline.slice();rescue='economic_year_complete_W';}
+  if(!safePoints(points)||c.net12>=1&&sum(points)<1||!c.active&&sum(points)!==0||points.some((v,m)=>v>baseline[m]))throw Error('Z completed economic/numeric boundary');
+  return finish(points,{mode:'calendar_support_shrink',applied:true,fallbackReason:null,numericGuardDetail:null,rescue,preRescuePoints,preAnnualRescuePoints,raw:monthProof.map(r=>r.raw)});
+ }catch(error){return fallback('Z_numeric_complete_W',error.message);}
+}
+
+return {forecastZ};
+}
+/** Pure point wrapper; nativeAdapter changes only immutable-W native fitting dependencies in isolated tests. */
+function appHistorySupportForecast_(history,fy,nativeAdapter) {
+ const baseline=(rows,year)=>appHistoryProvisionalForecast_(rows,year,nativeAdapter);
+ const q=appHistorySupportFactory_(baseline).forecastZ(history,fy);
+ if(q.method!=='Z_CALENDAR_SUPPORT_SHRINK_W'||q.points.length!==12||q.points.some(v=>!Number.isSafeInteger(v)||v<0)||
+    !Number.isSafeInteger(q.total)||q.points.reduce((s,v)=>s+v,0)!==q.total)throw new Error('Invalid provisional Z result');
+ return q;
+}
+/** Compact point evidence only. Raw MC means/quantiles remain those of the referenced run. */
+function appHistorySupportCompact_(q) {
+ if(!q||q.method!=='Z_CALENDAR_SUPPORT_SHRINK_W')throw new Error('Invalid provisional Z summary');
+ return {policyVersion:'PROVISIONAL_Z_V1',policyStatus:'provisional',provisional:true,validationStatus:'in_progress',validationNote:'known_period_validation_required',
+  method:q.method,kind:'Z',points:q.points.slice(),total:q.total,annualTarget:q.total,halfTargets:q.halfTargets.slice(),
+  active:q.active,inactive:!q.active,net12:q.net12,mode:q.mode,applied:q.applied,rescue:q.rescue,
+  fallbackReason:q.fallbackReason||'',historyYearsUsed:q.profileYears.slice(),trainingThroughYm:q.sourcePrefix.historyEnd,
+  weights:[],selectedFoldFYs:[],baselineWMethod:q.completeW.method,baselineWMode:q.completeW.mode,baselineWEligible:q.completeW.eligible,
+  calendarMethod:'positive_net_total_calendar_support_frequency',calendarSupportHits:q.hits.slice(),calendarReliability:q.reliability.slice(),
+  economicHalfRescues:q.economicHalfRescues.slice(),annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
+}
+
+
+// ===== 過去2年度の損失で支持月補正を守る暫定点額 =====
+// Exact AA source 3a45da556b706ce515882627a503c382b501340f7be63f6ee86e81be6c9f7dd3; module import/export syntax only is adapted.
+function appHistoryGuardFactory_(forecastZ) {
+/** AA: prospective own-past loss guard over immutable support shrink Z and complete W. */
+const METHOD='AA_PAST_LOSS_GUARDED_SUPPORT_W';
+const clone=v=>Array.isArray(v)?v.map(clone):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clone(x)])):v,sum=a=>a.reduce((s,v)=>s+v,0),halves=p=>[sum(p.slice(0,6)),sum(p.slice(6))];
+const ym=(y,m)=>`${y+Math.floor((m+3)/12)}-${String((m+3)%12+1).padStart(2,'0')}`;
+const safe=p=>Array.isArray(p)&&p.length===12&&p.every(v=>Number.isSafeInteger(v)&&v>=0)&&Number.isSafeInteger(sum(p));
+const ni=(a,b)=>a<=b+128*Number.EPSILON*Math.max(1,Math.abs(b));
+function threshold(history,fy){
+ const by=new Map(history.map(r=>[r.ym,r.base+r.spot])),vals=[];
+ for(let y=2022;y<fy;y++)if(Array.from({length:12},(_,m)=>ym(y,m)).every(k=>by.has(k)))for(let m=0;m<12;m++){const v=by.get(ym(y,m));if(!Number.isFinite(v))throw Error('Nonfinite AA training TOTAL');if(v>0)vals.push(v);}
+ vals.sort((a,b)=>a-b);if(!vals.length)return null;
+ const h=(vals.length-1)*.9,l=Math.floor(h),u=Math.ceil(h);return vals[l]+(h-l)*(vals[u]-vals[l]);
+}
+function loss(points,actual,t){
+ let SAE=0,SSE=0,largeSSE=0;
+ for(let m=0;m<points.length;m++){const a=actual[m],e=points[m]-a,e2=e*e;SAE+=Math.abs(e);SSE+=e2;if(t!==null&&a>0&&a>=t)largeSSE+=e2;}
+ if(![SAE,SSE,largeSSE].every(Number.isFinite))throw Error('Nonfinite AA observed loss');return {SAE,SSE,largeSSE};
+}
+function checkedZ(q,fy){
+ if(!q||q.method!=='Z_CALENDAR_SUPPORT_SHRINK_W'||q.fy!==fy||!safe(q.points)||!q.completeW||!safe(q.completeW.points)||q.points.some((v,m)=>v>q.completeW.points[m])||q.total!==sum(q.points)||q.completeW.total!==sum(q.completeW.points)||q.syntheticWOverride!==false)throw Error('Invalid AA complete Z/W policy');return q;
+}
+/** zPredict is synthetic-only injection. Real forecasts accept history/fy and omit it. */
+function forecastAA(history,fy,{zPredict}={}){
+ const predict=zPredict||forecastZ,outer=clone(checkedZ(predict(history,fy),fy)),w=outer.completeW.points.slice(),z=outer.points.slice(),net12=outer.net12;
+ const common={method:METHOD,kind:'AA',fy,active:outer.active,net12,baseNet12:outer.baseNet12,spotNet12:outer.spotNet12,
+  sourcePrefix:clone(outer.sourcePrefix),profileYears:outer.profileYears.slice(),completeZ:outer,completeW:clone(outer.completeW),baseWPoints:w.slice(),wPoints12:w.slice(),zPoints12:z.slice(),eligible:outer.eligible,
+  syntheticWOverride:false,syntheticZOverride:zPredict!==undefined,weights:[0,0],selectedFoldFYs:[],folds:[],economicHalfRescues:[]};
+ const finish=(points,extra)=>({...common,...extra,points:points.slice(),points12:points.slice(),postRescuePoints:points.slice(),total:sum(points),halfTargets:halves(points),exactW:points.every((v,m)=>v===w[m])});
+ const fallback=reason=>finish(w,{mode:'complete_W',applied:false,rescue:reason,fallbackReason:reason,preRescuePoints:w.slice(),preAnnualRescuePoints:w.slice()});
+ if(!outer.eligible)return fallback('outer_Z_route_complete_W');
+ try{
+  const by=new Map(history.map(r=>[r.ym,r])),years=[];
+  for(let y=2024;y<fy;y++){
+   const prefix=history.filter(r=>r.ym<`${y}-04`),all=Array.from({length:12},(_,m)=>ym(y,m));
+   const clean=[];for(let t=2022;t<y;t++)if(Array.from({length:12},(_,m)=>ym(t,m)).every(k=>prefix.some(r=>r.ym===k)))clean.push(t);
+   if(prefix.length>=24&&prefix.at(-1)?.ym===`${y}-03`&&all.every(k=>by.has(k))&&clean.length>=2)years.push(y);
+  }
+  const foldFYs=years.slice(-2);if(foldFYs.length<2)return fallback('insufficient_two_complete_past_validation_FYs');
+  const folds=foldFYs.map(y=>{
+   const prefix=history.filter(r=>r.ym<`${y}-04`),largeThreshold=threshold(prefix,y);
+   const predicted=clone(checkedZ(predict(prefix,y),y)); // No heldout actual/name is passed to Z.
+   const actualMonthly=Array.from({length:12},(_,m)=>{const r=by.get(ym(y,m)),v=r.base+r.spot;if(!Number.isFinite(v))throw Error('Nonfinite AA fold actual');return v;});
+   const comparisons=[0,1].map(h=>{const actual=actualMonthly.slice(h*6,h*6+6),Z=loss(predicted.points.slice(h*6,h*6+6),actual,largeThreshold),W=loss(predicted.completeW.points.slice(h*6,h*6+6),actual,largeThreshold);
+    return {half:h,Z,W,SAENonInferior:Z.SAE<=W.SAE,SSENonInferior:ni(Z.SSE,W.SSE),largeSSENonInferior:ni(Z.largeSSE,W.largeSSE),pass:Z.SAE<=W.SAE&&ni(Z.SSE,W.SSE)&&ni(Z.largeSSE,W.largeSSE)};});
+   return {fy:y,historyStart:prefix[0].ym,historyEnd:prefix.at(-1).ym,observedMonths:prefix.length,predictionMadeBeforeFoldActualsRead:true,actualMonthly,largeThreshold,zPoints12:predicted.points.slice(),wPoints12:predicted.completeW.points.slice(),completeZ:predicted,comparisons};
+  });
+  const weights=[0,1].map(h=>folds.every(f=>f.comparisons[h].pass)?1:0);
+  common.weights=weights;common.selectedFoldFYs=foldFYs;common.folds=folds;
+  let points=[...((weights[0]===1?z:w).slice(0,6)),...((weights[1]===1?z:w).slice(6))];const preRescuePoints=points.slice(),rescues=[];
+  for(let h=0;h<2;h++)if(sum(points.slice(h*6,h*6+6))===0&&sum(w.slice(h*6,h*6+6))>0&&outer.profileYears.some(y=>Array.from({length:6},(_,m)=>by.get(ym(y,h*6+m))).some(r=>r&&r.base+r.spot>0))){points.splice(h*6,6,...w.slice(h*6,h*6+6));rescues.push(h);}
+  const preAnnualRescuePoints=points.slice();let rescue=rescues.length?'economic_half_complete_W':'none';if(sum(points)===0&&net12>=1){points=w.slice();rescue='economic_year_complete_W';}
+  if(!safe(points)||points.some((v,m)=>v>w[m])||net12>=1&&sum(points)<1||!outer.active&&sum(points)!==0)throw Error('AA completed economic boundary');
+  return finish(points,{mode:'past_loss_guarded_support',applied:true,rescue,fallbackReason:null,preRescuePoints,preAnnualRescuePoints,economicHalfRescues:rescues});
+ }catch(error){return finish(w,{mode:'complete_W',applied:false,rescue:'AA_numeric_complete_W',fallbackReason:'AA_numeric_complete_W',numericGuardDetail:String(error.message),preRescuePoints:w.slice(),preAnnualRescuePoints:w.slice()});}
+}
+
+return {forecastAA};
+}
+/** Pure AA wrapper. Complete W/Z helpers remain unchanged; nativeAdapter is forwarded only. */
+function appHistoryGuardForecast_(history,fy,nativeAdapter) {
+ const support=(rows,year)=>appHistorySupportForecast_(rows,year,nativeAdapter);
+ const q=appHistoryGuardFactory_(support).forecastAA(history,fy);
+ if(q.method!=='AA_PAST_LOSS_GUARDED_SUPPORT_W'||q.points.length!==12||q.points.some(v=>!Number.isSafeInteger(v)||v<0)||
+    !Number.isSafeInteger(q.total)||q.points.reduce((s,v)=>s+v,0)!==q.total)throw new Error('Invalid provisional AA result');
+ return q;
+}
+/** Compact evidence; full source/prefix/fold proof is available only from the pure helper. */
+function appHistoryGuardCompact_(q) {
+ if(!q||q.method!=='AA_PAST_LOSS_GUARDED_SUPPORT_W')throw new Error('Invalid provisional AA summary');
+ return {policyVersion:'PROVISIONAL_AA_V1',policyStatus:'provisional',provisional:true,validationStatus:'in_progress',validationNote:'known_period_validation_required',
+  method:q.method,kind:'AA',points:q.points.slice(),total:q.total,annualTarget:q.total,halfTargets:q.halfTargets.slice(),active:q.active,inactive:!q.active,net12:q.net12,
+  mode:q.mode,applied:q.applied,rescue:q.rescue,fallbackReason:q.fallbackReason||'',historyYearsUsed:q.profileYears.slice(),trainingThroughYm:q.sourcePrefix.historyEnd,
+  weights:q.weights.slice(),selectedFoldFYs:q.selectedFoldFYs.slice(),economicHalfRescues:q.economicHalfRescues.slice(),
+  calendarMethod:'own_past_two_FY_each_half_all_three_losses_noninferior',baselineWMethod:q.completeW.method,baselineWMode:q.completeW.mode,
+  supportMethod:q.completeZ.method,supportMode:q.completeZ.mode,annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
+}
+
+
+// ===== 完全Wと過去損失で守った補正の固定等重み点額 =====
+// Exact BB source 6ee2a91935eceea887692cc88d676f87807b8fbe7c4269e26123320281d58aef; import/export syntax adaptation only.
+function appHistoryCombinationFactory_(forecastAA) {
+/** BB: fixed equal-weight forecast combination of completed immutable W and AA. */
+const METHOD='BB_EQUAL_WEIGHT_W_AA_COMBINATION';
+const clone=v=>Array.isArray(v)?v.map(clone):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clone(x)])):v;
+const sum=a=>a.reduce((s,v)=>s+v,0),halves=p=>[sum(p.slice(0,6)),sum(p.slice(6))];
+const safe=p=>Array.isArray(p)&&p.length===12&&p.every(v=>Number.isSafeInteger(v)&&v>=0)&&Number.isSafeInteger(sum(p));
+/** aaPredict is synthetic-only injection. Real runs omit it. No fitted combination coefficient. */
+function forecastBB(history,fy,{aaPredict}={}){
+ const a=clone((aaPredict||forecastAA)(history,fy));
+ if(!a||a.method!=='AA_PAST_LOSS_GUARDED_SUPPORT_W'||a.fy!==fy||!safe(a.points)||!a.completeW||!safe(a.completeW.points)||a.total!==sum(a.points)||a.completeW.total!==sum(a.completeW.points)||a.syntheticWOverride!==false||a.syntheticZOverride!==false||a.points.some((v,m)=>v>a.completeW.points[m]))throw Error('Invalid BB completed AA/W policies');
+ if(typeof a.net12!=='number'||!Number.isFinite(a.net12)||typeof a.active!=='boolean'||a.active!==(a.net12>0)||a.completeW.net12!==a.net12||a.completeW.active!==a.active||a.net12>=1&&(a.total<1||a.completeW.total<1)||a.net12<=0&&(a.total!==0||a.completeW.total!==0))throw Error('Invalid BB baseline economic metadata');
+ const w=a.completeW.points.slice(),aa=a.points.slice();
+ const common={method:METHOD,kind:'BB',fy,active:a.active,net12:a.net12,baseNet12:a.baseNet12,spotNet12:a.spotNet12,sourcePrefix:clone(a.sourcePrefix),profileYears:a.profileYears.slice(),eligible:a.eligible,
+  completeAA:a,completeW:clone(a.completeW),baseWPoints:w.slice(),wPoints12:w.slice(),aaPoints12:aa.slice(),syntheticWOverride:false,syntheticAAOverride:aaPredict!==undefined,
+  combinationWeight:.5,weights:[],selectedFoldFYs:[],folds:[],economicHalfRescues:[]};
+ const finish=(points,extra)=>({...common,...extra,points:points.slice(),points12:points.slice(),postRescuePoints:points.slice(),total:sum(points),halfTargets:halves(points),exactW:points.every((v,m)=>v===w[m])});
+ try{
+  const monthProof=aa.map((v,m)=>{const difference=w[m]-v,raw=v+difference/2,point=Math.round(raw);if(!Number.isSafeInteger(difference)||!Number.isFinite(raw)||!Number.isSafeInteger(point)||point<v||point>w[m])throw Error('Unsafe BB midpoint');return {month:m,aaPoint:v,wPoint:w[m],difference,raw,pointBeforeRescue:point};});
+  let points=monthProof.map(r=>r.pointBeforeRescue),preRescuePoints=points.slice(),rescue='none';
+  const preAnnualRescuePoints=points.slice();if(sum(points)===0&&a.net12>=1){points=w.slice();rescue='economic_year_complete_W';}
+  if(!safe(points)||points.some((v,m)=>v<aa[m]||v>w[m])||a.net12>=1&&sum(points)<1||!a.active&&sum(points)!==0)throw Error('BB completed economic boundary');
+  return finish(points,{mode:'equal_weight_complete_policies',applied:true,fallbackReason:null,rescue,raw:monthProof.map(r=>r.raw),monthProof,preRescuePoints,preAnnualRescuePoints});
+ }catch(error){return finish(w,{mode:'complete_W',applied:false,rescue:'BB_numeric_complete_W',fallbackReason:'BB_numeric_complete_W',numericGuardDetail:String(error.message),preRescuePoints:w.slice(),preAnnualRescuePoints:w.slice()});}
+}
+
+return {forecastBB};
+}
+/** Pure fixed combination; every lower-level W/Z/AA helper is unchanged. */
+function appHistoryCombinationForecast_(history,fy,nativeAdapter) {
+ const guarded=(rows,year)=>appHistoryGuardForecast_(rows,year,nativeAdapter);
+ const q=appHistoryCombinationFactory_(guarded).forecastBB(history,fy);
+ if(q.method!=='BB_EQUAL_WEIGHT_W_AA_COMBINATION'||q.points.length!==12||q.points.some(v=>!Number.isSafeInteger(v)||v<0)||
+    !Number.isSafeInteger(q.total)||q.points.reduce((s,v)=>s+v,0)!==q.total)throw new Error('Invalid provisional BB result');
+ return q;
+}
+/** Compact evidence only; referenced MC means/quantiles are unchanged. */
+function appHistoryCombinationCompact_(q) {
+ if(!q||q.method!=='BB_EQUAL_WEIGHT_W_AA_COMBINATION')throw new Error('Invalid provisional BB summary');
+ return {policyVersion:'PROVISIONAL_BB_V1',policyStatus:'provisional',provisional:true,validationStatus:'in_progress',validationNote:'known_period_validation_required',
+  method:q.method,kind:'BB',points:q.points.slice(),total:q.total,annualTarget:q.total,halfTargets:q.halfTargets.slice(),active:q.active,inactive:!q.active,net12:q.net12,
+  mode:q.mode,applied:q.applied,rescue:q.rescue,fallbackReason:q.fallbackReason||'',historyYearsUsed:q.profileYears.slice(),trainingThroughYm:q.sourcePrefix.historyEnd,
+  weights:[],selectedFoldFYs:[],combinationWeight:q.combinationWeight,economicHalfRescues:q.economicHalfRescues.slice(),
+  calendarMethod:'equal_weight_completed_W_AA_policies',baselineWMethod:q.completeW.method,baselineWMode:q.completeW.mode,
+  guardedMethod:q.completeAA.method,guardedMode:q.completeAA.mode,annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
+}
+
   // ===== Forecast_Agent.js ここまで =====
   // ===== Forecast_WebApp.js ここから（変更しない） =====
 /**
@@ -12782,6 +12999,12 @@ function webAuditLogUrl_() {
     HISTORY_MONTHLY_POINT_METHOD: typeof HISTORY_MONTHLY_POINT_METHOD === 'undefined' ? undefined : HISTORY_MONTHLY_POINT_METHOD,
     appHistoryProvisionalForecast_: typeof appHistoryProvisionalForecast_ === 'undefined' ? undefined : appHistoryProvisionalForecast_,
     appHistoryProvisionalCompact_: typeof appHistoryProvisionalCompact_ === 'undefined' ? undefined : appHistoryProvisionalCompact_,
+    appHistorySupportForecast_: typeof appHistorySupportForecast_ === 'undefined' ? undefined : appHistorySupportForecast_,
+    appHistorySupportCompact_: typeof appHistorySupportCompact_ === 'undefined' ? undefined : appHistorySupportCompact_,
+    appHistoryGuardForecast_: typeof appHistoryGuardForecast_ === 'undefined' ? undefined : appHistoryGuardForecast_,
+    appHistoryGuardCompact_: typeof appHistoryGuardCompact_ === 'undefined' ? undefined : appHistoryGuardCompact_,
+    appHistoryCombinationForecast_: typeof appHistoryCombinationForecast_ === 'undefined' ? undefined : appHistoryCombinationForecast_,
+    appHistoryCombinationCompact_: typeof appHistoryCombinationCompact_ === 'undefined' ? undefined : appHistoryCombinationCompact_,
     TRI_METHODS: typeof TRI_METHODS === 'undefined' ? undefined : TRI_METHODS,
     TRI_PRIOR_WEIGHTS: typeof TRI_PRIOR_WEIGHTS === 'undefined' ? undefined : TRI_PRIOR_WEIGHTS,
     readTriangulationEnabled_: typeof readTriangulationEnabled_ === 'undefined' ? undefined : readTriangulationEnabled_,
@@ -12791,7 +13014,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: 'c4d53677246305114707da1941b27b2cc3df26e35c049cbe69291a2cbf746cd1',
+    SOURCE_SHA256: 'b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

@@ -91,10 +91,14 @@ function appProvisionalReadiness_(plan, snap) {
     run.annual_p10 <= run.annual_p50 && run.annual_p50 <= run.annual_p90;
   const forecastReady = annualReady && months.length === 12 && expected.every(ym => months.filter(m => String(m.ym) === ym &&
     ['p10', 'p50', 'p90'].every(k => typeof m[k] === 'number' && isFinite(m[k]) && m[k] >= 0) && m.p10 <= m.p50 && m.p50 <= m.p90).length === 1);
-  const planning = appForecastPlanningOf_(run.planning_json, plan.fy, run.annual_p50);
+  if (!snap.pointSnapshot) snap.pointSnapshot = { tables: { PLANS: snap.plans, FORECAST_RUNS: snap.runs,
+    FORECAST_MONTHLY: snap.monthly, PLAN_ACTIONS: snap.actions } };
+  const resolvedPoint = appPointRevisionResolve_(plan, run, months, snap.pointSnapshot);
+  const planning = resolvedPoint.planning;
   return { forecastReady: forecastReady, planningReady: !!planning, runId: String(run.run_id), method: planning ? planning.method : 'LEGACY_MONTHLY_P50',
     appVersion: String(run.app_version || ''), engineVersion: String(run.engine_version || ''), finishedAt: String(run.finished_at || ''),
-    annualRiskReady: annualReady,
+    annualRiskReady: annualReady, pointRevision: resolvedPoint.revision,
+    rawMethod: resolvedPoint.rawPlanning ? resolvedPoint.rawPlanning.method : 'LEGACY_MONTHLY_P50',
     reason: !forecastReady ? '年度と12か月の予測帯がそろっていないか、数値・順序を確認できません。' : !planning ? '月別の計画値の控えがありません（従来の中央値を表示）。' : '',
     planId: plan.plan_id, measure: appPlanIsMeasure_(plan), frozen: appYearIsFrozen_(plan.fy) };
 }

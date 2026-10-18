@@ -5,8 +5,16 @@ import { makeEnv, MEMBER } from './gas-mock.mjs';
 const hash=v=>crypto.createHash('sha256').update(typeof v==='string'?v:JSON.stringify(v)).digest('hex');
 const NAME='合成オフライン製薬',AS_OF=Date.parse('2026-10-18T01:00:00Z');
 const SOURCE_PARTS=Array.from({length:4},(_,j)=>{const fy=2022+j,rows=[[41,46,50,56,57,66].map(x=>'sheader'+x)];for(let i=0;i<12;i++){const date=new Date(fy,3+i,1).toISOString();rows.push(['s'+NAME,'sベース','s合成品','e','d'+date,'n'+(100000+j*12000+i*5000)]);if(i===8)rows.push(['s'+NAME,'sスポット','s合成案件','e','d'+date,'n50000']);}return{fy,sheetName:'*'+fy+'_actual_value',rowStart:1,rowCount:rows.length,rows};});
+// Keep the historical W-only transport contract distinct from new native BB calculation.
+// The transformed synthetic engine has its own honest fingerprint; no live artifact is changed.
+function historicalWEngine(e){
+ e.run(`(()=>{const original=appLegacyEngine_.toString(),needle='const q = appHistoryCombinationForecast_(rows,';
+  if(!original.includes(needle))throw Error('Historical W fixture dispatch missing');
+  const source=original.replace(needle,'const q = appHistoryProvisionalForecast_(rows,'),factory=eval('('+source+')'),sha=appSha256Hex_(source);
+  appLegacyEngine_=function(svc){const out=factory(svc);out.SOURCE_SHA256=sha;return out;};})();`);
+}
 function nativeFixture(sourceParts=SOURCE_PARTS){
- const e=makeEnv();e.call('apiSetup()');const ctx=e.call('(()=>{const user=appCurrentUser_();return{user,actor:user.email,roles:appRolesOf_(user),requestId:"SYNTHETIC-NATIVE"};})()');
+ const e=makeEnv();historicalWEngine(e);e.call('apiSetup()');const ctx=e.call('(()=>{const user=appCurrentUser_();return{user,actor:user.email,roles:appRolesOf_(user),requestId:"SYNTHETIC-NATIVE"};})()');
  const specs={};for(const p of sourceParts){const rows=p.rows.map(c=>{const full=Array(66).fill('');[41,46,50,56,57,66].forEach((col,i)=>{const t=c[i][0],v=c[i].slice(1);full[col-1]=t==='d'?new Date(v):t==='n'?Number(v):t==='e'?'':v;});return full;});specs[p.sheetName]={cols:66,values:rows};}
  const source=e.makeBook('合成実績',specs);e.task('saveSetting({key:"source.zac_spreadsheet",value:__id})',{__id:source.getId()});
  function stage(kind,payload){let req={kind,payload};for(let i=0;i<40;i++){const r=e.call('appJobExecute_(__ctx,__job)',{__ctx:ctx,__job:{id:'SYNTHETIC-STAGE-'+i,kind:req.kind,payload:req.payload,requestedBy:ctx.actor,parentId:''}});assert.ok(!r.needConfirm);if(!r.__next)return r;req=r.__next;}throw Error('native continuation limit');}
@@ -25,7 +33,7 @@ const {m:rawManifest,b:rawBundle}=nativeFixture();
 let checks=0,cases=0;const eq=(a,b,n)=>{assert.deepEqual(a,b,n);checks++;},ok=(v,n)=>{assert.ok(v,n);checks++;},reject=(f,re)=>{assert.throws(f,re);checks++;};
 function addFile(e,v,label='synthetic.json'){return e.call(`(()=>{const f=DriveApp.getFolderById(appProps_().getProperty(APP_PROP.folderId)).createFile(__label,__text,MimeType.PLAIN_TEXT);return{fileId:f.getId(),sha256:appSha256Hex_(__text)};})()`,{__text:JSON.stringify(v),__label:label});}
 function fixture(src={m:rawManifest,b:rawBundle,parts:SOURCE_PARTS}){
- const e=makeEnv({owner:src.m.actor,active:src.m.actor});e.call('apiSetup()');
+ const e=makeEnv({owner:src.m.actor,active:src.m.actor});historicalWEngine(e);e.call('apiSetup()');
  const ctx=e.call(`(()=>{const user=appCurrentUser_();return{user,actor:user.email,roles:appRolesOf_(user),requestId:'SYNTHETIC-OFFLINE'};})()`),m=structuredClone(src.m),b=structuredClone(src.b);
  m.cutoff='2026/03';m.sourceStart='2022/04';m.batchId='SYNTHETIC-BATCH';
  const sourceRecords={};m.reservations.forEach(r=>sourceRecords[r.reservationKey]=[]);for(let fy=2022;fy<=2025;fy++){const part=structuredClone(src.parts.find(p=>p.fy===fy));const rec=e.call('appOfflineEngineClassifyPart_(__m,__meta,__start,__rows)',{__m:m,__meta:{name:part.sheetName},__start:part.rowStart,__rows:part.rows});for(const k of Object.keys(rec))sourceRecords[k].push(...rec[k]);}for(const r of m.reservations)r.nativeSourceHistory=e.call('appOfflineHistoryOfRecords_(__rows,__m)',{__rows:sourceRecords[r.reservationKey],__m:m});

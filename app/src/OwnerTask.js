@@ -36,6 +36,13 @@ const APP_OWNER_BACKUP_STALE_HOURS = 26;   // 状態の要約: 最新のバッ�
  * brief は OWNER_TASK_RESULT に置く短い形（always なら常に。そうでなければ大きいときだけ）。全部は実行ログに出す
  */
 const APP_OWNER_ACTIONS = {
+  // Point-only updates: owner task only; never an executable APP_PLAN_ACTIONS entry.
+  previewPointRevision: { name: 'POINT.PREVIEW', args: ['fy', 'method', 'policySha256', 'publicationId'],
+    opts: () => ({ minRole: 'ADMIN', ownerOnly: true, audit: false }), run: (ctx, i) => appPointPreview_(ctx, i) },
+  applyPointRevision: { name: 'POINT.APPLY', args: ['publicationId', 'method', 'policySha256', 'previewSha256'],
+    opts: () => ({ minRole: 'ADMIN', ownerOnly: true, audit: false }), run: (ctx, i) => appPointApply_(ctx, i) },
+  readPointRevisions: { name: 'POINT.READBACK', args: ['fy'],
+    opts: () => ({ minRole: 'ADMIN', ownerOnly: true, audit: false }), run: (ctx, i) => appPointReadback_(ctx, i) },
   // ---- メンバー・役割・メーカーの表示名（Directory.js） ----
   listDirectory: { name: 'DIRECTORY.LIST', opts: () => ({ minRole: 'ADMIN', audit: false }),
     run: ctx => appCachedRead_('DIRECTORY', () => appListDirectory_(ctx)), brief: r => appOwnerDirectoryBrief_(r), always: true },
