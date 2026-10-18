@@ -84,7 +84,7 @@ const n1 = numbers(first.runId);
 // 本物のA-9 → Engine → 計算/保存ジョブで計画値と任意根拠が残る。分位点は別項目のまま。
 const planning1 = JSON.parse(firstRun.planning_json);
 assert.equal(planning1.version, 'HISTORY_MONTHLY_POINT_V2');
-assert.equal(planning1.method, 'BB_EQUAL_WEIGHT_W_AA_COMBINATION');
+assert.equal(planning1.method, 'EE_PREQUENTIAL_AMOUNT_POLICY_BB');
 assert.equal(planning1.provisional,true);
 assert.equal(planning1.validationStatus,'in_progress');
 assert.equal(planning1.applied, true);
@@ -94,7 +94,7 @@ assert.equal(planning1.annualBasis, 'sum_monthly_points');
 assert.equal(planning1.months.reduce((s, m) => s + m.point, 0), planning1.annualTarget);
 assert.ok(planning1.months.every(m => Number.isSafeInteger(m.point) && m.point >= 0 && Number.isFinite(m.mean)));
 assert.ok(planning1.months.some(m => m.point > 0));
-assert.ok(planning1.provisionalWeights.length===0 && planning1.provisionalWeights.every(w=>w>=0 && w<=1));
+assert.ok(planning1.provisionalWeights.length===12 && planning1.provisionalWeights.every(w=>Number.isFinite(w) && w>=0));
 assert.ok(planning1.provisionalFolds.length<=2 && planning1.provisionalFolds.every(y=>y<FY));
 assert.deepEqual(planning1.halfTargets,[0,1].map(h=>planning1.months.slice(h*6,h*6+6).reduce((s,m)=>s+m.point,0)));
 assert.ok(Buffer.byteLength(firstRun.planning_json) <= 4000);

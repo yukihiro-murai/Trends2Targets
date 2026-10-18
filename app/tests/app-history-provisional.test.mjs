@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {setUpEnv} from './gas-mock.mjs';
 
-const METHOD='W_COMPONENT_EVENT_HALF_SHAPE_BLEND',ACTIVE='BB_EQUAL_WEIGHT_W_AA_COMBINATION',env=setUpEnv();
+const METHOD='W_COMPONENT_EVENT_HALF_SHAPE_BLEND',ACTIVE='EE_PREQUENTIAL_AMOUNT_POLICY_BB',env=setUpEnv();
 const r=env.call(`(() => {
  const fy=2026,asOf=new Date('2026-04-06T12:00:00+09:00').getTime();
  const e=appLegacyEngine_(appLegacyServices_({}, {asOfMs:asOf}));

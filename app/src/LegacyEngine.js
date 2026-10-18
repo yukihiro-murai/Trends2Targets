@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.10-dev、SHA-256 b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.11-dev、SHA-256 789825d1b2f2a0d8647417fd0300db3eea513020ff301c31ab6fec3b31baf621）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,7 +31,7 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.10-dev';
+const VERSION = '2.7.11-dev';
 // FY2024で固定し既知のFY2025/FY2026上期で確認。月点の合計は年度P50とは別。
 const HISTORY_MONTHLY_POINT_METHOD = 'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
@@ -5130,7 +5130,7 @@ function buildHistoryMonthlyPlanning_(mixed, months, history, opt) {
       const base = history && history.baseSeries48 || [], spot = history && history.spotSeries48 || [];
       if (headers.length !== base.length || base.length !== spot.length) throw new Error('Invalid provisional history dimensions');
       const rows = headers.map((m, i) => ({ ym: fmtYM_(m).replace('/', '-'), base: base[i], spot: spot[i] }));
-      const q = appHistoryCombinationForecast_(rows, months[0].getFullYear());
+      const q = appHistoryPrequentialAmountForecast_(rows, months[0].getFullYear());
       // q.applied は月形状の再配分だけの印。完全Sを保持する疎な経路も、有効な月次点として保存する。
       return Object.assign(meta, { applied: true, reason: '', method: q.method,
         provisional: true, validationStatus: 'in_progress', annualRawP50, annualTarget: q.total,
@@ -11955,6 +11955,301 @@ function appHistoryCombinationCompact_(q) {
   guardedMethod:q.completeAA.method,guardedMode:q.completeAA.mode,annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
 }
 
+/** Internal CC scalar primitives from frozen ESM SHA256 00bce8249e65ae90515ab3fb54a758b880fc97652eb79e926d04efadfc65ba47; import/export adaptation only. */
+function appHistoryAmountFactory_(forecastBB) {
+/* BEGIN_VERBATIM_CC_BODY */
+/** CC: own-past TOTAL amount calibration on fully supported BB calendar months only. */
+
+
+const METHOD='CC_PAST_SUPPORTED_TOTAL_AMOUNT_BB';
+const METHODS=Object.freeze({CC:METHOD});
+const MAX=Number.MAX_SAFE_INTEGER,EPS=Number.EPSILON;
+const sum=a=>a.reduce((s,v)=>s+v,0),halves=a=>[sum(a.slice(0,6)),sum(a.slice(6))];
+const clone=v=>Array.isArray(v)?v.map(clone):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clone(x)])):v;
+const fiscalMonths=fy=>Array.from({length:12},(_,m)=>`${fy+Math.floor((m+3)/12)}-${String((m+3)%12+1).padStart(2,'0')}`);
+const safePoints=p=>Array.isArray(p)&&p.length===12&&p.every(v=>Number.isSafeInteger(v)&&v>=0)&&Number.isSafeInteger(sum(p))&&sum(p)<=MAX;
+const finite=(v,message)=>{if(!Number.isFinite(v))throw Error(message);return v;};
+function contextOf(history,fy){
+ if(!Number.isInteger(fy)||fy<2024||fy>9999||!Array.isArray(history)||history.length<24||history.length>48||history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||r.ym>=`${fy}-04`||!Number.isFinite(r.base)||!Number.isFinite(r.spot)))throw Error('Invalid or future CC history');
+ const by=new Map(history.map(r=>[r.ym,r]));if(by.size!==history.length)throw Error('Duplicate CC history');
+ for(let i=1;i<history.length;i++){const[y,m]=history[i-1].ym.split('-').map(Number),next=`${y+Math.floor(m/12)}-${String(m%12+1).padStart(2,'0')}`;if(history[i].ym!==next)throw Error('Noncontinuous CC history');}
+ if(history.at(-1)?.ym!==`${fy}-03`||!fiscalMonths(fy-1).every(ym=>by.has(ym))||!fiscalMonths(fy-2).every(ym=>by.has(ym)))throw Error('Incomplete CC prior24');
+ const cleanFYs=[];for(let y=2022;y<fy;y++)if(fiscalMonths(y).every(ym=>by.has(ym)))cleanFYs.push(y);
+ if(cleanFYs.length<2)throw Error('Insufficient CC clean FYs');
+ const latest=fiscalMonths(fy-1).map(ym=>by.get(ym)),baseNet12=sum(latest.map(r=>r.base)),spotNet12=sum(latest.map(r=>r.spot)),net12=baseNet12+spotNet12;
+ if(![baseNet12,spotNet12,net12].every(Number.isFinite))throw Error('Invalid CC prior net');
+ return{fy,by,baseNet12,spotNet12,net12,active:net12>0,cleanFYs,profileYears:cleanFYs.slice(-3),historyStart:history[0].ym,historyEnd:history.at(-1).ym,observedMonths:history.length};
+}
+function validBB(q,c){
+ if(!q||q.method!=='BB_EQUAL_WEIGHT_W_AA_COMBINATION'||q.fy!==c.fy||!safePoints(q.points)||q.total!==sum(q.points)||q.net12!==c.net12||q.active!==c.active||q.syntheticAAOverride!==false)throw Error('Invalid complete CC BB baseline');
+ if(c.net12>=1&&q.total<1||!c.active&&q.total!==0)throw Error('Invalid complete CC BB economic boundary');
+ return q;
+}
+function profileOf(history,c,baseline){
+ const totals=history.map(r=>finite(r.base+r.spot,'Nonfinite CC monthly TOTAL'));
+ const densityPositiveMonths24=totals.slice(-24).filter(v=>v>0).length,dense=densityPositiveMonths24>12;
+ const profileRows=c.profileYears.map(fy=>({fy,months:fiscalMonths(fy).map(ym=>{const r=c.by.get(ym),rawTotal=finite(r.base+r.spot,'Nonfinite CC calendar TOTAL');return{ym,rawTotal,positive:rawTotal>0};})}));
+ const k=profileRows.length,hits=Array.from({length:12},(_,m)=>profileRows.reduce((h,r)=>h+(r.months[m].positive?1:0),0));
+ const eligible=c.active&&dense;
+ const rawCalendarSupportMask=baseline.map((b,m)=>b>0&&hits[m]===k),supportMask=rawCalendarSupportMask.map(v=>eligible&&v);
+ return{profileYears:c.profileYears.slice(),profileRows,hits,k,densityPositiveMonths24,densityObservedMonths:24,dense,eligible,supportComputed:true,rawCalendarSupportMask,effectiveSupportMask:supportMask.slice(),supportMask,halfPastPositive:[0,1].map(h=>profileRows.some(r=>r.months.slice(h*6,h*6+6).some(m=>m.positive)))};
+}
+function normalizeRows(rows){
+ if(!Array.isArray(rows))throw Error('CC calibration rows must be an array');
+ const checked=rows.map(r=>{
+  if(!r||!Number.isInteger(r.fy)||!Array.isArray(r.b)||r.b.length!==6||!Array.isArray(r.s)||r.s.length!==6||!Array.isArray(r.actual)||r.actual.length!==6||r.b.some(v=>!Number.isSafeInteger(v)||v<0)||r.s.some((v,m)=>!Number.isSafeInteger(v)||v<0||v!==0&&v!==r.b[m])||r.actual.some(v=>!Number.isFinite(v)))throw Error('Invalid CC calibration row');
+  return{fy:r.fy,b:r.b.slice(),s:r.s.slice(),actual:r.actual.slice()};
+ });
+ if(new Set(checked.map(r=>r.fy)).size!==checked.length||checked.some((r,i)=>i>0&&r.fy<=checked[i-1].fy))throw Error('CC calibration FY order');
+ const sigma=Math.max(0,...checked.flatMap(r=>r.s));
+ if(sigma===0)return{rawRows:checked,rows:[],sigma:0,D:0,B:0,informativeFoldFYs:[],informativeFoldCount:0};
+ const normalized=checked.map(r=>({fy:r.fy,...Object.fromEntries(['b','s','actual'].map(k=>[k,r[k].map(v=>{const z=v/sigma;if(!Number.isFinite(z)||v!==0&&z===0)throw Error('Unsafe CC currency normalization');return z;})]))}));
+ const info=normalized.filter(r=>r.s.some(v=>v>0)),D=sum(info.map(r=>sum(r.s)))/info.length,B=sum(info.map(r=>sum(r.s.map(v=>v*v))))/info.length;
+ if(!Number.isFinite(D)||!Number.isFinite(B)||D<=0||B<=0)throw Error('Invalid CC normalized scales');
+ return{rawRows:checked,rows:normalized,sigma,D,B,informativeFoldFYs:info.map(r=>r.fy),informativeFoldCount:info.length};
+}
+/** Fixed arithmetic certificate for the normalized objective; lower/upper at ratio knots. */
+function certificate(n,lambda){
+ if(!Number.isFinite(lambda)||lambda<0)throw Error('Invalid CC amount multiplier');
+ if(n.sigma===0)return{objective:null,absoluteLoss:null,squaredLoss:null,ridge:0,gradientLower:0,gradientUpper:0,kktResidual:0,kktScale:1,kktTolerance:128*EPS,kktPassed:true};
+ let absoluteLoss=0,squaredLoss=0,gradientLower=2*(lambda-1),gradientUpper=gradientLower,kktScale=2*(Math.abs(lambda)+1);
+ for(const r of n.rows)for(let m=0;m<6;m++){
+  const b=r.b[m],s=r.s[m],a=r.actual[m],p=s>0?lambda*s:b,e=p-a;
+  absoluteLoss+=Math.abs(e)/n.D;squaredLoss+=e*e/n.B;
+  if(s>0){
+   const knot=a/s,linear=2*s*e/n.B;
+   const left=lambda<knot?-1:lambda>knot?1:-1,right=lambda<knot?-1:lambda>knot?1:1;
+   gradientLower+=linear+s*left/n.D;gradientUpper+=linear+s*right/n.D;
+   kktScale+=2*s*(Math.abs(p)+Math.abs(a))/n.B+s/n.D;
+  }
+ }
+ const ridge=(lambda-1)*(lambda-1),objective=absoluteLoss+squaredLoss+ridge;
+ if(![absoluteLoss,squaredLoss,ridge,objective,gradientLower,gradientUpper,kktScale].every(Number.isFinite))throw Error('Nonfinite CC loss or derivative');
+ const kktResidual=lambda===0?Math.max(0,-gradientUpper):Math.max(0,gradientLower,-gradientUpper),kktTolerance=128*EPS*Math.max(1,kktScale);
+ return{objective,absoluteLoss,squaredLoss,ridge,gradientLower,gradientUpper,kktResidual,kktScale,kktTolerance,kktPassed:kktResidual<=kktTolerance};
+}
+function amountObjective(rows,lambda){return certificate(normalizeRows(rows),lambda);}
+/** No tunable arguments: finite knots of SUM L1/D + SUM L2/B + ridge-to-one. */
+function fitSupportedAmount(rows){
+ const n=normalizeRows(rows);
+ if(n.sigma===0)return{status:'no_informative_folds',lambda:1,sigma:0,D:0,B:0,DNative:0,BNative:0,informativeFoldFYs:[],informativeFoldCount:0,knots:[],...certificate(n,1)};
+ let ss=0,sa=0,signTerm=0;const atoms=[];
+ for(const r of n.rows)for(let m=0;m<6;m++)if(r.s[m]>0){const s=r.s[m],a=r.actual[m],knot=a/s;finite(knot,'Nonfinite CC knot');ss+=s*s;sa+=s*a;signTerm+=(a<=0?1:-1)*s/n.D;if(knot>0)atoms.push({knot,mass:s/n.D,fy:r.fy,month:m});}
+ const slope=2+2*ss/n.B;let intercept=-2-2*sa/n.B+signTerm;
+ if(![ss,sa,signTerm,slope,intercept].every(Number.isFinite)||slope<=0)throw Error('Nonfinite CC solver coefficients');
+ atoms.sort((a,b)=>a.knot-b.knot||a.fy-b.fy||a.month-b.month);
+ const knots=[];for(const a of atoms){const prev=knots.at(-1);if(prev&&prev.value===a.knot){prev.jump+=2*a.mass;prev.atoms.push({fy:a.fy,month:a.month});}else knots.push({value:a.knot,jump:2*a.mass,atoms:[{fy:a.fy,month:a.month}]});}
+ let lambda=null,status='';
+ if(intercept>=0){lambda=0;status='boundary_zero';}
+ let lower=0;
+ for(const k of knots){
+  if(lambda!==null)break;
+  const root=-intercept/slope;
+  if(!Number.isFinite(root))throw Error('Nonfinite CC interval root');
+  if(root>=lower&&root<k.value){lambda=root;status='interval_root';break;}
+  const left=slope*k.value+intercept,right=left+k.jump;
+  if(![left,right].every(Number.isFinite))throw Error('Nonfinite CC knot derivative');
+  if(left<=0&&right>=0||root===k.value){lambda=k.value;status='knot_minimum';break;}
+  intercept+=k.jump;lower=k.value;
+ }
+ if(lambda===null){lambda=-intercept/slope;status='last_interval_root';if(!Number.isFinite(lambda)||lambda<lower||lambda<0)throw Error('Unsafe CC final root');}
+ const proof=certificate(n,lambda);if(!proof.kktPassed)throw Error('CC normalized KKT certificate failed');
+ const DNative=n.D*n.sigma,BNative=n.B*n.sigma*n.sigma;
+ if(![DNative,BNative].every(Number.isFinite))throw Error('Nonfinite CC native scale metadata');
+ return{status,lambda,sigma:n.sigma,D:n.D,B:n.B,DNative,BNative,informativeFoldFYs:n.informativeFoldFYs.slice(),informativeFoldCount:n.informativeFoldCount,normalizedRows:n.rows,knots,slope,...proof};
+}
+/** bbPredict is synthetic-only. Real calls omit it and use unchanged complete BB. */
+function forecastCC(history,fy,{bbPredict}={}){
+ const c=contextOf(history,fy),predict=bbPredict||forecastBB,completeBB=clone(validBB(predict(history,fy),c)),baseline=completeBB.points.slice();
+ const common={method:METHOD,kind:'CC',fy,net12:c.net12,baseNet12:c.baseNet12,spotNet12:c.spotNet12,active:c.active,completeBB,baseBBPoints:baseline.slice(),bbPoints12:baseline.slice(),
+  sourcePrefix:{fy,historyStart:c.historyStart,historyEnd:c.historyEnd,observedMonths:c.observedMonths,cleanFYs:c.cleanFYs.slice()},profileYears:c.profileYears.slice(),
+  syntheticBBOverride:bbPredict!==undefined,eligible:false,weights:[1,1],selectedFoldFYs:[],folds:[],calibration:[],economicHalfRescues:[],supportComputed:false,rawCalendarSupportMask:Array(12).fill(null),effectiveSupportMask:Array(12).fill(false),supportMask:Array(12).fill(false),hits:Array(12).fill(null),profileRows:[]};
+ const finish=(points,extra)=>({...common,...extra,points:points.slice(),points12:points.slice(),total:sum(points),halfTargets:halves(points),postRescuePoints:points.slice(),exactBB:points.every((v,m)=>v===baseline[m])});
+ const fallback=(reason,detail=null)=>finish(baseline,{mode:'complete_BB',applied:false,rescue:reason,fallbackReason:reason,numericGuardDetail:detail,raw:baseline.slice(),preEconomicRaw:baseline.slice(),preRescuePoints:baseline.slice(),preAnnualRescuePoints:baseline.slice()});
+ try{
+  const profile=profileOf(history,c,baseline);Object.assign(common,profile);
+  if(!c.active)return fallback('inactive_complete_BB');
+  if(!profile.eligible)return fallback('not_dense_complete_BB');
+  const years=[];for(let y=2024;y<fy;y++){
+   const prefix=history.filter(r=>r.ym<`${y}-04`);if(prefix.length<24||prefix.at(-1)?.ym!==`${y}-03`||!fiscalMonths(y).every(ym=>c.by.has(ym)))continue;
+   let clean=0;for(let t=2022;t<y;t++)if(fiscalMonths(t).every(ym=>prefix.some(r=>r.ym===ym)))clean++;
+   if(clean>=2)years.push(y);
+  }
+  const selectedFoldFYs=years.slice(-2);if(selectedFoldFYs.length<2)return fallback('insufficient_two_complete_past_validation_FYs');
+  const predicted=selectedFoldFYs.map(y=>{
+   const prefix=history.filter(r=>r.ym<`${y}-04`),context=contextOf(prefix,y),bb=clone(validBB(predict(prefix,y),context)),p=profileOf(prefix,context,bb.points);
+   return{fy:y,historyStart:context.historyStart,historyEnd:context.historyEnd,observedMonths:context.observedMonths,profileYears:p.profileYears.slice(),predictionMadeBeforeFoldActualsRead:true,bbPoints12:bb.points.slice(),baselineMethod:bb.method,baselineMode:bb.mode,rawCalendarSupportMask:p.rawCalendarSupportMask.slice(),effectiveSupportMask:p.effectiveSupportMask.slice(),supportMask:p.supportMask.slice(),hits:p.hits.slice(),k:p.k,dense:p.dense,densityPositiveMonths24:p.densityPositiveMonths24,active:context.active};
+  });
+  const folds=predicted.map(f=>({...f,actualMonthly:fiscalMonths(f.fy).map(ym=>{const r=c.by.get(ym);return finite(r.base+r.spot,'Nonfinite CC fold actual');})}));
+  const calibration=[0,1].map(h=>({half:h,...fitSupportedAmount(folds.map(f=>({fy:f.fy,b:f.bbPoints12.slice(h*6,h*6+6),s:f.bbPoints12.slice(h*6,h*6+6).map((b,m)=>f.supportMask[h*6+m]?b:0),actual:f.actualMonthly.slice(h*6,h*6+6)})))}));
+  const weights=calibration.map(v=>v.lambda);common.selectedFoldFYs=selectedFoldFYs.slice();common.folds=folds;common.calibration=calibration;common.weights=weights.slice();
+  const preEconomicRaw=baseline.map((b,m)=>profile.supportMask[m]?finite(weights[Math.floor(m/6)]*b,'Nonfinite CC outer amount'):b);
+  let points=preEconomicRaw.map((v,m)=>profile.supportMask[m]?Math.round(v):baseline[m]),raw=preEconomicRaw.slice();
+  if(!safePoints(points))throw Error('Unsafe CC rounded points');
+  const preRescuePoints=points.slice(),economicHalfRescues=[];
+  for(let h=0;h<2;h++)if(sum(points.slice(h*6,h*6+6))===0&&sum(baseline.slice(h*6,h*6+6))>0&&profile.halfPastPositive[h]){
+   points.splice(h*6,6,...baseline.slice(h*6,h*6+6));raw.splice(h*6,6,...baseline.slice(h*6,h*6+6));economicHalfRescues.push(h);
+  }
+  const preAnnualRescuePoints=points.slice();let rescue=economicHalfRescues.length?'economic_half_complete_BB':'none';
+  if(sum(points)===0&&c.net12>=1){points=baseline.slice();raw=baseline.slice();rescue='economic_year_complete_BB';}
+  if(!safePoints(points)||c.net12>=1&&sum(points)<1||!c.active&&sum(points)!==0||points.some((v,m)=>!profile.supportMask[m]&&v!==baseline[m]))throw Error('CC completed economic/support boundary');
+  return finish(points,{mode:'supported_total_amount_calibration',applied:true,rescue,fallbackReason:null,numericGuardDetail:null,raw,preEconomicRaw,preRescuePoints,preAnnualRescuePoints,economicHalfRescues});
+ }catch(error){return fallback('CC_numeric_complete_BB',String(error.message));}
+}
+/* END_VERBATIM_CC_BODY */
+return {forecastCC,fitSupportedAmount,amountObjective};
+}
+
+/** Private unregistered DD factory, source SHA256 c0f51b930cbf32253949bbf191adcfd19176fc9e994f72a8262d392042e38525. Import/export adaptation only. */
+function appHistoryCalendarAmountFactory_(forecastCC) {
+/* BEGIN_VERBATIM_DD_BODY */
+/** DD: twelve independent amount multipliers, immutable CC folds/shared scales, complete BB baseline. */
+
+const METHOD='DD_CALENDAR_SEPARABLE_AMOUNT_BB';
+const METHODS=Object.freeze({DD:METHOD});
+const clone=v=>Array.isArray(v)?v.map(clone):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clone(x)])):v;
+const sum=a=>a.reduce((s,v)=>s+v,0),halves=a=>[sum(a.slice(0,6)),sum(a.slice(6))];
+const safe=p=>Array.isArray(p)&&p.length===12&&p.every(v=>Number.isSafeInteger(v)&&v>=0)&&Number.isSafeInteger(sum(p));
+/** Shared scale is the full half's immutable CC scale, never recomputed from one calendar. */
+function fitCalendarAmount(rows,shared){
+ if(!Array.isArray(rows)||rows.some(r=>!r||!Number.isInteger(r.fy)||!Number.isSafeInteger(r.b)||r.b<0||!Number.isSafeInteger(r.s)||r.s<0||r.s!==0&&r.s!==r.b||!Number.isFinite(r.actual))||new Set(rows.map(r=>r.fy)).size!==rows.length||rows.some((r,i)=>i>0&&r.fy<=rows[i-1].fy))throw Error('Invalid DD calendar rows');
+ if(!shared||!Number.isFinite(shared.sigma)||shared.sigma<0||!Number.isFinite(shared.D)||!Number.isFinite(shared.B))throw Error('Invalid DD shared scale');
+ const common={sigma:shared.sigma,D:shared.D,B:shared.B,sharedInformativeFoldFYs:(shared.informativeFoldFYs||[]).slice(),sharedInformativeFoldCount:shared.informativeFoldCount||0,ownInformativeFoldFYs:rows.filter(r=>r.s>0).map(r=>r.fy)};
+ if(!rows.some(r=>r.s>0))return{...common,status:'no_own_support',lambda:1,normalizedRows:[],knots:[],objective:null,kktResidual:0,kktTolerance:128*Number.EPSILON,kktPassed:true};
+ if(shared.sigma<=0||shared.D<=0||shared.B<=0)throw Error('Missing informative DD half scale');
+ const r=rows.map(x=>({fy:x.fy,...Object.fromEntries(['b','s','actual'].map(k=>{const z=x[k]/shared.sigma;if(!Number.isFinite(z)||x[k]!==0&&z===0)throw Error('Unsafe DD normalization');return[k,z];}))}));
+ const {D,B}=shared;let ss=0,sa=0,sign=0;const atoms=[];
+ for(const x of r)if(x.s>0){const knot=x.actual/x.s;if(!Number.isFinite(knot))throw Error('Nonfinite DD knot');ss+=x.s*x.s;sa+=x.s*x.actual;sign+=(x.actual<=0?1:-1)*x.s/D;if(knot>0)atoms.push({value:knot,jump:2*x.s/D,fy:x.fy});}
+ const slope=2+2*ss/B;let intercept=-2-2*sa/B+sign;if(![ss,sa,sign,slope,intercept].every(Number.isFinite))throw Error('Unsafe DD solver coefficients');
+ atoms.sort((a,b)=>a.value-b.value||a.fy-b.fy);const knots=[];for(const a of atoms){const prev=knots.at(-1);if(prev&&prev.value===a.value){prev.jump+=a.jump;prev.foldFYs.push(a.fy);}else knots.push({value:a.value,jump:a.jump,foldFYs:[a.fy]});}
+ let lambda=intercept>=0?0:null,status=lambda===0?'boundary_zero':'',lower=0;
+ for(const k of knots){if(lambda!==null)break;const root=-intercept/slope;if(!Number.isFinite(root))throw Error('Unsafe DD interval root');if(root>=lower&&root<k.value){lambda=root;status='interval_root';break;}const left=slope*k.value+intercept,right=left+k.jump;if(![left,right].every(Number.isFinite))throw Error('Unsafe DD knot derivative');if(left<=0&&right>=0||root===k.value){lambda=k.value;status='knot_minimum';break;}intercept+=k.jump;lower=k.value;}
+ if(lambda===null){lambda=-intercept/slope;status='last_interval_root';if(!Number.isFinite(lambda)||lambda<lower||lambda<0)throw Error('Unsafe DD final root');}
+ let absoluteLoss=0,squaredLoss=0,gradientLower=2*(lambda-1),gradientUpper=gradientLower,kktScale=2*(Math.abs(lambda)+1);
+ for(const x of r){const p=x.s>0?lambda*x.s:x.b,e=p-x.actual;absoluteLoss+=Math.abs(e)/D;squaredLoss+=e*e/B;if(x.s>0){const knot=x.actual/x.s,linear=2*x.s*e/B;gradientLower+=linear+x.s*(lambda<knot?-1:lambda>knot?1:-1)/D;gradientUpper+=linear+x.s*(lambda<knot?-1:lambda>knot?1:1)/D;kktScale+=2*x.s*(Math.abs(p)+Math.abs(x.actual))/B+x.s/D;}}
+ const ridge=(lambda-1)*(lambda-1),objective=absoluteLoss+squaredLoss+ridge,kktResidual=lambda===0?Math.max(0,-gradientUpper):Math.max(0,gradientLower,-gradientUpper),kktTolerance=128*Number.EPSILON*Math.max(1,kktScale);
+ if(![lambda,absoluteLoss,squaredLoss,ridge,objective,gradientLower,gradientUpper,kktScale,kktResidual,kktTolerance].every(Number.isFinite)||kktResidual>kktTolerance)throw Error('DD KKT or loss certificate failed');
+ return{...common,status,lambda,normalizedRows:r,knots,slope,absoluteLoss,squaredLoss,ridge,objective,gradientLower,gradientUpper,kktScale,kktResidual,kktTolerance,kktPassed:true};
+}
+/** ccPredict is a synthetic-only provider. Actual forecasts use unchanged immutable forecastCC. */
+function forecastDD(history,fy,{ccPredict}={}){
+ const c=clone((ccPredict||forecastCC)(history,fy)),b=c.completeBB;
+ if(!c||c.method!=='CC_PAST_SUPPORTED_TOTAL_AMOUNT_BB'||c.fy!==fy||!b||b.method!=='BB_EQUAL_WEIGHT_W_AA_COMBINATION'||!safe(b.points)||b.total!==sum(b.points)||!Number.isFinite(c.net12)||c.active!==(c.net12>0)||b.net12!==c.net12||b.active!==c.active||!ccPredict&&c.syntheticBBOverride!==false||c.net12>=1&&b.total<1||c.net12<=0&&b.total!==0)throw Error('Invalid immutable DD CC/BB provider');
+ const baseline=b.points.slice(),common={method:METHOD,kind:'DD',fy,net12:c.net12,baseNet12:c.baseNet12,spotNet12:c.spotNet12,active:c.active,completeBB:clone(b),completeCC:c,providerRole:'strict_prefix_folds_support_shared_scales_only',providerCompletionRequired:true,providerMode:c.mode,CCPointsUsed:false,CCHalfWeightsUsed:false,
+  baseBBPoints:baseline.slice(),bbPoints12:baseline.slice(),sourcePrefix:clone(c.sourcePrefix),profileYears:c.profileYears.slice(),profileRows:clone(c.profileRows),supportMask:c.supportMask.slice(),effectiveSupportMask:c.effectiveSupportMask.slice(),rawCalendarSupportMask:c.rawCalendarSupportMask.slice(),supportComputed:c.supportComputed,hits:c.hits.slice(),densityPositiveMonths24:c.densityPositiveMonths24,dense:c.dense,eligible:c.eligible,
+  syntheticCCOverride:ccPredict!==undefined,weights:Array(12).fill(1),selectedFoldFYs:[],folds:[],calibration:[],economicHalfRescues:[]};
+ const finish=(p,extra)=>({...common,...extra,points:p.slice(),points12:p.slice(),postRescuePoints:p.slice(),total:sum(p),halfTargets:halves(p),exactBB:p.every((v,m)=>v===baseline[m])});
+ const fallback=(reason,detail=null)=>finish(baseline,{mode:'complete_BB',applied:false,rescue:reason,fallbackReason:reason,numericGuardDetail:detail,raw:baseline.slice(),preEconomicRaw:baseline.slice(),preRescuePoints:baseline.slice(),preAnnualRescuePoints:baseline.slice()});
+ if(c.mode!=='supported_total_amount_calibration'||c.selectedFoldFYs.length!==2||c.folds.length!==2||c.calibration.length!==2)return fallback('CC_provider_without_two_fitted_folds');
+ try{
+  const calibration=Array.from({length:12},(_,m)=>{const half=Math.floor(m/6),shared=c.calibration[half],rows=c.folds.map(f=>({fy:f.fy,b:f.bbPoints12[m],s:f.supportMask[m]?f.bbPoints12[m]:0,actual:f.actualMonthly[m]}));return{month:m,half,...fitCalendarAmount(rows,shared)};});
+  const weights=calibration.map(x=>x.lambda);common.weights=weights.slice();common.calibration=calibration;common.selectedFoldFYs=c.selectedFoldFYs.slice();common.folds=clone(c.folds);
+  const preEconomicRaw=baseline.map((v,m)=>c.supportMask[m]?weights[m]*v:v);if(preEconomicRaw.some(v=>!Number.isFinite(v)||v<0))throw Error('Unsafe DD outer amount');
+  let raw=preEconomicRaw.slice(),points=raw.map((v,m)=>c.supportMask[m]?Math.round(v):baseline[m]);if(!safe(points))throw Error('Unsafe DD rounded points');
+  const preRescuePoints=points.slice(),economicHalfRescues=[];
+  for(let h=0;h<2;h++)if(sum(points.slice(h*6,h*6+6))===0&&sum(baseline.slice(h*6,h*6+6))>0&&c.halfPastPositive[h]){points.splice(h*6,6,...baseline.slice(h*6,h*6+6));raw.splice(h*6,6,...baseline.slice(h*6,h*6+6));economicHalfRescues.push(h);}
+  const preAnnualRescuePoints=points.slice();let rescue=economicHalfRescues.length?'economic_half_complete_BB':'none';if(sum(points)===0&&c.net12>=1){points=baseline.slice();raw=baseline.slice();rescue='economic_year_complete_BB';}
+  if(!safe(points)||c.net12>=1&&sum(points)<1||!c.active&&sum(points)!==0||points.some((v,m)=>!c.supportMask[m]&&v!==baseline[m]))throw Error('DD completed economic/support boundary');
+  return finish(points,{mode:'calendar_total_amount_calibration',applied:true,rescue,fallbackReason:null,numericGuardDetail:null,raw,preEconomicRaw,preRescuePoints,preAnnualRescuePoints,economicHalfRescues});
+ }catch(error){return fallback('DD_numeric_complete_BB',String(error.message));}
+}
+/* END_VERBATIM_DD_BODY */
+return {forecastDD,fitCalendarAmount};
+}
+/** Private unregistered EE port. Frozen source SHA256 9dafabe42bc509ec32fd6808c999e135b9b169965d379dd0f1dda45aa049f54c; import/export adaptation only. */
+function appHistoryPrequentialAmountFactory_(forecastBB,fitSupportedAmount,fitCalendarAmount) {
+/* BEGIN_VERBATIM_EE_BODY */
+/** EE: first-year fit, next-year completed-policy admission, no refit before outer forecast. */
+
+
+
+const METHOD='EE_PREQUENTIAL_AMOUNT_POLICY_BB';
+const METHODS=Object.freeze({EE:METHOD});
+const clone=v=>Array.isArray(v)?v.map(clone):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clone(x)])):v;
+const sum=a=>a.reduce((s,v)=>s+v,0),halves=a=>[sum(a.slice(0,6)),sum(a.slice(6))],fym=y=>Array.from({length:12},(_,m)=>`${y+Math.floor((m+3)/12)}-${String((m+3)%12+1).padStart(2,'0')}`);
+const safe=p=>Array.isArray(p)&&p.length===12&&p.every(v=>Number.isSafeInteger(v)&&v>=0)&&Number.isSafeInteger(sum(p));
+const ni=(a,b)=>a<=b+128*Number.EPSILON*Math.max(1,Math.abs(b)),lt=(a,b)=>a<b-128*Number.EPSILON*Math.max(1,Math.abs(b));
+function book(history,fy){
+ if(!Number.isInteger(fy)||fy<2024||fy>9999||!Array.isArray(history)||history.length<24||history.length>48||history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||r.ym>=`${fy}-04`||!Number.isFinite(r.base)||!Number.isFinite(r.spot)))throw Error('Invalid or future EE history');
+ const by=new Map(history.map(r=>[r.ym,r]));if(by.size!==history.length)throw Error('Duplicate EE month');for(let i=1;i<history.length;i++){const[y,m]=history[i-1].ym.split('-').map(Number);if(history[i].ym!==`${y+Math.floor(m/12)}-${String(m%12+1).padStart(2,'0')}`)throw Error('EE month gap');}
+ if(history.at(-1)?.ym!==`${fy}-03`)throw Error('EE must end priorMarch');const years=[];for(let y=2022;y<fy;y++)if(fym(y).every(k=>by.has(k)))years.push(y);if(years.length<2)throw Error('EE needs two clean FYs');return{fy,by,years};
+}
+function context(history,fy){const b=book(history,fy),net12=sum(history.slice(-12).map(r=>r.base))+sum(history.slice(-12).map(r=>r.spot));if(!Number.isFinite(net12))throw Error('Nonfinite EE net');return{...b,net12,active:net12>0};}
+function validBB(q,c){if(!q||q.method!=='BB_EQUAL_WEIGHT_W_AA_COMBINATION'||q.fy!==c.fy||!safe(q.points)||q.total!==sum(q.points)||q.net12!==c.net12||q.active!==c.active||q.syntheticAAOverride!==false||c.net12>=1&&q.total<1||!c.active&&q.total!==0)throw Error('Invalid EE BB baseline');return q;}
+function profile(history,c,b){
+ const years=c.years.slice(-3),rows=years.map(fy=>({fy,months:fym(fy).map(ym=>{const r=c.by.get(ym),rawTotal=r.base+r.spot;if(!Number.isFinite(rawTotal))throw Error('Nonfinite EE calendar');return{ym,rawTotal,positive:rawTotal>0};})}));
+ const totals=history.map(r=>r.base+r.spot);if(totals.some(v=>!Number.isFinite(v)))throw Error('Nonfinite EE density');const densityPositiveMonths24=totals.slice(-24).filter(v=>v>0).length,eligible=c.active&&densityPositiveMonths24>12;
+ const hits=Array.from({length:12},(_,m)=>rows.reduce((n,r)=>n+(r.months[m].positive?1:0),0)),rawCalendarSupportMask=b.map((v,m)=>v>0&&hits[m]===years.length),supportMask=rawCalendarSupportMask.map(v=>eligible&&v);
+ return{profileYears:years,profileRows:rows,hits,k:years.length,densityPositiveMonths24,eligible,dense:densityPositiveMonths24>12,rawCalendarSupportMask,supportMask,effectiveSupportMask:supportMask.slice(),halfPastPositive:[0,1].map(h=>rows.some(r=>r.months.slice(h*6,h*6+6).some(m=>m.positive)))};
+}
+function complete(b,c,p,weights){
+ const baseline=b.points.slice();if(!p.eligible)return{points:baseline,total:b.total,halfTargets:halves(baseline),weights:Array(12).fill(1),raw:baseline.slice(),preEconomicRaw:baseline.slice(),preRescuePoints:baseline.slice(),preAnnualRescuePoints:baseline.slice(),economicHalfRescues:[],rescue:'ineligible_complete_BB',numericFailure:false};
+ try{
+  if(weights.length!==12||weights.some(v=>!Number.isFinite(v)||v<0))throw Error('Invalid EE weights');const preEconomicRaw=baseline.map((v,m)=>p.supportMask[m]?weights[m]*v:v);if(preEconomicRaw.some(v=>!Number.isFinite(v)||v<0))throw Error('Unsafe EE raw amount');
+  let raw=preEconomicRaw.slice(),points=raw.map((v,m)=>p.supportMask[m]?Math.round(v):baseline[m]);if(!safe(points))throw Error('Unsafe EE rounded amount');const preRescuePoints=points.slice(),economicHalfRescues=[];
+  for(let h=0;h<2;h++)if(sum(points.slice(h*6,h*6+6))===0&&sum(baseline.slice(h*6,h*6+6))>0&&p.halfPastPositive[h]){points.splice(h*6,6,...baseline.slice(h*6,h*6+6));raw.splice(h*6,6,...baseline.slice(h*6,h*6+6));economicHalfRescues.push(h);}
+  const preAnnualRescuePoints=points.slice();let rescue=economicHalfRescues.length?'economic_half_complete_BB':'none';if(sum(points)===0&&c.net12>=1){points=baseline.slice();raw=baseline.slice();rescue='economic_year_complete_BB';}
+  if(!safe(points)||c.net12>=1&&sum(points)<1||!c.active&&sum(points)!==0||points.some((v,m)=>!p.supportMask[m]&&v!==baseline[m]))throw Error('EE economic/support boundary');
+  return{points,total:sum(points),halfTargets:halves(points),weights:weights.slice(),raw,preEconomicRaw,preRescuePoints,preAnnualRescuePoints,economicHalfRescues,rescue,numericFailure:false};
+ }catch(error){return{points:baseline,total:b.total,halfTargets:halves(baseline),weights:Array(12).fill(1),raw:baseline.slice(),preEconomicRaw:baseline.slice(),preRescuePoints:baseline.slice(),preAnnualRescuePoints:baseline.slice(),economicHalfRescues:[],rescue:'EE_numeric_complete_BB',numericFailure:true,numericGuardDetail:String(error.message)};}
+}
+function actual(c,fy){return fym(fy).map(ym=>{const r=c.by.get(ym),v=r.base+r.spot;if(!Number.isFinite(v))throw Error('Nonfinite EE actual');return v;});}
+function p90(history,fy){const c=book(history,fy),values=[];for(const y of c.years)for(const ym of fym(y)){const r=c.by.get(ym),v=r.base+r.spot;if(!Number.isFinite(v))throw Error('Nonfinite EE threshold history');if(v>0)values.push(v);}values.sort((a,b)=>a-b);if(!values.length)return null;const h=(values.length-1)*.9,l=Math.floor(h),u=Math.ceil(h);return values[l]+(h-l)*(values[u]-values[l]);}
+function loss(points,a,t){let SAE=0,SSE=0,zeroSAE=0,largeSSE=0;for(let m=0;m<points.length;m++){const e=points[m]-a[m],e2=e*e;SAE+=Math.abs(e);SSE+=e2;if(a[m]===0)zeroSAE+=Math.abs(e);if(t!==null&&a[m]>0&&a[m]>=t)largeSSE+=e2;}if(![SAE,SSE,zeroSAE,largeSSE].every(Number.isFinite))throw Error('Nonfinite EE heldout loss');return{SAE,SSE,zeroSAE,largeSSE};}
+function admission(a,b){return a.SAE<b.SAE&&ni(a.SSE,b.SSE)&&ni(a.largeSSE,b.largeSSE)&&a.zeroSAE<=b.zeroSAE;}
+/** bbPredict synthetic-only; low-level CC/DD solvers are immutable, their point providers never called. */
+function forecastEE(history,fy,{bbPredict}={}){
+ const structural=book(history,fy),predict=bbPredict||forecastBB;let outer=null;
+ const getOuter=()=>{if(!outer){const c=context(history,fy),b=clone(validBB(predict(history,fy),c));outer={c,b,p:null};}return outer;};
+ const trace={selectedFoldFYs:[],folds:[],trainingHalfCalibration:[],calibration:[],validation:null,validationChoices:['BB','BB']};
+ const finish=(policy,extra)=>{const o=getOuter(),p=o.p;return{method:METHOD,kind:'EE',fy,completeBB:clone(o.b),baseBBPoints:o.b.points.slice(),bbPoints12:o.b.points.slice(),net12:o.c.net12,active:o.c.active,sourcePrefix:{fy,historyStart:history[0].ym,historyEnd:history.at(-1).ym,observedMonths:history.length,cleanFYs:o.c.years.slice()},profileYears:o.c.years.slice(-3),profileRows:p?clone(p.profileRows):[],supportComputed:!!p,supportMask:p?p.supportMask.slice():Array(12).fill(false),effectiveSupportMask:p?p.supportMask.slice():Array(12).fill(false),rawCalendarSupportMask:p?p.rawCalendarSupportMask.slice():Array(12).fill(null),eligible:!!p&&p.eligible,hits:p?p.hits.slice():Array(12).fill(null),densityPositiveMonths24:p?p.densityPositiveMonths24:null,
+   syntheticBBOverride:bbPredict!==undefined,pointProvidersUsed:false,solverDependencies:['immutable_fitSupportedAmount','immutable_fitCalendarAmount'],...clone(trace),...clone(policy),points12:policy.points.slice(),postRescuePoints:policy.points.slice(),exactBB:policy.points.every((v,m)=>v===o.b.points[m]),...extra};};
+ const fallback=(reason,detail=null)=>{const o=getOuter();try{o.p=profile(history,o.c,o.b.points);}catch{}const base=o.b.points.slice();return finish({points:base,total:o.b.total,halfTargets:halves(base),weights:Array(12).fill(1),choices:['BB','BB'],raw:base.slice(),preEconomicRaw:base.slice(),preRescuePoints:base.slice(),preAnnualRescuePoints:base.slice(),economicHalfRescues:[],rescue:reason},{mode:'complete_BB',applied:false,fallbackReason:reason,numericGuardDetail:detail});};
+ try{
+  const years=[];for(let y=2024;y<fy;y++){const prefix=history.filter(r=>r.ym<`${y}-04`);if(prefix.length>=24&&prefix.at(-1)?.ym===`${y}-03`&&fym(y).every(k=>structural.by.has(k))){let n=0;const seen=new Set(prefix.map(r=>r.ym));for(let t=2022;t<y;t++)if(fym(t).every(k=>seen.has(k)))n++;if(n>=2)years.push(y);}}
+  const selected=years.slice(-2);if(selected.length<2)return fallback('insufficient_two_chronological_past_FYs');
+  const[firstFY,secondFY]=selected,firstPrefix=history.filter(r=>r.ym<`${firstFY}-04`),firstC=context(firstPrefix,firstFY),firstBB=clone(validBB(predict(firstPrefix,firstFY),firstC)),firstP=profile(firstPrefix,firstC,firstBB.points);
+  const firstActual=actual(structural,firstFY); // First label is available to train, never second label.
+  const trainingHalfCalibration=[0,1].map(h=>({half:h,...fitSupportedAmount([{fy:firstFY,b:firstBB.points.slice(h*6,h*6+6),s:firstBB.points.slice(h*6,h*6+6).map((v,m)=>firstP.supportMask[h*6+m]?v:0),actual:firstActual.slice(h*6,h*6+6)}])}));
+  const calibration=Array.from({length:12},(_,m)=>({month:m,half:Math.floor(m/6),...fitCalendarAmount([{fy:firstFY,b:firstBB.points[m],s:firstP.supportMask[m]?firstBB.points[m]:0,actual:firstActual[m]}],trainingHalfCalibration[Math.floor(m/6)])}));
+  const halfWeights=Array.from({length:12},(_,m)=>trainingHalfCalibration[Math.floor(m/6)].lambda),calendarWeights=calibration.map(v=>v.lambda);
+  const secondPrefix=history.filter(r=>r.ym<`${secondFY}-04`),secondC=context(secondPrefix,secondFY),secondBB=clone(validBB(predict(secondPrefix,secondFY),secondC)),secondP=profile(secondPrefix,secondC,secondBB.points);
+  const halfPolicy=complete(secondBB,secondC,secondP,halfWeights),calendarPolicy=complete(secondBB,secondC,secondP,calendarWeights),threshold=p90(secondPrefix,secondFY);
+  // Both complete whole-JPY policies exist before second heldout outcomes are extracted for loss.
+  const candidatePoliciesCompleted=true,secondActual=actual(structural,secondFY);
+  const comparisons=[0,1].map(h=>{const a=secondActual.slice(h*6,h*6+6),BB=loss(secondBB.points.slice(h*6,h*6+6),a,threshold),HALF=loss(halfPolicy.points.slice(h*6,h*6+6),a,threshold),CALENDAR=loss(calendarPolicy.points.slice(h*6,h*6+6),a,threshold),halfPass=admission(HALF,BB),calendarPass=admission(CALENDAR,BB);let choice='BB';if(halfPass&&!calendarPass)choice='HALF';else if(calendarPass&&!halfPass)choice='CALENDAR';else if(halfPass&&calendarPass){if(HALF.SAE<CALENDAR.SAE)choice='HALF';else if(CALENDAR.SAE<HALF.SAE)choice='CALENDAR';else if(lt(HALF.SSE,CALENDAR.SSE))choice='HALF';else if(lt(CALENDAR.SSE,HALF.SSE))choice='CALENDAR';}return{half:h,BB,HALF,CALENDAR,halfPass,calendarPass,choice};});
+  const choices=comparisons.map(v=>v.choice);trace.selectedFoldFYs=selected.slice();trace.trainingHalfCalibration=trainingHalfCalibration;trace.calibration=calibration;trace.validationChoices=choices.slice();trace.folds=[{fy:firstFY,role:'training',historyStart:firstPrefix[0].ym,historyEnd:firstPrefix.at(-1).ym,observedMonths:firstPrefix.length,bbPoints12:firstBB.points.slice(),support:clone(firstP),actualMonthly:firstActual},{fy:secondFY,role:'validation',historyStart:secondPrefix[0].ym,historyEnd:secondPrefix.at(-1).ym,observedMonths:secondPrefix.length,bbPoints12:secondBB.points.slice(),support:clone(secondP),actualMonthly:secondActual}];
+  trace.validation={firstFY,secondFY,threshold,thresholdSource:'strict_second_prefix_positive_complete_cleanFYs',candidatePoliciesCompletedBeforeActualRead:candidatePoliciesCompleted,candidatePolicies:{HALF:halfPolicy,CALENDAR:calendarPolicy},comparisons,choices:choices.slice(),coefficientsRefitAfterValidation:false};
+  const o=getOuter();o.p=profile(history,o.c,o.b.points);if(!o.p.eligible)return fallback('outer_ineligible_complete_BB');
+  const weights=Array.from({length:12},(_,m)=>choices[Math.floor(m/6)]==='HALF'?halfWeights[m]:choices[Math.floor(m/6)]==='CALENDAR'?calendarWeights[m]:1),policy=complete(o.b,o.c,o.p,weights);if(policy.numericFailure)return fallback('EE_numeric_complete_BB',policy.numericGuardDetail);
+  return finish({...policy,choices:choices.slice()},{mode:'prequential_amount_selection',applied:true,fallbackReason:null,numericGuardDetail:null});
+ }catch(error){return fallback('EE_numeric_complete_BB',String(error.message));}
+}
+/* END_VERBATIM_EE_BODY */
+return {forecastEE};
+}
+function appHistoryPrequentialAmountForecast_(history,fy,nativeAdapter) {
+ const prior=(rows,year)=>appHistoryCombinationForecast_(rows,year,nativeAdapter);
+ const halfFit=appHistoryAmountFactory_(null).fitSupportedAmount;
+ const calendarFit=appHistoryCalendarAmountFactory_(null).fitCalendarAmount;
+ const q=appHistoryPrequentialAmountFactory_(prior,halfFit,calendarFit).forecastEE(history,fy);
+ if(!q||q.method!=='EE_PREQUENTIAL_AMOUNT_POLICY_BB'||q.fy!==fy||!Array.isArray(q.points)||q.points.length!==12||q.points.some(v=>!Number.isSafeInteger(v)||v<0)||
+  !Number.isSafeInteger(q.total)||q.points.reduce((s,v)=>s+v,0)!==q.total||!Array.isArray(q.weights)||q.weights.length!==12||q.weights.some(v=>!Number.isFinite(v)||v<0)||
+  !Array.isArray(q.choices)||q.choices.length!==2||q.choices.some(v=>!['BB','HALF','CALENDAR'].includes(v))||!Array.isArray(q.selectedFoldFYs)||![0,2].includes(q.selectedFoldFYs.length)||
+  q.selectedFoldFYs.some((v,i)=>!Number.isInteger(v)||v<2024||v>=fy||i>0&&v<=q.selectedFoldFYs[i-1])||!['prequential_amount_selection','complete_BB'].includes(q.mode)||
+  !q.completeBB||q.completeBB.method!=='BB_EQUAL_WEIGHT_W_AA_COMBINATION'||q.pointProvidersUsed!==false)throw new Error('Invalid prequential amount policy');
+ return q;
+}
+function appHistoryPrequentialAmountCompact_(q) {
+ if(!q||q.method!=='EE_PREQUENTIAL_AMOUNT_POLICY_BB')throw new Error('Invalid prequential amount result');
+ return{policyVersion:'PROVISIONAL_EE_V1',policyStatus:'provisional',provisional:true,validationStatus:'in_progress',validationNote:'known_period_validation_required',method:q.method,kind:'EE',
+  points:q.points.slice(),total:q.total,annualTarget:q.total,halfTargets:q.halfTargets.slice(),active:q.active,inactive:!q.active,net12:q.net12,mode:q.mode,applied:q.applied,rescue:q.rescue,
+  fallbackReason:q.fallbackReason||'',weights:q.weights.slice(),choices:q.choices.slice(),validationChoices:q.validationChoices.slice(),selectedFoldFYs:q.selectedFoldFYs.slice(),
+  historyYearsUsed:q.profileYears.slice(),trainingThroughYm:q.sourcePrefix.historyEnd,economicHalfRescues:q.economicHalfRescues.slice(),supportComputed:q.supportComputed,
+  rawCalendarSupportMask:q.rawCalendarSupportMask.slice(),effectiveSupportMask:q.effectiveSupportMask.slice(),trainingHalfWeights:q.trainingHalfCalibration.map(c=>c.lambda),
+  heldoutThreshold:q.validation?q.validation.threshold:null,pointProvidersUsed:false,baselineBBMethod:q.completeBB.method,baselineBBMode:q.completeBB.mode,annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
+}
+
   // ===== Forecast_Agent.js ここまで =====
   // ===== Forecast_WebApp.js ここから（変更しない） =====
 /**
@@ -13005,6 +13300,8 @@ function webAuditLogUrl_() {
     appHistoryGuardCompact_: typeof appHistoryGuardCompact_ === 'undefined' ? undefined : appHistoryGuardCompact_,
     appHistoryCombinationForecast_: typeof appHistoryCombinationForecast_ === 'undefined' ? undefined : appHistoryCombinationForecast_,
     appHistoryCombinationCompact_: typeof appHistoryCombinationCompact_ === 'undefined' ? undefined : appHistoryCombinationCompact_,
+    appHistoryPrequentialAmountForecast_: typeof appHistoryPrequentialAmountForecast_ === 'undefined' ? undefined : appHistoryPrequentialAmountForecast_,
+    appHistoryPrequentialAmountCompact_: typeof appHistoryPrequentialAmountCompact_ === 'undefined' ? undefined : appHistoryPrequentialAmountCompact_,
     TRI_METHODS: typeof TRI_METHODS === 'undefined' ? undefined : TRI_METHODS,
     TRI_PRIOR_WEIGHTS: typeof TRI_PRIOR_WEIGHTS === 'undefined' ? undefined : TRI_PRIOR_WEIGHTS,
     readTriangulationEnabled_: typeof readTriangulationEnabled_ === 'undefined' ? undefined : readTriangulationEnabled_,
@@ -13014,7 +13311,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: 'b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f',
+    SOURCE_SHA256: '789825d1b2f2a0d8647417fd0300db3eea513020ff301c31ab6fec3b31baf621',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

@@ -2973,7 +2973,7 @@ function fcMonthlyPlanning(p, ms, annual, shown){
     if (!k || seen[k] || !Object.prototype.hasOwnProperty.call(byMonth, k)) { valid = false; return null; }
     seen[k] = true; return byMonth[k];
   });
-  var acceptedRevisionMethods = ['BB_EQUAL_WEIGHT_W_AA_COMBINATION'];
+  var acceptedRevisionMethods = ['BB_EQUAL_WEIGHT_W_AA_COMBINATION','EE_PREQUENTIAL_AMOUNT_POLICY_BB'];
   var approvedRevision = acceptedRevisionMethods.indexOf(p.method) >= 0 && p.provisional === true && typeof p.pointPolicySha256 === 'string'
     && /^[a-f0-9]{64}$/.test(p.pointPolicySha256) && typeof p.pointPolicySourceSha256 === 'string'
     && /^[a-f0-9]{64}$/.test(p.pointPolicySourceSha256);

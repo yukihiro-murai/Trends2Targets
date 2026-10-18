@@ -1,9 +1,9 @@
 /** Append-only publication of validated history-only monthly points; raw risk runs remain immutable. */
 const APP_POINT_REVISION_ACTION = 'FORECAST.POINT_REFRESH';
-// Only the completed BB combination passed the incremental release minimum; component endpoints remain internal.
+// Owner-authorized provisional EE is not a formal accuracy pass. Earlier BB remains readable; component endpoints are internal.
 // Config: { policySha256, engineSourceSha256, acceptedEngineSourceSha256s, entrypoint, normalize, validateNative, modes }.
 // normalize is a fixed local function, never user-supplied source/code.
-const APP_POINT_APPROVED_POLICIES = Object.freeze({ 'BB_EQUAL_WEIGHT_W_AA_COMBINATION': { policySha256:'c9c4046e25d904ccc1e507f34761b138974c820bedc44fc03294d38c864a4f93',engineSourceSha256:'b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f',acceptedEngineSourceSha256s:['b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f'],entrypoint:'appHistoryCombinationForecast_',normalize:appPointNormalizeCombination_,validateNative:appPointValidateCombination_,modes:['equal_weight_complete_policies','complete_W'] } });
+const APP_POINT_APPROVED_POLICIES = Object.freeze({ 'BB_EQUAL_WEIGHT_W_AA_COMBINATION': { policySha256:'c9c4046e25d904ccc1e507f34761b138974c820bedc44fc03294d38c864a4f93',engineSourceSha256:'b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f',acceptedEngineSourceSha256s:['b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f'],entrypoint:'appHistoryCombinationForecast_',normalize:appPointNormalizeCombination_,validateNative:appPointValidateCombination_,modes:['equal_weight_complete_policies','complete_W'] }, 'EE_PREQUENTIAL_AMOUNT_POLICY_BB': { policySha256:'891fe637890b07b37f22bf0a98e3c1745cdc2ab72527fd810b22e773b651cb1a',engineSourceSha256:'789825d1b2f2a0d8647417fd0300db3eea513020ff301c31ab6fec3b31baf621',acceptedEngineSourceSha256s:['789825d1b2f2a0d8647417fd0300db3eea513020ff301c31ab6fec3b31baf621'],entrypoint:'appHistoryPrequentialAmountForecast_',normalize:appPointNormalizePrequential_,validateNative:appPointValidatePrequential_,predecessorMethod:'BB_EQUAL_WEIGHT_W_AA_COMBINATION',modes:['prequential_amount_selection','complete_BB'] } });
 const APP_POINT_REVISION_HEAD = 'APP_POINT_REVISION_HEAD_V1';
 const APP_POINT_REVISION_LIMIT = 4;
 const APP_POINT_REVISION_BUDGET_MS = 240000;
@@ -17,6 +17,7 @@ function appPointPolicy_(method) {
   const p=APP_POINT_APPROVED_POLICIES[method];
   return p && /^[a-f0-9]{64}$/.test(p.policySha256) && /^[a-f0-9]{64}$/.test(p.engineSourceSha256) &&
     Array.isArray(p.acceptedEngineSourceSha256s) && p.acceptedEngineSourceSha256s.indexOf(p.engineSourceSha256)>=0 && p.acceptedEngineSourceSha256s.every(x=>/^[a-f0-9]{64}$/.test(x)) &&
+    (p.publishEnabled===undefined||typeof p.publishEnabled==='boolean') && (p.predecessorMethod===undefined||(typeof p.predecessorMethod==='string'&&p.predecessorMethod!==method&&/^[A-Za-z0-9_]{1,120}$/.test(p.predecessorMethod))) &&
     typeof p.validateNative==='function' && typeof p.entrypoint==='string' && /^[A-Za-z_][A-Za-z0-9_]*_$/.test(p.entrypoint) && typeof p.normalize==='function' &&
     Array.isArray(p.modes) && p.modes.length && p.modes.every(x=>typeof x==='string'&&/^[A-Za-z0-9_]{1,80}$/.test(x)) ? p : null;
 }
@@ -99,11 +100,61 @@ function appPointPlanningExtras_(value,out,fy) {
 function appPointRevisionPayload_(raw, plan, run) {
   let v=raw;try{if(typeof v==='string')v=JSON.parse(v);}catch(e){return null;}
   const p=v&&appPointPolicy_(v.method);
-  if(!p||v.version!=='FORECAST_POINT_REVISION_V1'||v.planId!==plan.plan_id||v.clientId!==plan.client_id||Number(v.fy)!==Number(plan.fy)||v.baseRunId!==run.run_id||
+  if(!p||!['FORECAST_POINT_REVISION_V1','FORECAST_POINT_REVISION_V2'].includes(v.version)||v.planId!==plan.plan_id||v.clientId!==plan.client_id||Number(v.fy)!==Number(plan.fy)||v.baseRunId!==run.run_id||
     v.policySha256!==p.policySha256||p.acceptedEngineSourceSha256s.indexOf(v.policySourceSha256)<0||!v.revisionId||!v.publicationId||!v.contextHash||!v.binding)return null;
+  if(p.predecessorMethod){
+    const b=v.predecessor;
+    if(v.version!=='FORECAST_POINT_REVISION_V2'||!b||b.version!=='POINT_PREDECESSOR_V1'||b.method!==p.predecessorMethod||!b.revisionId||b.revisionId===v.revisionId||!b.publicationId||
+      !['policySha256','policySourceSha256','actionHash','planningHash'].every(k=>typeof b[k]==='string'&&/^[a-f0-9]{64}$/.test(b[k])))return null;
+  }else if(v.version!=='FORECAST_POINT_REVISION_V1'||v.predecessor!==undefined)return null;
   const planning=appForecastPlanningOf_(v.planning,plan.fy,run.annual_p50);
   if(!planning||planning.method!==v.method||planning.provisional!==true||planning.pointPolicySourceSha256!==v.policySourceSha256||appUtf8Bytes_(JSON.stringify(v))>18000)return null;
   return Object.assign({},v,{planning:planning});
+}
+/** Saved point policies must preserve the native annual and raw-W active-half economic guards. */
+function appPointEconomicValid_(planning,c) {
+  if(!planning||!c||!Array.isArray(c.history)||c.history.length!==48||!c.rawPlanning||!Array.isArray(c.rawPlanning.months)||c.rawPlanning.months.length!==12||!Array.isArray(planning.months)||planning.months.length!==12)return false;
+  const points=planning.months.map(m=>m&&m.point),raw=c.rawPlanning.months.map(m=>m&&m.point),integer=v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
+  if(!points.every(integer)||!raw.every(integer)||c.history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||typeof r.base!=='number'||!isFinite(r.base)||typeof r.spot!=='number'||!isFinite(r.spot)||!isFinite(r.base+r.spot)))return false;
+  const total=points.reduce((a,b)=>a+b,0),net=c.history.slice(-12).reduce((a,r)=>a+r.base,0)+c.history.slice(-12).reduce((a,r)=>a+r.spot,0);
+  if(!integer(total)||planning.annualTarget!==total||!isFinite(net)||(net>=1&&total===0)||(net<=0&&total!==0))return false;
+  for(let h=0;h<2;h++){
+    const rawHalf=raw.slice(h*6,h*6+6).reduce((a,b)=>a+b,0),pointHalf=points.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
+    if(!integer(rawHalf)||!integer(pointHalf))return false;
+    if(rawHalf>0&&c.history.some(r=>Math.floor(((Number(r.ym.slice(5,7))+8)%12)/6)===h&&r.base+r.spot>0)&&pointHalf===0)return false;
+  }
+  return true;
+}
+/** Raw context stays unchanged; a V2 predecessor is an immutable BB V1 row, not a current-active condition. */
+function appPointRowMatchesContext_(row,p,c) {
+  return row.action_id===p.revisionId&&row.engine_sha256===p.policySourceSha256&&p.contextHash===c.hash&&appPointHash_(p.binding)===appPointHash_(c.binding)&&row.input_hash===c.hash&&
+    appPointHash_(p.planning.months.map(m=>m.mean))===c.binding.meansHash&&p.planning.annualRawP50===c.rawPlanning.annualRawP50&&appPointEconomicValid_(p.planning,c);
+}
+function appPointPredecessorValid_(p,plan,run,c,snap) {
+  const policy=appPointPolicy_(p.method),b=p.predecessor,parentPolicy=b&&appPointPolicy_(b.method);
+  if(!policy||!policy.predecessorMethod||!b||!parentPolicy||parentPolicy.predecessorMethod||b.method!==policy.predecessorMethod)return false;
+  const rows=snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===b.revisionId&&r.plan_id===plan.plan_id&&r.action===APP_POINT_REVISION_ACTION&&r.status==='DONE');
+  if(rows.length!==1)return false;const row=rows[0],parent=appPointRevisionPayload_(row.result_json,plan,run);
+  return !!parent&&parent.version==='FORECAST_POINT_REVISION_V1'&&parent.method===b.method&&parent.publicationId===b.publicationId&&parent.policySha256===b.policySha256&&parent.policySourceSha256===b.policySourceSha256&&
+    appPointHash_(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,row))===b.actionHash&&appPointHash_(parent.planning)===b.planningHash&&appPointRowMatchesContext_(row,parent,c);
+}
+function appPointCurrentPredecessor_(plan,run,c,snap,policy) {
+  if(!policy.predecessorMethod)return null;
+  const parentPolicy=appPointPolicy_(policy.predecessorMethod);appPointAssert_(parentPolicy&&!parentPolicy.predecessorMethod,'直前方式の契約が不正です。');
+  const current=appPointRevisionResolve_(plan,run,c.months,snap),v=current.revision;
+  appPointAssert_(v&&current.planning&&current.planning.method===policy.predecessorMethod,'期待する直前の月次予測が有効ではありません（既に別方式へ更新済みの場合も含みます）。');
+  const rows=snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===v.revisionId);appPointAssert_(rows.length===1,'直前改訂の行が一意ではありません。');
+  return {planning:current.planning,reference:{version:'POINT_PREDECESSOR_V1',revisionId:v.revisionId,publicationId:v.publicationId,method:v.method,policySha256:v.policySha256,policySourceSha256:v.policySourceSha256,
+    actionHash:appPointHash_(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,rows[0])),planningHash:appPointHash_(current.planning)}};
+}
+function appPointRequirePredecessor_(plan,run,c,snap,policy,expected,ownIntent) {
+  if(!policy.predecessorMethod){appPointAssert_(!expected,'不要な直前改訂が指定されています。');return null;}
+  if(ownIntent){
+    const own=snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===ownIntent.action_id),active=appPointRevisionResolve_(plan,run,c.months,snap);
+    if(own.length===1&&JSON.stringify(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,own[0]))===JSON.stringify(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,ownIntent))&&active.revision&&active.revision.revisionId===ownIntent.action_id)return null;
+  }
+  const current=appPointCurrentPredecessor_(plan,run,c,snap,policy);
+  appPointAssert_(expected&&appPointHash_(expected)===appPointHash_(current.reference),'プレビュー後に直前の月次予測が変わりました。');return current;
 }
 /** Public-view resolver: no writes/model/learning calls; caller authorizes plan read. */
 function appPointRevisionResolve_(plan, run, monthly, snap) {
@@ -117,14 +168,13 @@ function appPointRevisionResolve_(plan, run, monthly, snap) {
   if(!candidates.length)return fallback; // No indexed history read or global-context work for old plans.
   if(!snap.history)Object.assign(snap,appPointSnapshot_(snap));
   let context;try{context=appPointContext_(plan,run,snap);}catch(e){return fallback;}
-  for(let i=0;i<candidates.length;i++){
-    const row=candidates[i].row,p=candidates[i].p,policy=appPointPolicy_(p.method);
-    if(row.action_id!==p.revisionId||row.engine_sha256!==p.policySourceSha256||p.contextHash!==context.hash||appPointHash_(p.binding)!==appPointHash_(context.binding)||row.input_hash!==context.hash)continue;
-    if(appPointHash_(p.planning.months.map(m=>m.mean))!==context.binding.meansHash||p.planning.annualRawP50!==context.rawPlanning.annualRawP50)continue;
-    return {planning:p.planning,rawPlanning:raw,revision:{revisionId:p.revisionId,publicationId:p.publicationId,baseRunId:p.baseRunId,method:p.method,publishedAt:row.finished_at,
-      historySha256:p.binding.historySha256,policySha256:p.policySha256,policySourceSha256:p.policySourceSha256}};
-  }
-  return fallback;
+  const valid=candidates.filter(x=>appPointRowMatchesContext_(x.row,x.p,context));
+  const children=valid.filter(x=>x.p.predecessor&&appPointPredecessorValid_(x.p,plan,run,context,snap));
+  // A valid child beats its parent even in the same timestamp second. Conflicting children fail back to the valid legacy BB.
+  const selected=children.length===1?children[0]:valid.filter(x=>!x.p.predecessor)[0];if(!selected)return fallback;
+  const row=selected.row,p=selected.p;
+  return {planning:p.planning,rawPlanning:raw,revision:Object.assign({revisionId:p.revisionId,publicationId:p.publicationId,baseRunId:p.baseRunId,method:p.method,publishedAt:row.finished_at,
+    historySha256:p.binding.historySha256,policySha256:p.policySha256,policySourceSha256:p.policySourceSha256},p.predecessor?{predecessorRevisionId:p.predecessor.revisionId,predecessorPlanningHash:p.predecessor.planningHash}:{})};
 }
 function appPointIdle_(allowPending) { appOfflineRequireIdle_(allowPending===true);appProvisionalRequireNoBulk_();const st=appProvisionalState_();appPointAssert_(!st||!st.active&&!st.current,'一括処理が進行中です。'); }
 function appPointHead_() { const raw=appProps_().getProperty(APP_POINT_REVISION_HEAD);return raw?JSON.parse(raw):null; }
@@ -148,6 +198,17 @@ function appPointValidateCombination_(v,fy) {
 function appPointNormalizeCombination_(q) {
   return {method:q.method,points:q.points,total:q.total,active:q.active,net12:q.net12,years:q.profileYears,
     halfTargets:q.halfTargets,mode:q.mode,rescue:q.rescue||'none',wPoints:q.wPoints12,weights:[],folds:[]};
+}
+function appPointValidatePrequential_(v,fy) {
+  const w=v.provisionalWeights,f=v.provisionalFolds;
+  if(!Array.isArray(w)||w.length!==12||!w.every(n=>typeof n==='number'&&Number.isFinite(n)&&n>=0)||!Array.isArray(f)||[0,2].indexOf(f.length)<0||
+    !f.every((y,i,a)=>Number.isInteger(y)&&y>=2024&&y<fy&&(!i||y>a[i-1]))||(!f.length&&w.some(n=>n!==1))||
+    (v.provisionalMode==='prequential_amount_selection'&&f.length!==2))return null;
+  return {provisionalWeights:w.slice(),provisionalFolds:f.slice()};
+}
+function appPointNormalizePrequential_(q) {
+  return {method:q.method,points:q.points,total:q.total,active:q.active,net12:q.net12,years:q.profileYears,
+    halfTargets:q.halfTargets,mode:q.mode,rescue:q.rescue||'none',wPoints:q.completeBB.baseWPoints,predecessorPoints:q.completeBB.points,weights:q.weights,folds:q.selectedFoldFYs};
 }
 /** Stamp only a CURRENT approved native engine result, then use the common strict parser. */
 function appPointNativePlanning_(raw,engine,fy,annualRawP50) {
@@ -184,11 +245,11 @@ function appPointPreview_(ctx,input) {
   ctx=appPointOwner_(ctx);input=input||{};const started=Date.now();
   return appWithLock_(()=>{
     appPointIdle_();appStoreForget_();const snap=appPointSnapshot_(!input.publicationId?{engRows:appReadTable_('ENG_ROWS')}:{}),engine=appPointEngine_(ctx.actor),method=String(input.method||''),policy=appPointPolicy_(method);
-    appPointAssert_(policy&&input.policySha256===policy.policySha256&&engine.SOURCE_SHA256===policy.engineSourceSha256&&typeof engine[policy.entrypoint]==='function','方式が未承認か計算APIがありません。');
+    appPointAssert_(policy&&policy.publishEnabled!==false&&input.policySha256===policy.policySha256&&engine.SOURCE_SHA256===policy.engineSourceSha256&&typeof engine[policy.entrypoint]==='function','方式が未承認か計算APIがありません。');
     let s;if(input.publicationId)s=appPointLoadState_(ctx,String(input.publicationId));else{
       const prior=appPointHead_();if(prior)appPointAssert_(appPointLoadState_(ctx,prior.publicationId).status==='DONE','前のプレビューまたは適用を先に完了してください。');
       const fy=appProvisionalFy_(input);appRequireOpenYear_(fy);const all=snap.tables.PLANS.filter(p=>Number(p.fy)===fy&&p.state!=='ARCHIVED');
-      s={version:'POINT_PUBLICATION_V1',publicationId:appId_('PPR'),actor:ctx.actor,fy:fy,method:method,policySha256:input.policySha256,engineVersion:engine.VERSION,engineSourceSha256:engine.SOURCE_SHA256,webSha256:engine.WEB_SOURCE_SHA256,appVersion:APP_VERSION,globalContextHash:appPointGlobalContext_(snap),createdAt:appNowIso_(),status:'PREVIEW',entries:all.filter(appPlanIsMeasure_).map(p=>{const r=appPointLatest_(p.plan_id,snap),c=appPointContext_(p,r,snap);return{planId:p.plan_id,clientId:p.client_id,baseRunId:r.run_id,originalContextHash:c.hash,originalBinding:c.binding,status:'PENDING'};}),excludedNormal:all.filter(p=>!appPlanIsMeasure_(p)).map(p=>({planId:p.plan_id,reason:'NORMAL_PRESERVED'}))};
+      s={version:'POINT_PUBLICATION_V1',publicationId:appId_('PPR'),actor:ctx.actor,fy:fy,method:method,policySha256:input.policySha256,engineVersion:engine.VERSION,engineSourceSha256:engine.SOURCE_SHA256,webSha256:engine.WEB_SOURCE_SHA256,appVersion:APP_VERSION,globalContextHash:appPointGlobalContext_(snap),createdAt:appNowIso_(),status:'PREVIEW',entries:all.filter(appPlanIsMeasure_).map(p=>{const r=appPointLatest_(p.plan_id,snap),c=appPointContext_(p,r,snap),prior=appPointCurrentPredecessor_(p,r,c,snap,policy),entry={planId:p.plan_id,clientId:p.client_id,baseRunId:r.run_id,originalContextHash:c.hash,originalBinding:c.binding,status:'PENDING'};if(prior)entry.predecessor=prior.reference;return entry;}),excludedNormal:all.filter(p=>!appPlanIsMeasure_(p)).map(p=>({planId:p.plan_id,reason:'NORMAL_PRESERVED'}))};
       appPointAssert_(s.entries.length>0&&s.entries.length<=100,'対象数を確認してください。');appPointSaveState_(s);
     }
     appPointAssert_(s.status==='PREVIEW'&&s.method===method&&s.policySha256===input.policySha256&&s.engineSourceSha256===engine.SOURCE_SHA256&&s.appVersion===APP_VERSION&&s.globalContextHash===appPointGlobalContext_(snap),'方式・版・更新状態が変わりました。');
@@ -196,23 +257,30 @@ function appPointPreview_(ctx,input) {
     for(let i=0;i<s.entries.length&&done<APP_POINT_REVISION_LIMIT;i++){
       const e=s.entries[i];if(e.status!=='PENDING')continue;if(Date.now()-started+APP_POINT_REVISION_RESERVE_MS>APP_POINT_REVISION_BUDGET_MS)break;
       const plan=snap.tables.PLANS.filter(p=>p.plan_id===e.planId)[0],run=appPointLatest_(e.planId,snap);appPointAssert_(run&&run.run_id===e.baseRunId,'基準の予測が変わりました。');
-      const c=appPointContext_(plan,run,snap);appPointAssert_(c.hash===e.originalContextHash&&appPointHash_(c.binding)===appPointHash_(e.originalBinding),'名簿固定後に入力・履歴が変わりました。');const proof=engine[policy.entrypoint](c.history,s.fy),q=policy.normalize(proof);
+      const c=appPointContext_(plan,run,snap);appPointAssert_(c.hash===e.originalContextHash&&appPointHash_(c.binding)===appPointHash_(e.originalBinding),'名簿固定後に入力・履歴が変わりました。');const preceding=appPointRequirePredecessor_(plan,run,c,snap,policy,e.predecessor);const proof=engine[policy.entrypoint](c.history,s.fy),q=policy.normalize(proof);
       const net=c.history.slice(-12).reduce((a,r)=>a+r.base,0)+c.history.slice(-12).reduce((a,r)=>a+r.spot,0);
       appPointAssert_(isFinite(net)&&q.net12===net&&q.active===(net>0),'計算結果と対象履歴の活動条件が違います。');
       appPointAssert_(q.method===method&&JSON.stringify(q.wPoints)===JSON.stringify(c.rawPlanning.months.map(m=>m.point)),'保存Wと履歴からのWが一致しません。');
-      const planning=appPointPlanning_(q,c.rawPlanning,s.fy,method,policy);
-      const proofFile=appOfflineWriteFile_('Point_proof_'+s.publicationId+'_'+e.planId,{version:'POINT_PREVIEW_PROOF_V1',publicationId:s.publicationId,planId:e.planId,fy:s.fy,method:method,policySha256:s.policySha256,policySourceSha256:s.engineSourceSha256,history:c.history,fullq:proof,rawRun:appStripRow_(run),monthly:c.months.map(appStripRow_),binding:c.binding,contextHash:c.hash,rawPlanning:c.rawPlanning,planning:planning});
+      if(preceding)appPointAssert_(Array.isArray(q.predecessorPoints)&&JSON.stringify(q.predecessorPoints)===JSON.stringify(preceding.planning.months.map(m=>m.point)),'履歴からの直前方式と現在の保存点が一致しません。');
+      const planning=appPointPlanning_(q,c.rawPlanning,s.fy,method,policy);appPointAssert_(appPointEconomicValid_(planning,c),'計算結果が年額・半期の活動条件を満たしません。');
+      const proofFile=appOfflineWriteFile_('Point_proof_'+s.publicationId+'_'+e.planId,Object.assign({version:'POINT_PREVIEW_PROOF_V1',publicationId:s.publicationId,planId:e.planId,fy:s.fy,method:method,policySha256:s.policySha256,policySourceSha256:s.engineSourceSha256,history:c.history,fullq:proof,rawRun:appStripRow_(run),monthly:c.months.map(appStripRow_),binding:c.binding,contextHash:c.hash,rawPlanning:c.rawPlanning,planning:planning},preceding?{predecessor:e.predecessor,precedingPlanning:preceding.planning}:{}));
       e.proofFileRef=proofFile;newFiles.push({planId:e.planId,file:proofFile}); // Durable full evidence before PREVIEWED/state head.
       e.status='PREVIEWED';e.contextHash=c.hash;e.binding=c.binding;e.planning=planning;e.policySha256=s.policySha256;e.revisionId='PPT-'+appSha256Hex_(s.publicationId+'|'+e.planId).slice(0,32);e.policySummary={mode:q.mode,rescue:q.rescue,active:q.active,net12:q.net12,proofSha256:appPointHash_(proof)};done++;
       appPointSaveState_(s);
     }
-    if(s.entries.every(e=>e.status==='PREVIEWED')){s.status='READY';s.previewSha256=appPointHash_({publicationId:s.publicationId,method:s.method,policySha256:s.policySha256,sourceSha256:s.engineSourceSha256,entries:s.entries.map(e=>({planId:e.planId,baseRunId:e.baseRunId,contextHash:e.contextHash,planning:e.planning,proofFileRef:e.proofFileRef}))});appPointSaveState_(s);}
+    if(s.entries.every(e=>e.status==='PREVIEWED')){s.status='READY';s.previewSha256=appPointPreviewDigest_(s);appPointSaveState_(s);}
     return {publicationId:s.publicationId,status:s.status,total:s.entries.length,previewed:s.entries.filter(e=>e.status==='PREVIEWED').length,excludedNormal:s.excludedNormal.length,computedThisCall:done,previewSha256:s.previewSha256||'',stateFile:appPointHead_(),newFiles:newFiles,proofFiles:s.entries.filter(e=>e.proofFileRef).map(e=>({planId:e.planId,file:e.proofFileRef})),modelOnly:true,mcCalls:0};
   });
 }
+/** Stable approved READY content; statuses and exact journal receipts are intentionally excluded. */
+function appPointPreviewDigest_(s) {
+  return appPointHash_({publicationId:s.publicationId,method:s.method,policySha256:s.policySha256,sourceSha256:s.engineSourceSha256,
+    entries:s.entries.map(e=>({planId:e.planId,baseRunId:e.baseRunId,contextHash:e.contextHash,planning:e.planning,proofFileRef:e.proofFileRef,predecessor:e.predecessor||null}))});
+}
 function appPointMakeAction_(ctx,s,e) {
-  const now=appNowIso_(),p={version:'FORECAST_POINT_REVISION_V1',publicationId:s.publicationId,revisionId:e.revisionId,planId:e.planId,clientId:e.clientId,fy:s.fy,baseRunId:e.baseRunId,method:s.method,policySha256:s.policySha256,policySourceSha256:s.engineSourceSha256,
+  const now=appNowIso_(),p={version:e.predecessor?'FORECAST_POINT_REVISION_V2':'FORECAST_POINT_REVISION_V1',publicationId:s.publicationId,revisionId:e.revisionId,planId:e.planId,clientId:e.clientId,fy:s.fy,baseRunId:e.baseRunId,method:s.method,policySha256:s.policySha256,policySourceSha256:s.engineSourceSha256,
     contextHash:e.contextHash,binding:e.binding,planning:e.planning,policySummary:e.policySummary,computedAt:s.createdAt};
+  if(e.predecessor)p.predecessor=e.predecessor;
   return {action_id:e.revisionId,plan_id:e.planId,action:APP_POINT_REVISION_ACTION,status:'DONE',engine_version:s.engineVersion,engine_sha256:s.engineSourceSha256,web_sha256:s.webSha256,seed:'',as_of:now,input_hash:e.contextHash,changed_sheets_json:[],result_json:p,started_at:now,finished_at:now,actor_email:ctx.actor};
 }
 function appPointRecoverOwn_(ctx,s) {
@@ -220,23 +288,23 @@ function appPointRecoverOwn_(ctx,s) {
   const entries=s.entries.filter(e=>e.actionRow&&e.planId===pending.planId&&pending.label==='月次点改訂:'+s.publicationId+':'+e.revisionId);appPointAssert_(entries.length===1,'別の保存が途中です。');
   const e=entries[0],body=JSON.parse(DriveApp.getFileById(pending.fileId).getBlob().getDataAsString()),ops=body.ops||[];
   appPointAssert_(body.actor===ctx.actor&&body.planId===e.planId&&body.label===pending.label&&ops.length===1&&ops[0].table==='PLAN_ACTIONS'&&ops[0].mode==='ensure'&&Object.keys(ops[0]).sort().join(',')==='mode,rows,table'&&ops[0].rows.length===1&&JSON.stringify(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,ops[0].rows[0]))===JSON.stringify(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,e.actionRow)),'保存の控えが固定した改訂と違います。');
-  appStoreForget_();const snap=appPointSnapshot_(),p=snap.tables.PLANS.filter(p=>p.plan_id===e.planId)[0],r=appPointLatest_(e.planId,snap),c=appPointContext_(p,r,snap);appPointAssert_(c.hash===e.contextHash,'保存の中断後に対象が変わりました。');appJournalRecover_(ctx);
+  appStoreForget_();const snap=appPointSnapshot_(),p=snap.tables.PLANS.filter(p=>p.plan_id===e.planId)[0],r=appPointLatest_(e.planId,snap),c=appPointContext_(p,r,snap);appPointAssert_(c.hash===e.contextHash&&appPointEconomicValid_(e.planning,c),'保存の中断後に対象または活動条件が変わりました。');const intent=appPointRevisionPayload_(e.actionRow.result_json,p,r);appPointAssert_(intent&&appPointEconomicValid_(intent.planning,c),'保存の控えが活動条件を満たしません。');appPointRequirePredecessor_(p,r,c,snap,appPointPolicy_(s.method),e.predecessor,e.actionRow);appJournalRecover_(ctx);
 }
 /** Journal only the exact reserved action row; all data/risk/input/budget/learning tables stay untouched. */
 function appPointApply_(ctx,input) {
   ctx=appPointOwner_(ctx);input=input||{};const started=Date.now();
   return appWithLock_(()=>{
     appPointIdle_(true);let s=appPointLoadState_(ctx,String(input.publicationId||''));appPointAssert_(['READY','APPLYING','DONE'].indexOf(s.status)>=0,'全件のプレビューが必要です。');
-    appPointAssert_(s.method===input.method&&appPointPolicy_(s.method)&&s.policySha256===input.policySha256&&s.policySha256===appPointPolicy_(s.method).policySha256&&s.engineSourceSha256===appPointPolicy_(s.method).engineSourceSha256&&appPointEngine_(ctx.actor).SOURCE_SHA256===s.engineSourceSha256&&s.appVersion===APP_VERSION&&input.previewSha256===s.previewSha256&&/^[a-f0-9]{64}$/.test(s.previewSha256||''),'方式・版が変わりました。');
+    appPointAssert_(s.method===input.method&&appPointPolicy_(s.method)&&appPointPolicy_(s.method).publishEnabled!==false&&s.policySha256===input.policySha256&&s.policySha256===appPointPolicy_(s.method).policySha256&&s.engineSourceSha256===appPointPolicy_(s.method).engineSourceSha256&&appPointEngine_(ctx.actor).SOURCE_SHA256===s.engineSourceSha256&&s.appVersion===APP_VERSION&&input.previewSha256===s.previewSha256&&s.previewSha256===appPointPreviewDigest_(s)&&/^[a-f0-9]{64}$/.test(s.previewSha256||''),'方式・版が変わりました。');
     appPointRecoverOwn_(ctx,s);appStoreForget_();const snap=appPointSnapshot_();let applied=0;
     for(let i=0;i<s.entries.length&&applied<APP_POINT_REVISION_LIMIT;i++){
       const e=s.entries[i];if(e.status==='DONE')continue;if(Date.now()-started+APP_POINT_REVISION_RESERVE_MS>APP_POINT_REVISION_BUDGET_MS)break;
       const plan=snap.tables.PLANS.filter(p=>p.plan_id===e.planId)[0],run=appPointLatest_(e.planId,snap),c=appPointContext_(plan,run,snap);
-      appPointAssert_(run.run_id===e.baseRunId&&c.hash===e.contextHash&&appPointHash_(c.binding)===appPointHash_(e.binding),'プレビュー後に計画・履歴・入力・学習が変わりました。');
+      appPointAssert_(run.run_id===e.baseRunId&&c.hash===e.contextHash&&appPointHash_(c.binding)===appPointHash_(e.binding)&&appPointEconomicValid_(e.planning,c),'プレビュー後に計画・履歴・入力・学習または活動条件が変わりました。');
       if(!e.actionRow){e.actionRow=appPointMakeAction_(ctx,s,e);s.status='APPLYING';appPointSaveState_(s);} // Durable exact intent before native journal.
       const old=snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===e.revisionId);appPointAssert_(old.length<=1,'改訂IDが重複しています。');
       if(old.length)appPointAssert_(JSON.stringify(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,old[0]))===JSON.stringify(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,e.actionRow)),'同じ改訂IDの内容が違います。');
-      else appJournalRun_(ctx,'月次点改訂:'+s.publicationId+':'+e.revisionId,e.planId,[{table:'PLAN_ACTIONS',mode:'ensure',rows:[e.actionRow]}]);
+      else {appPointRequirePredecessor_(plan,run,c,snap,appPointPolicy_(s.method),e.predecessor,e.actionRow);appJournalRun_(ctx,'月次点改訂:'+s.publicationId+':'+e.revisionId,e.planId,[{table:'PLAN_ACTIONS',mode:'ensure',rows:[e.actionRow]}]);}
       appStoreForget_('PLAN_ACTIONS');snap.tables.PLAN_ACTIONS=appReadTable_('PLAN_ACTIONS');
       const active=appPointRevisionResolve_(plan,appPointLatest_(e.planId,snap),null,snap);
       appPointAssert_(active.revision&&active.revision.revisionId===e.revisionId&&appPointHash_(active.planning)===appPointHash_(e.planning),'改訂の保存を読み戻せません。');

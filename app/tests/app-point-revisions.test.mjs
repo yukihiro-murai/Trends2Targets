@@ -93,10 +93,10 @@ const allTables = f => f.env.call('Object.fromEntries(Object.keys(APP_TABLES).ma
     {table:'EFFECT_COEFS',mode:'append',rows:[{plan_id:__measure,coef_id:'CONSTRUCTED-EFFECT',run_id:'CONSTRUCTED-'+__measure,beta_human:1,beta_ai:1,basis:'PRIOR',posterior_json:{kept:true},evidence_hash:'constructed-evidence'}]}
   ]);appStoreForget_();`, { __actor: OWNER, __normal: f.normalId, __measure: f.ids[0] });
   const before = allTables(f);
-  assert.equal(f.env.run('Object.keys(APP_POINT_APPROVED_POLICIES).join()'), METHOD);
+  assert.equal(f.env.run('Object.keys(APP_POINT_APPROVED_POLICIES).join()'), METHOD+',EE_PREQUENTIAL_AMOUNT_POLICY_BB');
   assert.equal(f.env.run('appPointPolicy_("Z_CALENDAR_SUPPORT_SHRINK_W")'), null);
   assert.equal(f.env.run('appPointPolicy_("__proto__")'), null);
-  assert.equal(f.env.run('appLegacyEngine_(appLegacyServices_({}, {actor:Session.getActiveUser().getEmail()})).SOURCE_SHA256'), f.policy.engineSourceSha256,
+  assert.equal(f.env.run('appLegacyEngine_(appLegacyServices_({}, {actor:Session.getActiveUser().getEmail()})).SOURCE_SHA256'), f.env.run('appPointPolicy_("EE_PREQUENTIAL_AMOUNT_POLICY_BB").engineSourceSha256'),
     'the approved policy binds the assembled engine source');
   assert.equal(latest(f).pointRevision, null);
   const first = f.env.task('previewPointRevision(__in)', { __in: f.previewInput });
@@ -259,6 +259,170 @@ const allTables = f => f.env.call('Object.fromEntries(Object.keys(APP_TABLES).ma
   assert.equal(f.env.table('PLAN_ACTIONS').filter(a => a.action === 'FORECAST.POINT_REFRESH').length, 1);
   assert.ok(latest(f).pointRevision);
   assert.equal(f.env.run('__pointCalls'), 1);
+}
+
+// The registered successor uses the saved BB as an immutable predecessor, not as a new raw run.
+const EE_METHOD = 'EE_PREQUENTIAL_AMOUNT_POLICY_BB';
+function enableEEFixture(f) {
+  f.eePolicy = f.env.call(`(() => {const p=appPointPolicy_(__method);return {policySha256:p.policySha256,engineSourceSha256:p.engineSourceSha256};})()`, { __method: EE_METHOD });
+  f.env.run(`
+    var __eeCalls=0,__eeBadHalf=false,__eeBadYear=false;
+    appPointEngine_=function(){const p=appPointPolicy_(__ee);return {
+      VERSION:'constructed-ee-engine',SOURCE_SHA256:p.engineSourceSha256,WEB_SOURCE_SHA256:'c'.repeat(64),
+      appHistoryPrequentialAmountForecast_:function(history,fy){
+        __eeCalls++;
+        if(history.length!==48||history[0].ym!=='2022-04'||history[47].ym!=='2026-03')throw Error('Wrong EE prefix');
+        const net=history.slice(-12).reduce((s,r)=>s+r.base,0)+history.slice(-12).reduce((s,r)=>s+r.spot,0);
+        const points=Array.from({length:12},(_,m)=>__eeBadYear||__eeBadHalf&&m<6?0:6);
+        return {method:__ee,points:points,total:points.reduce((s,v)=>s+v,0),active:true,net12:net,
+          profileYears:[fy-3,fy-2,fy-1],halfTargets:[points.slice(0,6).reduce((s,v)=>s+v,0),points.slice(6).reduce((s,v)=>s+v,0)],
+          mode:'prequential_amount_selection',rescue:'none',weights:Array(12).fill(.75),selectedFoldFYs:[2024,2025],
+          completeBB:{method:__bb,points:Array(12).fill(8),baseWPoints:Array(12).fill(10),total:96}};
+      }};};`, { __ee: EE_METHOD, __bb: METHOD });
+}
+function previewEEFixture(f) {
+  const input = { fy: FY, method: EE_METHOD, policySha256: f.eePolicy.policySha256 };
+  let r = f.env.task('previewPointRevision(__in)', { __in: input });
+  while (r.status === 'PREVIEW') r = f.env.task('previewPointRevision(__in)', { __in: { ...input, publicationId: r.publicationId } });
+  assert.equal(r.status, 'READY');
+  f.preview = r;
+  f.applyInput = { publicationId: r.publicationId, method: EE_METHOD, policySha256: f.eePolicy.policySha256, previewSha256: r.previewSha256 };
+  return r;
+}
+function eeFixture(measures = 1) {
+  const f = fixture(measures);
+  f.env.run("appNowIso_=function(){return '2026-10-18T00:00:00+0900';};");
+  f.previewAll(); f.applyAll(); enableEEFixture(f);
+  return f;
+}
+
+{
+  const f = eeFixture(2), before = allTables(f), preceding = latest(f);
+  assert.equal(preceding.planning.method, METHOD, 'old-source BB remains readable under the new generator');
+  assert.notEqual(f.policy.engineSourceSha256, f.eePolicy.engineSourceSha256);
+  previewEEFixture(f);
+  assert.deepEqual(allTables(f), before);
+  assert.ok(state(f).entries.every(e => e.predecessor.method === METHOD && e.predecessor.policySourceSha256 === f.policy.engineSourceSha256));
+  f.applyAll();
+  const after = allTables(f), d = latest(f);
+  assert.equal(after.PLAN_ACTIONS.length - before.PLAN_ACTIONS.length, 2);
+  assert.deepEqual(after.PLAN_ACTIONS.slice(0, before.PLAN_ACTIONS.length), before.PLAN_ACTIONS, 'original BB rows remain exact');
+  for (const name of Object.keys(before)) if (name !== 'PLAN_ACTIONS') assert.deepEqual(after[name], before[name], name + ' remains exact after EE');
+  assert.equal(d.planning.method, EE_METHOD, 'same-second successor beats its parent without self-invalidating');
+  assert.deepEqual(d.planning.months.map(m => m.point), Array(12).fill(6));
+  assert.equal(d.planning.annualTarget, 72);
+  assert.equal(d.rawPlanning.annualTarget, 120);
+  assert.equal(d.latest.annual_p50, 100);
+  assert.equal(d.latest.finished_at, '2026-04-06T00:00:01Z');
+  assert.deepEqual(d.monthly.map(m => m.p50), W_POINTS);
+  assert.deepEqual(d.planning.months.map(m => m.mean), preceding.planning.months.map(m => m.mean));
+  assert.equal(d.pointRevision.predecessorRevisionId, preceding.pointRevision.revisionId);
+  const entry = state(f).entries[0];
+  const proof = f.env.call('appOfflineReadFile_(__ref.fileId,__ref.sha256)', { __ref: entry.proofFileRef });
+  assert.deepEqual(proof.precedingPlanning, preceding.planning);
+  assert.deepEqual(proof.fullq.completeBB.points, POINTS);
+  const row = after.PLAN_ACTIONS.find(a => a.action_id === d.pointRevision.revisionId), payload = JSON.parse(row.result_json);
+  assert.equal(payload.version, 'FORECAST_POINT_REVISION_V2');
+  assert.equal(payload.predecessor.revisionId, preceding.pointRevision.revisionId);
+  assert.equal(payload.baseRunId, d.latest.run_id);
+  assert.equal(latest(f, f.normalId).pointRevision, null);
+  assert.equal(f.env.call('appPortfolioData_().plans.find(p=>p.planId===__id).forecastPointAnnual', { __id: f.ids[0] }), 72);
+  assert.equal(f.env.call('appProvisionalReadiness_(appPlanOf_(__id),appProvisionalSnapshot_()).method', { __id: f.ids[0] }), EE_METHOD);
+  assert.equal(f.env.task('applyPointRevision(__in)', { __in: f.applyInput }).appliedThisCall, 0);
+  assert.deepEqual(allTables(f), after);
+  assert.equal(f.env.run('__eeCalls'), 2, 'readers and replay do not recalculate the policy');
+  assert.throws(() => previewEEFixture(f), /直前/);
+
+  // Native metadata has twelve nonnegative lambdas, not probabilities or BB's empty array.
+  const parse = p => f.env.call('appForecastPlanningOf_(__raw,2026,100)', { __raw: p });
+  const native = J(d.planning);
+  delete native.pointPolicySha256;
+  delete native.pointPolicySourceSha256;
+  assert.deepEqual(f.env.call('appPointNativePlanning_(__raw,{sourceSha256:__sha},2026,100)', { __raw: native, __sha: f.eePolicy.engineSourceSha256 }), d.planning);
+  assert.equal(f.env.call('appPointNativePlanning_(__raw,{sourceSha256:__sha},2026,100)', { __raw: native, __sha: f.policy.engineSourceSha256 }), null);
+  const lambdas = J(d.planning); lambdas.provisionalWeights[0] = 0; lambdas.provisionalWeights[1] = 2;
+  assert.ok(parse(lambdas), 'finite lambda can be zero or greater than one');
+  const fallback = J(d.planning);
+  fallback.provisionalWeights = Array(12).fill(1); fallback.provisionalFolds = []; fallback.provisionalMode = 'complete_BB';
+  fallback.months.forEach(m => { m.point = 8; m.share = 1 / 12; }); fallback.annualTarget = 96; fallback.halfTargets = [48, 48];
+  assert.ok(parse(fallback), 'structural/numeric completed-BB fallback is valid with unit weights');
+  const invalid = [
+    p => p.provisionalWeights = Array(11).fill(1), p => p.provisionalWeights = Array(13).fill(1),
+    p => p.provisionalWeights[0] = NaN, p => p.provisionalWeights[0] = Infinity,
+    p => p.provisionalWeights[0] = -0.1, p => p.provisionalWeights[0] = '1',
+    p => p.provisionalFolds = [2024], p => p.provisionalFolds = [2025, 2024],
+    p => p.provisionalFolds = [2024, 2024], p => p.provisionalFolds = [2024, 2026],
+    p => p.provisionalFolds = [2023, 2025], p => p.provisionalFolds = [],
+    p => p.provisionalMode = 'unregistered_mode', p => delete p.provisional,
+    p => p.pointPolicySourceSha256 = f.policy.engineSourceSha256,
+    p => p.pointPolicySha256 = '0'.repeat(64),
+  ];
+  for (const mutate of invalid) { const p = J(d.planning); mutate(p); assert.equal(parse(p), null); }
+  const badFallback = J(fallback); badFallback.provisionalWeights[0] = .5;
+  assert.equal(parse(badFallback), null, 'no-fold fallback cannot claim fitted multipliers');
+}
+
+// A successor cannot start without its saved predecessor, and cannot retain a missing parent reference.
+{
+  const f = fixture(1); enableEEFixture(f); const before = allTables(f);
+  assert.throws(() => previewEEFixture(f), /直前/);
+  assert.equal(f.env.run('__eeCalls'), 0);
+  assert.deepEqual(allTables(f), before);
+}
+{
+  const f = eeFixture(); previewEEFixture(f); f.applyAll();
+  f.env.run(`(() => {const r=appReadTable_('PLAN_ACTIONS').find(r=>r.plan_id===__id&&JSON.parse(r.result_json).method===__ee),v=JSON.parse(r.result_json);
+    delete v.predecessor;appPatchRow_('PLAN_ACTIONS',{action_id:r.action_id},{result_json:JSON.stringify(v)},'constructed');appStoreForget_();})()`, { __id: f.ids[0], __ee: EE_METHOD });
+  assert.equal(latest(f).planning.method, METHOD, 'unbound child falls back to original BB');
+}
+
+// Parser-valid economic corruption is rejected by the resolver, without hiding the valid BB parent.
+for (const allYear of [true, false]) {
+  const f = eeFixture(); previewEEFixture(f); f.applyAll();
+  const parsed = f.env.call(`(() => {const r=appReadTable_('PLAN_ACTIONS').find(r=>r.plan_id===__id&&JSON.parse(r.result_json).method===__ee),v=JSON.parse(r.result_json),p=v.planning;
+    p.months.forEach((m,i)=>{if(__all||i<6)m.point=0;});p.annualTarget=p.months.reduce((s,m)=>s+m.point,0);
+    p.halfTargets=[p.months.slice(0,6).reduce((s,m)=>s+m.point,0),p.months.slice(6).reduce((s,m)=>s+m.point,0)];p.months.forEach(m=>m.share=p.annualTarget?m.point/p.annualTarget:0);
+    const parsed=!!appForecastPlanningOf_(p,2026,100);appPatchRow_('PLAN_ACTIONS',{action_id:r.action_id},{result_json:JSON.stringify(v)},'constructed');appStoreForget_();return parsed;})()`,
+  { __id: f.ids[0], __ee: EE_METHOD, __all: allYear });
+  assert.equal(parsed, true, 'the economic guard adds a context check beyond numeric parsing');
+  assert.equal(latest(f).planning.method, METHOD);
+  assert.deepEqual(latest(f).planning.months.map(m => m.point), POINTS);
+}
+
+// Neither a bad pure result nor an altered approved READY image may reach the journal.
+for (const bad of ['__eeBadYear', '__eeBadHalf']) {
+  const f = eeFixture(), before = allTables(f);
+  f.env.run(bad + '=true;');
+  assert.throws(() => previewEEFixture(f), /計算結果/);
+  assert.deepEqual(allTables(f), before);
+  assert.equal(f.env.call('appJournalPending_()'), null);
+}
+for (const tamper of ['parent', 'point']) {
+  const f = eeFixture(); previewEEFixture(f); const before = allTables(f);
+  f.env.run(`(() => {const s=appPointLoadState_({user:{isOwner:true},actor:__actor},__pub);
+    if(__tamper==='parent')s.entries[0].predecessor.actionHash='0'.repeat(64);else s.entries[0].planning.months[0].point++;
+    appPointSaveState_(s);})()`, { __actor: OWNER, __pub: f.preview.publicationId, __tamper: tamper });
+  assert.throws(() => f.env.task('applyPointRevision(__in)', { __in: f.applyInput }), /方式・版/);
+  assert.deepEqual(allTables(f), before);
+  assert.equal(f.env.call('appJournalPending_()'), null, 'digest refusal happens before creating a journal');
+}
+
+// Recovery after an exact child row append must not require its BB parent to stay current-active.
+{
+  const f = eeFixture(); previewEEFixture(f);
+  f.env.run(`var __eeJournalApply=appJournalApply_;appJournalApply_=function(ops){__eeJournalApply(ops);appStoreForget_();throw Error('constructed after-append interruption');};`);
+  assert.throws(() => f.env.task('applyPointRevision(__in)', { __in: f.applyInput }), /after-append interruption/);
+  assert.ok(f.env.call('appJournalPending_()'));
+  assert.equal(latest(f).planning.method, EE_METHOD);
+  const afterAppend = allTables(f);
+  assert.throws(() => f.env.task('applyPointRevision(__in)', { __in: { ...f.applyInput, policySha256: '0'.repeat(64) } }), /方式・版/);
+  assert.deepEqual(allTables(f), afterAppend);
+  assert.ok(f.env.call('appJournalPending_()'));
+  f.env.run('appJournalApply_=__eeJournalApply;');
+  f.applyAll();
+  assert.equal(f.env.call('appJournalPending_()'), null);
+  assert.deepEqual(allTables(f), afterAppend, 'recovery acknowledges the exact existing row without appending another');
+  assert.equal(latest(f).planning.method, EE_METHOD);
 }
 
 console.log('app-point-revisions: all tests passed');

@@ -48,7 +48,7 @@ export const ENGINE_EXPORTS = [
   'fitOpsModelTrendSeason_', 'buildResidualPool_', 'percentile_', 'readDlmEngineMode_', 'computeDlmFyForecast_', 'readDlmPrimarySpotCapBasis_',
   'forecastByResidualQuantiles_', 'fitSpotRecurringModel_', 'forecastMonteCarloMixed_', 'forecastSeasonalWeighted48_', 'readForecastClosedMonthMode_', 'buildHistoryAnnualAnchor_', 'buildHistorySpotTiming_', 'redistributeHistorySpotTiming_',
   // 本番の A-9 の中身そのもの（物差しの「統計だけ」が、人の入力の無い本番と差 0 になることをテストで確かめる。app/tests/app-v10-backtest.test.mjs）
-  'runForecastFYCore_', 'buildHistoryMonthlyPlanning_', 'allocateAnnualYen_', 'roundMonthlyPointYen_', 'estimateHistoryMonthlyPoint_', 'historySpotTimingReliability_', 'HISTORY_MONTHLY_POINT_METHOD', 'appHistoryProvisionalForecast_', 'appHistoryProvisionalCompact_', 'appHistorySupportForecast_', 'appHistorySupportCompact_', 'appHistoryGuardForecast_', 'appHistoryGuardCompact_', 'appHistoryCombinationForecast_', 'appHistoryCombinationCompact_',
+  'runForecastFYCore_', 'buildHistoryMonthlyPlanning_', 'allocateAnnualYen_', 'roundMonthlyPointYen_', 'estimateHistoryMonthlyPoint_', 'historySpotTimingReliability_', 'HISTORY_MONTHLY_POINT_METHOD', 'appHistoryProvisionalForecast_', 'appHistoryProvisionalCompact_', 'appHistorySupportForecast_', 'appHistorySupportCompact_', 'appHistoryGuardForecast_', 'appHistoryGuardCompact_', 'appHistoryCombinationForecast_', 'appHistoryCombinationCompact_', 'appHistoryPrequentialAmountForecast_', 'appHistoryPrequentialAmountCompact_',
   // 三角測量（段 2。物差しの統計だけ・手法の記録が、本番の A-9 と同じ土台を作る）
   'TRI_METHODS', 'TRI_PRIOR_WEIGHTS', 'readTriangulationEnabled_', 'readTriangulationWeights_', 'computeTriangulationParts_', 'buildTriangulationBase_',
   // AI の時期と効き係数（段 3）
