@@ -63,7 +63,7 @@ function appPlanCreateBuild_(ctx, p) {
     const token = appId_('SCR');
     appScratchReset_(scratch, token);
     const asOfMs = new Date().getTime();
-    const engine = appLegacySetupBook_(scratch, { asOfMs: asOfMs, seed: token, actor: ctx.actor }, APP_SETUP_ORDER, c.clientName, c.fy, c.peopleCsv);
+    const engine = appLegacySetupBook_(scratch, { asOfMs: asOfMs, seed: token, actor: ctx.actor, provisionalSetup: !!(p.provisionalBatchId && c.purpose === APP_PLAN_MEASURE) }, APP_SETUP_ORDER, c.clientName, c.fy, c.peopleCsv);
     // A-1 が作る検証の表は 26 列。旧来の B-2 が書く 36 列まで広げてから保存する（Engine.js の APP_ENGINE_MIN_COLUMNS）
     appEnsureMinColumns_(scratch);
     const payload = { clientName: c.clientName, fy: c.fy, peopleCsv: c.peopleCsv, purpose: c.purpose, token: token, engine: engine, buildMs: new Date().getTime() - t0 };

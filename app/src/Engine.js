@@ -335,6 +335,7 @@ function appRunLegacyForecast_(book, opts) {
  */
 /** 計算用ブックの上で、旧来の A-1 初期セットアップ（setupForecastBook の中身。画面の確認とダイアログは除く）と設定の保存を動かす */
 function appLegacySetupBook_(book, opts, orderKeys, clientName, fy, peopleCsv) {
+  if (opts && opts.provisionalSetup === true) return appProvisionalFreshSetupBook_(book, opts, orderKeys, clientName, fy, peopleCsv);
   const svc = appLegacyServices_(book, opts);
   return appWithSeededRandom_(opts.seed, () => {
     const eng = appLegacyEngine_(svc);
@@ -459,4 +460,126 @@ function appForecastHeadline_(book) {
     month: appIsDate_(r[0]) ? Utilities.formatDate(r[0], APP_TZ, 'yyyy/MM') : String(r[0]), p10: num(r[1]), p50: num(r[2]), p90: num(r[3]) })) : [];
   return { title: String(sh.getRange(1, 1).getValue() || ''), annual: { p10: annual[0], p50: annual[1], p90: annual[2] },
     objective: { p10: objective[0], p50: objective[1], p90: objective[2] }, monthly: monthly, objectiveMonthly: objectiveMonthly };
+}
+
+/**
+ * Bounded provisional setup facade: omit only presentation setters not captured
+ * by appSheetSnapshot_. Values/formulas/grid/number formats/notes/validations/
+ * merges/filters/protection/chart data and all reads are forwarded unchanged.
+ * Caller must opt in only for a tagged, writable MEASURE CREATE.
+ */
+function appProvisionalSetupCosmeticBook_(book, stats, enabled, options) {
+  options = options || {};
+  const virtualSetupUi = enabled !== false && options.freshSetup === true;
+  let activeSheet = null;
+  const hiddenSheets = new WeakMap();
+  stats = stats || {};
+  if (enabled === undefined) enabled = true;
+  stats.enabled = enabled === true;
+  stats.calls = stats.calls || {};
+  stats.skipped = stats.skipped || {};
+  stats.forwarded = stats.forwarded || {};
+  const nativeByProxy = new WeakMap(), wrappers = new WeakMap();
+  const rangeCosmetic = {
+    setBackground:1,setBackgrounds:1,setBackgroundObject:1,setBackgroundObjects:1,
+    setFontColor:1,setFontColors:1,setFontColorObject:1,setFontColorObjects:1,
+    setFontWeight:1,setFontWeights:1,setFontSize:1,setFontSizes:1,
+    setFontStyle:1,setFontStyles:1,setFontFamily:1,setFontFamilies:1,
+    setFontLine:1,setFontLines:1,setHorizontalAlignment:1,setHorizontalAlignments:1,
+    setVerticalAlignment:1,setVerticalAlignments:1,setWrap:1,setWraps:1,
+    setWrapStrategy:1,setWrapStrategies:1,setTextRotation:1,setTextRotations:1,
+    setTextDirection:1,setTextDirections:1,setBorder:1
+  };
+  const sheetCosmetic = {
+    setColumnWidth:1,setColumnWidths:1,setRowHeight:1,setRowHeights:1,
+    setRowHeightsForced:1,setTabColor:1,setTabColorObject:1,
+    setFrozenRows:1,setFrozenColumns:1,setHiddenGridlines:1
+  };
+  const unwrap = value => value && (typeof value === 'object' || typeof value === 'function') && nativeByProxy.has(value) ? nativeByProxy.get(value) : value;
+  const count = (map,key) => { map[key] = Number(map[key] || 0) + 1; };
+  function wrap(target, kind) {
+    if (!target || (typeof target !== 'object' && typeof target !== 'function')) return target;
+    if (wrappers.has(target)) return wrappers.get(target);
+    const methods = {};
+    const proxy = new Proxy({}, { get(unused, prop) {
+      const value = target[prop];
+      if (typeof value !== 'function') return value;
+      if (typeof prop !== 'string') return value.bind(target);
+      if (methods[prop]) return methods[prop];
+      const key = kind + '.' + prop;
+      methods[prop] = function() {
+        count(stats.calls,key);
+        // Only the fresh CREATE runner enables virtual activation/visibility.
+        // These fields are not persisted by appSheetSnapshot_. Preserve reads
+        // made through this facade; never virtualize value-dependent reads.
+        if (virtualSetupUi) {
+          if (kind === 'book' && prop === 'setActiveSheet') {
+            activeSheet = unwrap(arguments[0]); count(stats.skipped,key);
+            return wrap(activeSheet,'sheet');
+          }
+          if (kind === 'book' && prop === 'getActiveSheet' && activeSheet) {
+            count(stats.skipped,key); return wrap(activeSheet,'sheet');
+          }
+          if (kind === 'book' && prop === 'moveActiveSheet') {
+            count(stats.skipped,key); return undefined;
+          }
+          if (kind === 'sheet' && (prop === 'showSheet' || prop === 'hideSheet')) {
+            hiddenSheets.set(target,prop === 'hideSheet'); count(stats.skipped,key);
+            return proxy;
+          }
+          if (kind === 'sheet' && prop === 'isSheetHidden' && hiddenSheets.has(target)) {
+            count(stats.skipped,key); return hiddenSheets.get(target);
+          }
+        }
+        if (stats.enabled && ((kind === 'range' || kind === 'rangeList') && Object.prototype.hasOwnProperty.call(rangeCosmetic,prop) || kind === 'sheet' && Object.prototype.hasOwnProperty.call(sheetCosmetic,prop))) {
+          count(stats.skipped,key);
+          return proxy;
+        }
+        count(stats.forwarded,key);
+        const args = Array.prototype.slice.call(arguments).map(unwrap);
+        const result = value.apply(target,args);
+        if (result === target) return proxy;
+        if (kind === 'book' && prop === 'getSheets') return result.map(v=>wrap(v,'sheet'));
+        if (kind === 'book' && ['getSheetByName','getActiveSheet','insertSheet','setActiveSheet'].indexOf(prop)>=0) return wrap(result,'sheet');
+        if ((kind === 'book' || kind === 'sheet') && ['getRange','getDataRange','getRangeByName'].indexOf(prop)>=0) return wrap(result,'range');
+        if ((kind === 'book' || kind === 'sheet') && prop === 'getRangeList') return wrap(result,'rangeList');
+        if (kind === 'range' && prop === 'getSheet') return wrap(result,'sheet');
+        if ((kind === 'range' && prop === 'getMergedRanges') || (kind === 'rangeList' && prop === 'getRanges')) return result.map(v=>wrap(v,'range'));
+        if (kind === 'range' && ['offset','activate'].indexOf(prop)>=0) return wrap(result,'range');
+        // Builders remain native operations; only unwrap any Range arguments.
+        if (kind === 'sheet' && prop === 'newChart') return wrap(result,'chartBuilder');
+        if (kind === 'chartBuilder' && /^as[A-Z].*Chart$/.test(prop)) return wrap(result,'chartBuilder');
+        return result;
+      };
+      return methods[prop];
+    } });
+    nativeByProxy.set(proxy,target);
+    wrappers.set(target,proxy);
+    return proxy;
+  }
+  return wrap(book,'book');
+}
+
+/** Fresh-only A-1 runner. The caller must have just completed appScratchReset_.
+ * Default appLegacySetupBook_ remains the complete native path. This omits:
+ * - clearing notes from newly created sheets;
+ * - the first GUIDE build (saveInitialSetupSettings builds the final GUIDE);
+ * - final note normalization/validation and presentation-only sweeps.
+ * Notes authored by individual builders are still forwarded. Orphan notes may
+ * remain in scratch; notes are not part of canonical ENG persistence.
+ */
+function appProvisionalFreshSetupBook_(book, opts, orderKeys, clientName, fy, peopleCsv, stats) {
+  if (!opts || opts.provisionalSetup !== true) throw new Error('Fresh provisional setup requires explicit opt-in');
+  const setupBook = appProvisionalSetupCosmeticBook_(book,stats,true,{freshSetup:true});
+  const svc = appLegacyServices_(setupBook,opts);
+  return appWithSeededRandom_(opts.seed,() => {
+    const eng = appLegacyEngine_(svc);
+    const ss = svc.SpreadsheetApp.getActiveSpreadsheet();
+    const order = orderKeys.map(k => eng.SHEETS[k]);
+    eng.resetWorkbookSheets_(ss,order);
+    ['buildCONFIG_','buildSALES_','buildFACTORS_PRODUCT_','buildFACTORS_CLIENT_',
+      'buildOPINIONS_','buildDEV_','buildPhase1Sheets_','buildOUTPUT_'].forEach(fn => eng[fn]());
+    eng.saveInitialSetupSettings(clientName,String(fy),peopleCsv);
+    return {version:eng.VERSION,sourceSha256:eng.SOURCE_SHA256};
+  });
 }

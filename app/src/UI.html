@@ -2360,7 +2360,7 @@ function viewMakers(){
   if (h.wait) return h.wait;
   if (!h.rows.length) return h.head + guide('guide', 'まだ計画がありません。');
   return h.head + '<div class="card"><div class="card-head"><h2>見通し' + tip('年間の売上の見通し（全メーカー同じ目盛り）。名前で予測結果へ') + '</h2>'
-    + '<span class="mkb-keys" aria-hidden="true"><span><i class="k-band"></i>80% の幅</span><span><i class="k-mid"></i>中心</span><span><i class="k-dot"></i>着地の推定</span></span></div>'
+    + '<span class="mkb-keys" aria-hidden="true"><span><i class="k-band"></i>80% の幅</span><span><i class="k-mid"></i>予測額</span><span><i class="k-dot"></i>着地の推定</span></span></div>'
     + '<div class="tblwrap">' + mkForecastTable(h.rows) + '</div></div>';
 }
 function viewBudgets(){

@@ -213,4 +213,26 @@ const belowBand = render(v2, 'result', highBand);
 assertPointsInsidePlot(belowBand);
 assert.deepEqual(chart().opts.band, Array.from({ length: 12 }, () => ({ lo: 100000, hi: 200000 })), 'P10より下の主点も帯を下げず表示する');
 assert.equal(calls.length, callsBefore);
+// 暫定の主列と一覧は同じ月次合計を表示し、予算などが読む元の年度中央値を変更しない。
+run("S.cv.fcMonthly='table'; S.fc.view=__v;", { __v: v });
+const provisional = clone(v2);
+Object.assign(provisional.planning, { method: 'W_COMPONENT_EVENT_HALF_SHAPE_BLEND', provisional: true, validationStatus: 'in_progress' });
+const provisionalHtml = render(provisional);
+assert.match(provisionalHtml, /月次予測の合計（暫定）/);
+assert.match(provisionalHtml, /精度は検証中です/);
+assert.equal(rows(table(provisionalHtml)).at(-1)[2], '390,000');
+const listRow = { planId: 'P1', clientName: '合成製薬', fy: 2026, p10: 0, p50: 0, p90: 2,
+  forecastPointAnnual: 390000, forecastPointProvisional: true, previousForecastPointAnnual: 300000, prevP50: 0 };
+const listBefore = JSON.stringify(listRow);
+run('S.pf={plans:__list};', { __list: [listRow] });
+const listHtml = run('mkForecastTable(__list)', { __list: [listRow] });
+assert.match(listHtml, /<th[^>]*>予測額<\/th>/);
+assert.match(listHtml, /月次予測の合計（暫定）/);
+assert.match(listHtml, /390,000/);
+assert.match(listHtml, /30\.0%/);
+assert.equal(JSON.stringify(listRow), listBefore, '描画が元の中央値と前回中央値を上書きしない');
+assert.equal(run('S.pf.plans[0].p50'), 0);
+const invalidProvisional = clone(provisional); delete invalidProvisional.planning.provisional;
+assert.equal(render(invalidProvisional), render(legacy), '暫定識別が欠けた控えは元の中央値へ戻す');
+
 console.log('PASS app-ui-monthly-planning: V1 compatibility, V2 independent annual sum, zero baseline, month join, quantiles, budget isolation');

@@ -48,14 +48,14 @@ function appProvisionalRequireWritable_(payload) {
   if (!st.current || st.current.index !== item.index || (st.current.intentId && st.current.intentId !== payload.provisionalIntentId)) throw new Error('暫定一括の実行番号が変わりました。');
   if (item.stage !== payload.provisionalStage) throw new Error('暫定一括の処理段階が変わりました。');
   if (!payload.planId) {
-    if (payload.clientName !== item.clientName || payload.purpose !== APP_PLAN_MEASURE) throw new Error('暫定一括の作成対象が変わりました。');
+    if (payload.clientName !== item.clientName || payload.purpose !== APP_PLAN_MEASURE || Number(payload.fy) !== Number(st.fy)) throw new Error('暫定一括の作成対象が変わりました。');
     return;
   }
   if (String(payload.planId) !== String(item.planId)) throw new Error('暫定一括の計画が一致しません。');
   appStoreForget_('PLANS');
   appStoreForget_('YEAR_CLOSURES');
   const plan = appPlanOf_(payload.planId);
-  if (!appPlanIsMeasure_(plan) || plan.state === 'ARCHIVED') throw new Error('計画の状態が変わったため、暫定一括を停止しました。');
+  if (!appPlanIsMeasure_(plan) || plan.state === 'ARCHIVED' || Number(plan.fy) !== Number(st.fy)) throw new Error('計画の状態が変わったため、暫定一括を停止しました。');
   appRequireOpenPlan_(plan.plan_id);
 }
 function appProvisionalFy_(input) {
@@ -316,7 +316,9 @@ function appProvisionalStatus_(ctx) {
     return Object.assign({}, item, { readiness: appProvisionalReadiness_(plan, snap) });
   });
   const counts = {}; items.forEach(i => { counts[i.status] = (counts[i.status] || 0) + 1; });
-  return { exists: true, id: st.id, version: st.version, fy: st.fy, active: !!st.active, current: st.current, waiting: st.waiting || '',
+  const leaf = st.current && st.current.rootJobId ? appProvisionalChain_(st.current.rootJobId).job : null;
+  const currentJob = leaf ? { jobId: leaf.id, kind: leaf.kind, status: leaf.status, createdAt: leaf.createdAt, startedAt: leaf.startedAt, finishedAt: leaf.finishedAt, error: leaf.error || '' } : null;
+  return { exists: true, id: st.id, version: st.version, fy: st.fy, active: !!st.active, current: st.current, currentJob: currentJob, waiting: st.waiting || '',
     startedAt: st.startedAt, finishedAt: st.finishedAt || '', count: st.count, sourceCandidateCount: st.sourceCandidateCount, counts: counts,
     forecastReady: items.filter(i => i.readiness.forecastReady).length, planningReady: items.filter(i => i.readiness.planningReady).length,
     allForecastReady: items.every(i => i.readiness.forecastReady), allMeasurePlanningReady: items.filter(i => i.status !== 'PRESERVED_NORMAL').every(i => i.readiness.planningReady),
