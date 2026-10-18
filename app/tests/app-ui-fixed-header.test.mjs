@@ -34,6 +34,7 @@ for(const view of ['prep','forecast','tri','budget']){
  const empty=checkSlots(run('headerTools(fcHeadSel(2099))'),view+' no plans in FY');assert.match(empty[1].attrs,/\bdisabled\b/);
  const closed=run(`headerTools('<span class="chip warn">締め済み</span>'+fcHeadSel(2026))`);
  const closedSlots=checkSlots(closed,view+' frozen');assert.doesNotMatch(closed,/class="chip/);assert.match(closedSlots[0].options,/<option value="2026" selected>FY2026・締め済み<\/option>/);assert.equal(closedSlots[1].attrs,s[1].attrs);
+ assert.match(closedSlots[0].attrs,/title="締め済みの年度（読み取り専用）"/);assert.match(closedSlots[0].attrs,/aria-description="この年度は締め済みで、読み取り専用です"/);
 }
 run('S.fc.plans=[];S.fc.planId="";S.view="forecast"');
 assert.match(checkSlots(run('headerTools(fcHeadSel(2026))'),'no plans')[1].attrs,/disabled/);

@@ -1027,6 +1027,7 @@ function headerTools(tools){
   if (!/^(prep|forecast|tri|budget)$/.test(S.view) || !maker) maker = '<select class="inp sm" aria-label="メーカー" disabled><option>全メーカー</option></select>';
   // 締め状態も年度欄の中へ。札の有無で選択欄の幅や位置を変えない。
   if (/class="chip\b[^>]*>[\s\S]*?締め済み/.test(html)) {
+    fy = fy.replace('<select ', '<select title="締め済みの年度（読み取り専用）" aria-description="この年度は締め済みで、読み取り専用です" ');
     var marked = false;
     fy = fy.replace(/(<option\b[^>]*\bselected[^>]*>)([\s\S]*?)(<\/option>)/, function(_, a, text, b){ marked = true; return a + text + '・締め済み' + b; });
     if (!marked) fy = fy.replace(/(<option\b[^>]*>)([\s\S]*?)(<\/option>)/, '$1$2・締め済み$3');
