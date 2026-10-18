@@ -312,9 +312,11 @@ function appOfflinePreflight_(ctx, input) {
     appOfflineAssert_(!clients.some(c => c.client_id !== r.clientId && c.normalized_name === r.normalizedName), 'client identity drift');
     if(!r.clientNew) {const frozen=m.existingClients.find(c=>c.client_id===r.clientId); const live=clients.find(c=>c.client_id===r.clientId); appOfflineAssert_(frozen&&live&&appOfflineSame_(appStripRow_(live),frozen),'reused client changed/missing');}
     const checked = appOfflinePlanCheck_(ctx, m, r, p);
-    Object.keys(checked.tables).forEach(t => { const def = APP_TABLES[t], have = appReadTable_(t), key = row => def.key.map(k => String(row[k])).join('\u0001'); checked.tables[t].forEach(row => {
-      const globalKey=t+'\u0001'+key(row); appOfflineAssert_(!globalKeys[globalKey],'cross-plan duplicate global key: '+t);globalKeys[globalKey]=true;
-      const old = have.find(v => key(v) === key(row));
+    Object.keys(checked.tables).forEach(t => { const def = APP_TABLES[t], have = appReadTable_(t), key = row => def.key.map(k => String(row[k])).join('\u0001'), first = new Map();
+      if (checked.tables[t].length) have.forEach(v => { const k = key(v); if (!first.has(k)) first.set(k, v); });
+      checked.tables[t].forEach(row => {
+      const rowKey=key(row),globalKey=t+'\u0001'+rowKey; appOfflineAssert_(!globalKeys[globalKey],'cross-plan duplicate global key: '+t);globalKeys[globalKey]=true;
+      const old = first.get(rowKey);
       appOfflineAssert_(!old || receipt && receipt.bundleSha256 === input.sha256 && appOfflineSame_(appObjectToRow_(def, old), appObjectToRow_(def, row)), 'existing global key conflict: ' + t);
     }); }); verified.push(checked);
   });
@@ -347,7 +349,7 @@ function appOfflineImport_(ctx, input) {
     appProvisionalSaveJson_(appOfflineReceiptKey_(state,r.reservationKey),receipt);
     appJournalRun_(ctx,label,r.planId,ops);
     // Re-read exact native rows after journal before assigning workflow readiness.
-    Object.keys(next.tables).forEach(t=>{const def=APP_TABLES[t],have=appReadTable_(t),key=row=>def.key.map(k=>String(row[k])).join('\u0001');next.tables[t].forEach(row=>{const old=have.find(v=>key(v)===key(row));appOfflineAssert_(old&&appOfflineSame_(appObjectToRow_(def,old),appObjectToRow_(def,row)),'post-import row mismatch: '+t);});});
+    Object.keys(next.tables).forEach(t=>{const def=APP_TABLES[t],have=appReadTable_(t),key=row=>def.key.map(k=>String(row[k])).join('\u0001'),first=new Map();if(next.tables[t].length)have.forEach(v=>{const k=key(v);if(!first.has(k))first.set(k,v);});next.tables[t].forEach(row=>{const old=first.get(key(row));appOfflineAssert_(old&&appOfflineSame_(appObjectToRow_(def,old),appObjectToRow_(def,row)),'post-import row mismatch: '+t);});});
     const readiness=appProvisionalReadiness_(appPlanOf_(r.planId),appProvisionalSnapshot_());appOfflineAssert_(readiness.forecastReady&&(readiness.planningReady||next.inactiveNoPlanning)&&readiness.runId===r.runId,'post-import readiness mismatch');
     const item=appProvisionalItem_(batch,r.index);appOfflineAssert_(item&&item.key===r.normalizedName,'reservation item changed');
     item.planId=r.planId;item.status=next.inactiveNoPlanning?'UNREADY':'DONE';item.stage='';item.error='';item.completionMode='verified_offline_bundle';item.offlineReceipt=Object.assign({},receipt,{status:'DONE',completionMode:'verified_offline_bundle'});item.readiness=readiness;appProvisionalSaveItem_(batch,item);
