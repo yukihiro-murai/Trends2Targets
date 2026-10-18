@@ -271,7 +271,7 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   assert.match(pc.basisText, /過去の売上が 2 年分そろわないので、予測の月の形で割り振りました/);
   // 測る専用の計画は予算を立てない
   env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planC}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, '${OWNER}'))`);
-  assert.throws(() => propose(planC, 60), /測る専用の計画なので、予算は立てません/);
+  assert.throws(() => propose(planC, 60), /この計画では予算を設定できません/);
 }
 
 // ==== 4b. 年度の途中（締まった 6 か月）: 締まった月は実績のまま、残りの月に割り振る ====

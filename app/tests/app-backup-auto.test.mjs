@@ -259,36 +259,19 @@ const dropBackupTriggers = (env) => { for (let i = env.triggers.length - 1; i >=
   const items = (sys) => JSON.parse(vm.runInContext(`JSON.stringify(homeSysItems(${JSON.stringify(sys)}))`, ui)).filter((x) => x[0] === 'バックアップ');
   const backup = { enabled: false, count: 0, latest: '', ageHours: null, keep: 14 };
   assert.deepEqual(items({ backup: Object.assign({}, backup, { enabled: true, count: 3, ageHours: 2 }), backupAuto: null }), [], 'トリガーがあれば出さない');
-  const pending = items({ backup, backupAuto: { off: false, checkedOn: '', checkedToday: false, reason: '' } });
-  assert.equal(pending.length, 1);
-  assert.match(pending[0][1], /所有者が次に開いたときに自動で有効になります/);
-  assert.doesNotMatch(pending[0][2], /enableBackup/, '手で有効にするよう頼まない');
-  assert.match(items({ backup, backupAuto: { off: false, checkedOn: jstDay(-1), checkedToday: false, reason: '' } })[0][1], /所有者が次に開いたときに/, '前の日に確かめただけなら、次に開いたときに作る');
-  // 今日もう確かめたのにトリガーが無い（確かめた後にアプリの外で消した・確かめる途中で止まった）: 次に開いても作らないので、明日以降と言い、今すぐ有効にする方法も出す
-  for (const reason of ['', 'CHECKING']) {
-    const today = items({ backup, backupAuto: { off: false, checkedOn: jstDay(0), checkedToday: true, reason } });
-    assert.equal(today.length, 1);
-    assert.match(today[0][1], /明日以降に所有者が開いたときに自動で有効になります/, `今日は済んでいる（${JSON.stringify(reason)}）`);
-    assert.doesNotMatch(today[0][1], /次に開いたとき/);
-    assert.match(today[0][2], /今日の分は済んでいます$/);
-    assert.doesNotMatch(today[0][2], /OWNER_TASK|apiOwnerTask|"action":|README|スクリプト プロパティ|BACKUP_AUTO_ENABLE/, 'エディタの操作の手順は画面に出さない（2026-10-15 村井さん）');
-  }
-  assert.match(items({ backup })[0][1], /自動で有効になります/, '前の版のサーバー（backupAuto が無い）でも同じ');
-  const off = items({ backup, backupAuto: { off: true, checkedOn: '', reason: '' } });
-  assert.match(off[0][1], /まだ動いていません/);
-  assert.equal(off[0][2], '自動で有効にしないよう止めてあります', '止めてあることだけ（エディタの操作の手順は出さない）');
-  const limit = items({ backup, backupAuto: { off: false, checkedOn: jstDay(0), checkedToday: true, reason: 'TRIGGER_LIMIT' } });
-  assert.match(limit[0][1], /自動で有効にできませんでした/);
-  assert.match(limit[0][2], /トリガーの数に余裕がありません/);
-  assert.doesNotMatch(limit[0][2], /OWNER_TASK|apiOwnerTask|"action":|README|スクリプト プロパティ|BACKUP_AUTO_ENABLE/);
-  const failed = items({ backup, backupAuto: { off: false, checkedOn: jstDay(0), checkedToday: true, reason: 'FAILED' } });
-  assert.match(failed[0][1], /自動で有効にできませんでした/);
-  assert.doesNotMatch(failed[0][2], /トリガーの数/);
-  // 有効で、バックアップがまだ無い・古いときは今までどおり
-  assert.match(items({ backup: Object.assign({}, backup, { enabled: true }) })[0][1], /まだ 1 つもありません/);
-  // セリフ: 1 件ならそのまま話す（文と説明）
-  const says = JSON.parse(vm.runInContext(`JSON.stringify(yomiSays({ fy: '2026', plans: [], approvals: [], mine: [], system: ${JSON.stringify({ backup, backupAuto: { off: false, checkedOn: '', checkedToday: false, reason: '' } })} }))`, ui));
-  assert.ok(says.some((x) => x.sys && /所有者が次に開いたときに自動で有効になります。$/.test(x.text)), JSON.stringify(says));
+  // 保守の有効化・トリガー枠などは通常ホームへ表示しない。バックアップ本体の検査は上記1〜8で維持。
+  const scenarios = [
+    { backup, backupAuto: { off: false, checkedOn: '', checkedToday: false, reason: '' } },
+    { backup, backupAuto: { off: false, checkedOn: jstDay(-1), checkedToday: false, reason: '' } },
+    ...['', 'CHECKING', 'TRIGGER_LIMIT', 'FAILED'].map(reason => ({ backup, backupAuto: { off: false, checkedOn: jstDay(0), checkedToday: true, reason } })),
+    { backup }, { backup, backupAuto: { off: true } },
+    { backup: Object.assign({}, backup, { enabled: true }) },
+    { backup: Object.assign({}, backup, { enabled: true, count: 3, ageHours: 60 }) }
+  ];
+  scenarios.forEach(sys => assert.deepEqual(items(sys), [], '保守状態を通常ホームへ出さない'));
+  const says = JSON.parse(vm.runInContext(`JSON.stringify(yomiSays({ fy: '2026', plans: [], approvals: [], mine: [], system: ${JSON.stringify(scenarios[0])} }))`, ui));
+  assert.ok(says.every(x => !/所有者|バックアップ|トリガー/.test(x.text || '')), '利用者への案内に運用説明を混ぜない');
+
 }
 
 console.log('app-backup-auto: all tests passed');

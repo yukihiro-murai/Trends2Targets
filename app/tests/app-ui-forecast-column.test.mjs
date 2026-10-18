@@ -117,7 +117,7 @@ h = page();
 assert.match(h, new RegExp('FY' + (FY + 2) + ' の計画はまだありません'), 'よみの案内 1 枚');
 assert.equal((h.match(/class="card"/g) || []).length, 4, 'カードは画面ごとに案内の 1 枚だけ（予測準備・予測結果・三角測量・予算策定）');
 assert.match(head(h), new RegExp('<option value="' + (FY + 2) + '" selected>'), '選んだ年度のまま');
-assert.doesNotMatch(head(h), /id="fc_mk"/, 'メーカーのプルダウンは出さない（選べるメーカーが無い）');
+assert.match(head(h), /id="fc_mk" aria-label="メーカー" disabled><option>メーカーなし<\/option>/, '選べるメーカーが無い年度も同じ欄を無効にして残す');
 run(`fcSetFy('${FY}')`); flush();
 assert.equal(run('S.fc.planId'), P[firstKey][FY], 'メーカーが決まっていなければ、その年度の最初のメーカー');
 // 保存していない入力があれば、先に確かめる（「やめる」なら今の年度・メーカーのまま）

@@ -259,14 +259,15 @@ const shiftMark = (env, minutes, patch) => {
   assert.match(bulkItems[0][2], /甲製薬（予測・確認が要る）：Stepが極端です/);
   assert.match(bulkItems[0][2], /乙製薬（物差し・止まった）/);
   assert.doesNotMatch(bulkItems[0][2], /OWNER_TASK|apiOwnerTask|"action":/);
-  const stalled = items({ state: 'RUNNING', stalled: true, at: '2026-10-13T03:02:00+0900', startedAt: '2026-10-13T03:02:00+0900', lastDoneAt: ago(30) });
-  assert.equal(stalled.length, 1, '止まった 1 行だけ（古さの行と重ねない）');
-  assert.equal(stalled[0][1], '毎日の手入れが途中で止まりました（2026-10-13 03:02 に始めて、終わりの記録がありません）');
-  assert.doesNotMatch(stalled[0][2], /OWNER_TASK|apiOwnerTask|"action":|README|スクリプト プロパティ|BACKUP_AUTO_ENABLE/, 'エディタの操作の手順は画面に出さない（2026-10-15 村井さん）');
-  assert.deepEqual(items({ state: 'RUNNING', stalled: false, at: ago(0.05), startedAt: ago(0.05), lastDoneAt: ago(20) }), [], '動いている間は出さない');
-  assert.match(items({ state: 'RUNNING', stalled: false, at: ago(0.05), startedAt: ago(0.05), lastDoneAt: ago(30) })[0][1], /最後に終わってから 30 時間たっています/, '最後に終わった時刻で見る');
-  assert.deepEqual(items({ state: 'DONE', at: ago(31), startedAt: ago(31), finishedAt: ago(20), lastDoneAt: ago(20), ok: true }), []);
-  assert.match(items({ at: ago(30), ok: true })[0][1], /最後に終わってから 30 時間たっています/, '前の版の形（at だけ）も今までどおり');
+  // 手入れの内部状態は通常ホームへ表示しない。実行結果の保管・監査は上記で確認する。
+  for (const state of [
+    { state: 'RUNNING', stalled: true, at: '2026-10-13T03:02:00+0900', startedAt: '2026-10-13T03:02:00+0900', lastDoneAt: ago(30) },
+    { state: 'RUNNING', stalled: false, at: ago(0.05), startedAt: ago(0.05), lastDoneAt: ago(20) },
+    { state: 'RUNNING', stalled: false, at: ago(0.05), startedAt: ago(0.05), lastDoneAt: ago(30) },
+    { state: 'DONE', at: ago(31), startedAt: ago(31), finishedAt: ago(20), lastDoneAt: ago(20), ok: true },
+    { at: ago(30), ok: true }
+  ]) assert.deepEqual(items(state), [], '通常ホームは業務の確認事項を表示する');
+
 }
 
 void MEMBER;

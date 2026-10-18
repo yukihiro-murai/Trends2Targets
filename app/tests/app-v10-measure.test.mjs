@@ -43,7 +43,7 @@ function finish(env, jobId) {
 const plan = (env, id) => env.table('PLANS').filter((p) => p.plan_id === id)[0];
 const audits = (env, action, phase) => env.audit().filter((a) => a.action === action && (!phase || a.phase === phase));
 const REFUSED = (env) => env.call('APP_MEASURE_REFUSED');
-const VERSION_REFUSED = '測る専用の計画なので、公式版は出しません。';
+const VERSION_REFUSED = 'この計画では公式版を発行できません。';
 
 // ==== 1. 計画を作るとき: purpose を足せる（印が PLANS に入り、作る処理の監査に残る） ====
 {
@@ -171,8 +171,8 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   assert.deepEqual(Object.keys(R).sort(), ['AI.RESEARCH', 'BUDGET.SAVE']);
   const jobs0 = env.call('appJobList_()').length;
   assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.EDIT', payload: { planId: planM, action: 'BUDGET.SAVE', args: { rows: [{ row: 29, adopted: 1, uplift: '' }] } } } }),
-    /測る専用の計画なので、予算は立てません。/);
-  assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.RUN', payload: { planId: planM, action: 'AI.RESEARCH' } } }), /測る専用の計画なので、市場は調べません/);
+    /この計画では予算を設定できません。/);
+  assert.throws(() => env.call('apiStartJob(__in)', { __in: { kind: 'PLAN.RUN', payload: { planId: planM, action: 'AI.RESEARCH' } } }), /この計画では市場調査を実行できません/);
   assert.equal(env.call('appJobList_()').length, jobs0, '待ち行列に入れない');
   assert.throws(() => env.call('appTestVersionSubmit_(__in)', { __in: { planId: planM } }), new RegExp(VERSION_REFUSED));
   assert.equal(env.table('PLAN_VERSIONS').length, 0, '公式版を書かない');
@@ -298,16 +298,16 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   // メーカーの一覧: 状態の札の代わりに印・空模様と予算は出さない・合計は予算を立てるメーカーだけ・合計の行の後ろに分ける
   const pf = env.call('apiPortfolio()').plans;
   const mk = clean(run(`S.pf = __p; S.mkFy = __fy; viewBudgets()`, { __p: pf, __fy: String(fy) }), 'メーカーの一覧');
-  assert.match(mk, /<span class="chip st off" data-tip="測る専用の計画です。[^"]*">測る専用<\/span>/, '状態の列の札（ほかの状態の札と同じ幅）');
-  assert.match(mk, /<span class="chip off" data-tip="[^"]*">測る専用 1<\/span>/, '状態の数の横に、測る専用の数');
+  assert.doesNotMatch(mk, /測る専用/, '内部区分の札や説明は出さない');
+  assert.doesNotMatch(mk, /測る専用 1/, '内部区分の件数は出さない');
   const states = [...mk.matchAll(/>(承認済み|承認待ち|策定中|未着手) (\d+)<\/span>/g)].reduce((n, x) => n + Number(x[2]), 0);
   assert.equal(states, 1, '状態の数は予算を立てるメーカーだけ');
   const foot = /<tr class="total">([\s\S]*?)<\/tr>/.exec(mk)[1];
-  assert.match(foot, /data-tip="測る専用の 1 メーカーは入れていません">1 メーカー<\/td><td class="num">960<\/td>/, '合計の予算は 960（測る専用の 6,000 は入れない）: ' + foot);
+  assert.match(foot, />1 メーカー<\/td><td class="num">960<\/td>/, '合計の予算は通常の1社960のみ');
   assert.ok(mk.indexOf('<tr class="total">') < mk.indexOf('テスト薬品'), '測る専用の行は合計の行の後ろ');
   assert.ok(mk.indexOf('テスト製薬') < mk.indexOf('<tr class="total">'));
   const rowM = /<tr><td class="wrap">[^]*?テスト薬品[^]*?<\/tr>/.exec(mk.slice(mk.indexOf('<tr class="total">')))[0];
-  assert.match(rowM, /<td>-<\/td><td><span class="chip st off"[^>]*>測る専用<\/span><\/td><td class="num">-<\/td>/, '空模様・予算は出さない');
+  assert.match(rowM, /<td>-<\/td><td><\/td><td class="num">-<\/td>/, '空模様・予算・内部区分は出さない');
 
   // ホーム: 測る専用の計画は見せる年度の計画に入れない（合計・空模様・よみの話）
   const home = env.call('apiHome()');
@@ -320,7 +320,7 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   // 分析: 合計・空模様・予算のグラフに入れず、数と名前（カーソル）を添える
   const an = env.call('apiCrossMaker(__in)', { __in: {} });
   const a = clean(run(`S.view = 'analysis'; S.an.data = __a; S.an.fy = __a.fy; viewAnalysis()`, { __a: an }), '分析');
-  assert.match(a, /<p class="note anx" data-tip="測る専用の計画です。予算は立てず、合計・空模様・予算と比べるグラフには入れません（外れ幅・読みのクセ・見直しの流れには入れます）\nテスト薬品">測る専用 1<\/p>/);
+  assert.doesNotMatch(a, /測る専用/, '分析に内部区分の注記を出さない');
   assert.doesNotMatch(a, /class="ansky"|見通しの空模様/, '空模様の板は分析に出さない（ホームにある。2026-10-13）');
   // 予算と比べる全体の読み解き（予算との差の内訳）は予算を立てるメーカーだけ
   const wf = /<h2>予算との差の内訳[\s\S]*?<\/svg><\/div><\/div>/.exec(a);
@@ -331,7 +331,7 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   const onlyM = Object.assign({}, an, { plans: an.plans.filter((p) => p.measure) });
   const a2 = clean(run(`S.an.data = __a; viewAnalysis()`, { __a: onlyM }), '分析（測る専用だけ）');
   assert.doesNotMatch(a2, /見通しの空模様|<div class="k">年間予算/);
-  assert.match(a2, /測る専用 1<\/p>/);
+  assert.doesNotMatch(a2, /測る専用/, '内部区分だけの年度も数を出さない');
   assert.doesNotMatch(a2, /着地の推定や/, '着地の推定の話をしない');
 
   // 予測: 題の横に印・予算の欄と保存と届く見込みを出さない・公式版は出さないと言う・A-4 は押せない（理由はカーソル）
@@ -345,8 +345,8 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   };
   const m = fc(planM);
   const head = clean(run('viewForecastAll()'), '予測（測る専用）');
-  assert.match(head, /<h1>予測[\s\S]*?<span class="chip off" data-tip="測る専用の計画です。[^"]*">測る専用<\/span><\/h1>/);
-  assert.match(head, /<option value="[^"]*" selected>テスト薬品<\/option>/, '選ぶ欄はメーカーの名前だけ（測る専用の印は題の横。2026-10-13 村井さん）');
+  assert.doesNotMatch(head, /測る専用/, '予測の題に内部区分を出さない');
+  assert.match(head, /<option value="[^"]*" selected>テスト薬品<\/option>/, '選ぶ欄はメーカーの名前だけ');
   const tabM = clean(run('fcBothTabs(__d, __v)', { __d: m.d, __v: m.v }), '予測と予算（測る専用）');
   assert.doesNotMatch(tabM, /fcBudget\(|fcSaveBudget\(\)|この予算に/, '予算の欄・保存・届く見込みを出さない');
   assert.match(run('fcRunBtn()'), /fcForecastRun\(\)/, '予測を実行は出す（物差しの点を作る。「予測と予算」の見出しの右）');
@@ -355,7 +355,7 @@ const VERSION_REFUSED = '測る専用の計画なので、公式版は出しま�
   assert.doesNotMatch(stepsM, /k-bud|tri-bud/, '測る専用は最終予算の線を出さない');
   run('S.fc.ver = __r', { __r: env.call('apiVersionList(__in)', { __in: { planId: planM } }) });
   const verM = clean(run('fcVersionTab(S.fc.data, S.fc.view)'), '公式版（測る専用）');
-  assert.match(verM, /測る専用の計画なので、公式版は出しません。/);
+  assert.match(verM, /この計画では公式版を発行できません。/);
   assert.doesNotMatch(verM, /verSubmit\(\)/);
   // 予算を立てる計画は今までどおり
   const A = fc(planA);

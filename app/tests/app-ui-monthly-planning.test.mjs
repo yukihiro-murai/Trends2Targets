@@ -185,7 +185,7 @@ const measureView = clone(v); measureView.plan.measure = true;
 run('S.fc.view=__v', { __v: measureView });
 const measureHtml = run('fcBudgetTab(__d,__v)', { __d: d, __v: measureView });
 assert.equal(measureHtml, run('fcBudgetTab(__d,__v)', { __d: legacy, __v: measureView }));
-assert.match(measureHtml, /測る専用の計画なので、予算は立てません/);
+assert.match(measureHtml, /この計画では予算を設定できません/);
 assert.match(render(d, 'result', measureView), /月次予測/);
 
 // 実際のSVG経路でも、帯の外にある月次予測を欠落させず描画できる。

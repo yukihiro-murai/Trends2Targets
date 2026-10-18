@@ -529,7 +529,7 @@ let second, mid;   // mid = 年度の途中の回（7/20）を足した後の回
   assert.match(said, />\d+\.\d% <span class="note">\d+\.\d%〜\d+\.\d%<\/span><\/td>/, '2 社なら外れ幅に 95% の幅を添える');
   // 前の数え方の回だけ: 動かし直すよう言う（表は出さない）
   const old = clean(render({ fy: '2026', backtest: Object.assign({ fy: '2026', plans: 0, oldCalcRuns: 2 }, env.call('appBacktestSummary_([], {})')) }));
-  assert.match(old, /<p class="note">数え方を直す前の回だけです（2 回）。所有者が物差しを動かし直すと、ここに出ます。<\/p>/);
+  assert.match(old, /<p class="note">数え方を直す前の回だけです（2 回）。更新後に比較結果が表示されます。<\/p>/);
   assert.doesNotMatch(old, /<table/);
   assert.equal(render({ fy: '2026', backtest: null }), '', '物差しが無ければカードを出さない');
   assert.equal(render({ fy: '2026' }), '', '古いサーバー（backtest が無い）でも描ける');

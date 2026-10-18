@@ -358,14 +358,18 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   h2.approvals = [{ planId: h2.plans[0].planId, clientName: 'テスト製薬', fy: h2.fy, versionNo: 2, submittedBy: 'planner' }];
   ui.__h2 = h2;
   assert.match(JSON.parse(vm.runInContext(`JSON.stringify(yomiSays(__h2)[0])`, ui)).text, /承認待ちの公式版が 1 件[\s\S]*確認をお願いします/);
-  // 仕組みの異常（バックアップが止まった等）はセリフで知らせ、「状態を見る」のボタンは付けない（2026-10-06）
+  // 保守の運用説明は出さず、実際の予測失敗・確認待ちは残す。
   const h3 = JSON.parse(JSON.stringify(ui.__home));
   h3.system = { backup: { enabled: false }, housekeeping: { ok: false, problems: ['x'] }, journal: null };
   ui.__h3 = h3;
   const says3 = JSON.parse(vm.runInContext(`JSON.stringify(yomiSays(__h3))`, ui));
-  assert.ok(says3.some((x) => /バックアップ/.test(x.text)) && says3.some((x) => /手入れ/.test(x.text)), JSON.stringify(says3));
+  assert.ok(says3.every((x) => !/バックアップ|手入れ|トリガー/.test(x.text)), JSON.stringify(says3));
   assert.ok(says3.every((x) => !x.act || x.act[0] !== '状態を見る'), JSON.stringify(says3));
   assert.doesNotMatch(vm.runInContext(`B.home = __h3; viewHome()`, ui), /状態を見る/);
+  h3.system.bulk = { items: [{ name: 'テスト製薬', kind: 'FORECAST', status: 'FAILED', error: '計算を完了できませんでした' }, { name: '参考製薬', kind: 'FORECAST', status: 'CONFIRM' }] };
+  const actionable = JSON.parse(vm.runInContext(`JSON.stringify(yomiSays(__h3))`, ui));
+  assert.ok(actionable.some((x) => /確認が要る計画が 1.*止まった計画が 1/.test(x.text)), JSON.stringify(actionable));
+  assert.ok(actionable.some((x) => /計算を完了できませんでした/.test(x.tip) && /予測を実行/.test(x.tip)), '失敗内容と確認する操作は残す');
   vm.runInContext(`B.home = __home`, ui);
   // 予算・着地見込みが無いメーカーがあるのに「おおむね晴れ」とは言わない（2026-10-06 点検）
   const fogSays = JSON.parse(vm.runInContext(`JSON.stringify(yomiSays({ fy: '2026', plans: [{ fy: '2026', planId: 'P', clientName: 'X', stepErrors: [], runs: 1, p50: 10, budget: null, officialFinal: null, landing: null, lastRunAt: new Date().toISOString(), officialNo: 1 }], approvals: [], mine: [] }))`, ui));

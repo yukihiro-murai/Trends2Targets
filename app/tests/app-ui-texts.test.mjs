@@ -22,7 +22,7 @@
  *  16. 当たり具合を計算した後・外れの原因を整理の前: 振り返りの人の記入の場所に 1 行、人の学びのまとめに残りの月の数（動かせない人には「整理されると」）
  *  17. 承認して反映（自動の学びを止めている間）: 説明の 1 行目は記録だけ、確かめる文は「判断を記録します（3〜6 分ほど）」の後に設定が変わらないこと
  *  18. 締め済みの年度: 分析・振り返りで「まだ」と言わない
- *  19. 所有者が設定した日は 2026/10/07 の形で「所有者が設定」
+ *  19. 設定日は内部で保持し、停止中の表示は通常の利用者向けにする
  *  20. 根拠の補正: 出している予測の補正と今の補正が違えば、月ごとの補正も出している予測が使った分を言う。今の補正が空なら補正なし
  *  21. AI の学び: 比べた月が無いときの荒れの文は、印の短い言い方と出し方だけ（荒れの説明はカーソル）
  *  22. 根拠の補正: 倍率が同じでも月ごとの補正が違えば違うとみなし、見える一文は出している予測のこと（カーソルで出している分 → 今の分）。
@@ -146,8 +146,8 @@ const OWNER_NOTE = 'owner-approved 2026-10-07 09:30: 自動の学びを止める
   };
   const cal = { factor: 1, aiWeight: 0, aiMax: null, monthBias: {}, updatedAt: '2026-10-07T09:30:00+09:00', quarter: '' };
   const OFF = '\n自動の学びを止めているので、「補正を学び直す」と「見直しを反映」では変わりません';
-  assert.equal(basis({ autoUpdate: false, biasFactor: 1, note: OWNER_NOTE }, cal), '所有者が承認した値（2026/10/07）で決めた、予測の直し方です' + OFF);
-  assert.equal(basis({ autoUpdate: true, biasFactor: 1, note: OWNER_NOTE }, cal), '所有者が承認した値（2026/10/07）で決めた、予測の直し方です');
+  assert.equal(basis({ autoUpdate: false, biasFactor: 1, note: OWNER_NOTE }, cal), '承認した値（2026/10/07）で決めた、予測の直し方です' + OFF);
+  assert.equal(basis({ autoUpdate: true, biasFactor: 1, note: OWNER_NOTE }, cal), '承認した値（2026/10/07）で決めた、予測の直し方です');
   assert.equal(basis({ autoUpdate: true, biasFactor: 0.9, note: 'auto-learned' }, cal), '「補正を学び直す」と「見直しを反映」で決まる、予測の直し方です');
   assert.equal(basis(undefined, cal), '「補正を学び直す」と「見直しを反映」で決まる、予測の直し方です', '学びの中身が無くても描ける');
   // 旗が 0 なら、所有者の書いた跡が無くても「補正を学び直す」と「見直しを反映」で決まるとは言わない（どちらでも値は変わらない）
@@ -546,12 +546,12 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   assert.doesNotMatch(heroSay(h({ months: 0, misses: 0, withNotes: 0, scoredMonths: 5 })), /ほかに/, '振り返りの記録が無いときは 8 の文だけ');
 }
 
-// ==== 19. 所有者が設定した日 ====
+// ==== 19. 設定日の内部情報と停止中の表示 ====
 {
   assert.equal(run('fcOwnerSet(__l)', { __l: { note: OWNER_NOTE } }), '2026/10/07');
   assert.equal(run('fcOwnerSet(__l)', { __l: { note: 'auto-learned' } }), '');
   assert.equal(run('fcOwnerSet(null)'), '');
-  assert.equal(run(`S.fc.view = __v; fcPaused('LEARN.MONTHLY')`, { __v: planView({ learning: { autoUpdate: false, note: OWNER_NOTE } }) }), '自動の学びを止めています（2026/10/07 所有者が設定）。今は動かしても補正は変わりません。');
+  assert.equal(run(`S.fc.view = __v; fcPaused('LEARN.MONTHLY')`, { __v: planView({ learning: { autoUpdate: false, note: OWNER_NOTE } }) }), '自動の学びを止めています。今は動かしても補正は変わりません。');
 }
 
 // ==== 20. 根拠の補正: 出している予測が使った月ごとの補正・今の補正が空 ====
@@ -786,17 +786,17 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   // (b) 所有者が見せた丸めの値（24.7%・1.42 倍）を書いた: 生の値（0.2466・1.4237）と違っても「承認して使っています」
   const b = card(L(), U({ tau: 0.247, w: 1.42, tauSet: true, wSet: true, tauFrom: '2026-10-08', wFrom: '2026-10-08' }));
   assert.deepEqual(notes(b), ['今の値: 年の水準のぶれ 24.7%・幅の倍率 1.42 倍（承認した値）', '全計画から学んだ値（試し）: 年の水準のぶれ 24.7%・幅の倍率 1.42 倍（承認して使っています）']);
-  assert.match(cardTip(b), /\n今使っている値: 年の水準のぶれ 24\.7%・幅の倍率 1\.42 倍（所有者が承認 2026\/10\/08 から）\n/);
+  assert.match(cardTip(b), /\n今使っている値: 年の水準のぶれ 24\.7%・幅の倍率 1\.42 倍（承認 2026\/10\/08 から）\n/);
   // (c) landing.tau だけ書いた: 値ごとに言う（決まった値の幅の倍率を「使っています」と言わない）。承認した日も値ごと
   const c = card(L(), U({ tau: 0.247, tauSet: true, tauFrom: '2026-10-08' }));
   assert.deepEqual(notes(c), ['今の値: 年の水準のぶれ 24.7%（承認した値）・幅の倍率 1 倍（決まった値）',
     '全計画から学んだ値（試し）: 年の水準のぶれ 24.7%（承認して使っています）・幅の倍率 1.42 倍（承認すると使います）']);
-  assert.match(cardTip(c), /\n今使っている値: 年の水準のぶれ 24\.7%（所有者が承認 2026\/10\/08 から）・幅の倍率 1 倍（決まった値）\n/);
+  assert.match(cardTip(c), /\n今使っている値: 年の水準のぶれ 24\.7%（承認 2026\/10\/08 から）・幅の倍率 1 倍（決まった値）\n/);
   // 決まった値と同じ値（1 倍）を学んだ: 承認しても変わらないので「今の値と同じ」
   assert.equal(notes(card(L({ tauLearned: false, w: 1 }), U()))[1], '全計画から学んだ値（試し）: 幅の倍率 1 倍（今の値と同じ）');
   // 違う日に書いた: 日は値ごと
   assert.match(cardTip(card(L(), U({ tau: 0.247, w: 1.42, tauSet: true, wSet: true, tauFrom: '2026-10-08', wFrom: '2026-10-09' }))),
-    /今使っている値: 年の水準のぶれ 24\.7%（所有者が承認 2026\/10\/08 から）・幅の倍率 1\.42 倍（所有者が承認 2026\/10\/09 から）/);
+    /今使っている値: 年の水準のぶれ 24\.7%（承認 2026\/10\/08 から）・幅の倍率 1\.42 倍（承認 2026\/10\/09 から）/);
   // (d) 書いた値が見せる丸めで違う: 「承認すると使います」。丸めの境（24.74% は 24.7%・24.76% は 24.8%）
   assert.equal(notes(card(L({ wLearned: false }), U({ tau: 0.2, tauSet: true, tauFrom: '2026-10-08' })))[1], '全計画から学んだ値（試し）: 年の水準のぶれ 24.7%（承認すると使います）');
   assert.match(notes(card(L({ wLearned: false }), U({ tau: 0.2474, tauSet: true })))[1], /24\.7%（承認して使っています）$/);
@@ -979,17 +979,18 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
     S.fc.ver = { planId: 'P', pending: { no: 3, versionId: 'V', rowVersion: 1 } }; verDecide('APPROVED');`);
   assert.equal(JSON.stringify(run('__asks')), JSON.stringify([['承認する', true]]));
   assert.match(uiHtml, /ask\(msg, '承認して反映', function\(\)\{[^\n]*\}, true\);/, '承認して反映も「やめる」が先');
-  // 仕組みの確認（管理者のホーム）: 失敗の数に出ない止まり方も出す（手入れが終わらない・自動の調べのトリガーが無い・動いていない・古いままの計画）
+  // 保守の運用説明は表示せず、市場情報の失敗・古さを表示する
   const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
   const sysItems = (sys) => Array.from(run('homeSysItems(__s)', { __s: sys })).map((x) => x[1]);
   const okBackup = { enabled: true, count: 3, ageHours: 5 };
   const arOk = { enabled: true, failures7d: 0, trigger: { installed: true }, lastTickAt: ago(20), stalePlans: [] };
   assert.deepEqual(sysItems({ housekeeping: { at: ago(20), ok: true }, backup: okBackup, autoResearch: arOk }), [], 'ふだんは何も出さない');
-  assert.match(sysItems({ housekeeping: { at: ago(30), ok: true }, backup: okBackup, autoResearch: arOk })[0], /毎日の手入れが、最後に終わってから 30 時間たっています/);
-  assert.match(sysItems({ backup: okBackup, autoResearch: Object.assign({}, arOk, { trigger: { installed: false, reason: 'TRIGGER_LIMIT', reasonLabel: 'トリガーの数に余裕が無い' } }) })[0], /トリガーを作れていません/);
-  assert.match(sysItems({ backup: okBackup, autoResearch: Object.assign({}, arOk, { lastTickAt: ago(80) }) })[0], /市場の自動の調べが、3 日動いていません/);
+  assert.deepEqual(sysItems({ housekeeping: { at: ago(30), ok: true }, backup: okBackup, autoResearch: arOk }), []);
+  assert.deepEqual(sysItems({ backup: okBackup, autoResearch: Object.assign({}, arOk, { trigger: { installed: false, reason: 'TRIGGER_LIMIT', reasonLabel: 'トリガーの数に余裕が無い' } }) }), []);
+  assert.deepEqual(sysItems({ backup: okBackup, autoResearch: Object.assign({}, arOk, { lastTickAt: ago(80) }) }), []);
+  assert.match(sysItems({ autoResearch: { failures7d: 2 } })[0], /市場の調査が、この 7 日で 2 回うまくいきませんでした/);
   assert.match(sysItems({ backup: okBackup, autoResearch: Object.assign({}, arOk, { stalePlans: [{ planId: 'A', lastAt: ago(24 * 20) }, { planId: 'B', lastAt: ago(24 * 8) }, { planId: 'C', lastAt: '' }] }) })[0],
-    /^1 メーカーの市場の調べが、14 日以上新しくなっていません$/, '一度も集めていない計画と 14 日に満たない計画は数えない');
+    /^1 メーカーの市場の情報が、14 日以上新しくなっていません$/, '一度も集めていない計画と 14 日に満たない計画は数えない');
 }
 
 console.log('app-ui-texts: all tests passed');

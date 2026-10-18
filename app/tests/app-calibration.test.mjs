@@ -749,10 +749,10 @@ function seedReviewPlan(e, name, withHistory) {
   ui.__q = view.boot.quarterly;
   vm.runInContext(`S.fc.view={ can: { plan: true, approve: true, admin: true }, actions: [] };`, ui);
   const html = vm.runInContext('fcRvProposals(__q)', ui);
-  assert.match(html, /<span class="chip off" data-tip="所有者が取り下げた案。反映しません">取り下げ<\/span>/);
+  assert.match(html, /<span class="chip off" data-tip="取り下げた案。反映しません">取り下げ<\/span>/);
   assert.doesNotMatch(html, /fcDec\(|fcRvGo\(|未反映/, '判断と反映の操作は出さない');
   assert.equal((html.match(/<span class="chip st off">取り下げ<\/span>/g) || []).length, 2, '案ごとの判断も取り下げ');
-  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext(`lrDecision({ status: '取り下げ', decidedAt: '' }, '')`, ui))), ['取り下げ', 'off', '所有者が取り下げました。反映しません']);
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext(`lrDecision({ status: '取り下げ', decidedAt: '' }, '')`, ui))), ['取り下げ', 'off', '取り下げられました。反映しません']);
 
   // C-3（承認した案の適用）: 何も適用しない。承認の判断を保存し直しても同じ
   const rel0 = JSON.stringify(engRows(envB, 'SOURCE_RELIABILITY', planB));

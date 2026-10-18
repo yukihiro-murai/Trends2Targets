@@ -55,19 +55,20 @@ a{color:var(--navy)}
 svg.i{width:20px;height:20px;flex:0 0 20px}
 
 /* ---- 上部バー ---- */
-.topbar{position:fixed;top:0;left:0;right:0;height:var(--top-h);background:var(--navy);color:#fff;display:flex;align-items:center;gap:12px;padding:0 var(--s6);z-index:60;box-shadow:inset 0 -3px 0 var(--primary)}
+.topbar{position:fixed;top:0;left:0;right:0;height:var(--top-h);background:var(--navy);color:#fff;display:flex;align-items:center;gap:12px;padding:0 var(--gutter) 0 var(--s6);z-index:60;box-shadow:inset 0 -3px 0 var(--primary)}
 .topbar .logo{width:36px;height:36px;flex:0 0 36px;border-radius:11px;background:var(--primary);display:flex;align-items:center;justify-content:center}
-.topbar .ttl{font-size:var(--fs-h2);letter-spacing:.02em;white-space:nowrap}
+.topbar .ttl{font-size:var(--fs-h2);letter-spacing:.02em;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .topbar .tsub{font-size:var(--fs-m);color:#CFE6F5;white-space:nowrap;margin-left:2px}
 .topbar .spacer{flex:1}
 .topbar .meta{font-size:var(--fs-s);color:#CFE6F5;white-space:nowrap}
 .topbar .meta b{color:#fff}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 /* 上の帯の右: 年度・メーカーの選ぶ欄と札（2026-10-16 村井さん: 画面の題の行はやめ、選ぶ欄は右上へ） */
-.hdrtools{display:flex;align-items:center;gap:var(--s2);min-width:0}
-.hdrtools .fc-sels{display:flex;gap:var(--s2)}
-.hdrtools select.inp{height:36px;width:var(--selw, var(--col));background-color:#fff;color:var(--navy);font-weight:600;border-color:transparent}
+.hdrtools{display:flex;align-items:center;gap:var(--s2);flex:0 0 auto;min-width:0}
+.hdrtools .hdr-sels{display:grid;grid-template-columns:var(--col) var(--col2);gap:var(--s3)}
+.hdrtools select.inp{height:36px;width:100%;min-width:0;max-width:none;background-color:#fff;color:var(--navy);font-weight:600;border-color:transparent}
 .hdrtools .chip{margin:0}
+@media (min-width:761px) and (max-width:1100px){.topbar .tsub{display:none}}
 
 /* ---- 枠と左のメニュー ---- */
 .layout{display:flex;padding-top:var(--top-h);min-height:100vh}
@@ -645,7 +646,7 @@ h1 + .lr-sec{margin-top:0}
 @media (max-width:760px){
   .topbar{padding:0 var(--s4)}
   .topbar .tsub,.topbar .meta{display:none}
-  .topbar .ttl{display:none}.hdrtools{flex:1;justify-content:flex-end}.hdrtools select.inp{width:auto;max-width:44vw;font-size:var(--fs-s)}
+  .topbar .ttl,.topbar .spacer{display:none}.hdrtools{flex:1;justify-content:flex-end;min-width:0}.hdrtools .hdr-sels{width:100%;grid-template-columns:96px minmax(0,1fr)}.hdrtools select.inp{width:100%;max-width:none;font-size:var(--fs-s)}
   .layout{display:block}
   .sidenav{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:80;width:auto;height:calc(var(--bnav-h) + env(safe-area-inset-bottom));display:grid;grid-auto-flow:column;grid-auto-columns:max-content;gap:0;padding:0 4px env(safe-area-inset-bottom);scrollbar-width:none;border-right:none;border-top:1px solid var(--line);box-shadow:0 -4px 16px rgba(15,53,87,.06);overflow-x:auto}
   .navbtn{flex-direction:column;justify-content:center;gap:2px;width:auto;min-width:72px;height:var(--bnav-h);margin:0;padding:0 12px;border-radius:0;font-size:var(--fs-s);line-height:1.3}   /* 名前が重ならないよう、項目は名前の幅。入りきらなければ横に送る */
@@ -1014,6 +1015,24 @@ function viewTitle(head){
   var name = m[1].replace(/<[^>]*>[\s\S]*$/, '').trim(), chips = m[1].slice(m[1].indexOf('<') >= 0 ? m[1].indexOf('<') : m[1].length);
   return { title: '<h1 id="vh" class="sr-only" tabindex="-1">' + name + '</h1>', tools: chips + m[2] };
 }
+/** 年度・メーカーは全画面で同じ 2 枠。画面ごとの既存の選択操作をそのまま使う。 */
+function headerTools(tools){
+  var html = String(tools || ''), selects = html.match(/<select\b[^>]*>[\s\S]*?<\/select>/g) || [], fy = '', maker = '';
+  selects.forEach(function(s){
+    if (/aria-label="(?:見る年度|年度)"/.test(s)) fy = s;
+    if (/aria-label="メーカー"/.test(s)) maker = s;
+  });
+  var whole = S.view === 'learning', fallbackFy = whole ? '' : S.view === 'home' ? (B.home && B.home.fy) : S.view === 'makers' || S.view === 'budgets' ? S.mkFy : S.view === 'analysis' ? (S.an && S.an.fy) : (S.fc && S.fc.fy);
+  if (whole || !fy) fy = '<select class="inp sm" aria-label="年度" disabled><option>' + (whole ? '全年度' : fallbackFy ? 'FY' + esc(fallbackFy) : '年度') + '</option></select>';
+  if (!/^(prep|forecast|tri|budget)$/.test(S.view) || !maker) maker = '<select class="inp sm" aria-label="メーカー" disabled><option>全メーカー</option></select>';
+  // 締め状態も年度欄の中へ。札の有無で選択欄の幅や位置を変えない。
+  if (/class="chip\b[^>]*>[\s\S]*?締め済み/.test(html)) {
+    var marked = false;
+    fy = fy.replace(/(<option\b[^>]*\bselected[^>]*>)([\s\S]*?)(<\/option>)/, function(_, a, text, b){ marked = true; return a + text + '・締め済み' + b; });
+    if (!marked) fy = fy.replace(/(<option\b[^>]*>)([\s\S]*?)(<\/option>)/, '$1$2・締め済み$3');
+  }
+  return '<span class="hdr-sels">' + fy + maker + '</span>';
+}
 /** 画面の中のタブ（下線）。list: [[key, 名前]]、onclick: 押したときに呼ぶ関数の名前（key を渡す） */
 function subTabs(list, cur, onclick){ return '<div class="tabs" role="tablist">' + list.map(function(t){ return '<button class="tab' + (cur === t[0] ? ' on' : '') + '" role="tab" aria-selected="' + (cur === t[0]) + '" onclick="' + onclick + '(\'' + t[0] + '\')">' + t[1] + '</button>'; }).join('') + '</div>'; }
 /**
@@ -1054,7 +1073,7 @@ function render(){
   var m = body.match(/^(<div class="page-head">[\s\S]*?<\/h1>[\s\S]*?<\/div>|<h1>[\s\S]*?<\/h1>)/);
   var head = m ? m[0] : '';
   var vt = viewTitle(head);
-  $('hdrTools').innerHTML = vt.tools;
+  $('hdrTools').innerHTML = headerTools(vt.tools);
   $('main').innerHTML = vt.title + errorBanner() + '<div id="jobBox">' + jobBanner() + '</div>' + body.slice(head.length);
   tipFocus($('main'));
   // 画面の中のタブが入りきらず横に送るときは、選んだタブが見える所まで送る（縦には動かさない）
@@ -1146,9 +1165,8 @@ function pct0(v){ return v === null || v === undefined ? '-' : (v * 100).toFixed
 function pct1(v){ return v === null || v === undefined ? '-' : (v > 0 ? '+' : '') + (v * 100).toFixed(1) + '%'; }
 /** 測る専用の計画か（サーバーの measure。予算を立てず、合計・空模様に入れない。版 10 の 3-9） */
 function planMeasure(p){ return !!(p && p.measure); }
-var MEASURE_TIP = '測る専用の計画です。予算は立てず、過去の売上で予測の当たり方を測るために使います。合計には入れません';
-/** 測る専用の札（説明はカーソルで）。st: 表の状態の列（ほかの状態の札と同じ幅） */
-function measureChip(st){ return '<span class="chip ' + (st ? 'st ' : '') + 'off" data-tip="' + esc(MEASURE_TIP) + '">測る専用</span>'; }
+/** 内部の計画区分は札に出さない。 */
+function measureChip(){ return ''; }
 /** 年間予算: サーバーが決めた予算（承認済みの公式版の最終予算、無ければ今の予算） */
 function planBudget(p){ return p.budgetUsed !== null && p.budgetUsed !== undefined ? p.budgetUsed : p.officialFinal !== null && p.officialFinal !== undefined ? p.officialFinal : p.budget; }
 /** 色の向き: 予算に対して 1.1 倍以上 = 暖色・0.9 倍以下 = 寒色・ほか（値なしも）= 灰 */
@@ -1184,7 +1202,7 @@ var FC_ACTION_FULL = { 'IMPORT.SALES': '売上を取り込む（過去 4 年の�
   'IMPORT.ACTUALS': '確定した月の実績を取り込む', 'EVAL.REPORT': '予測と実績を比べて当たり具合を計算する', 'EVAL.INSIGHTS': '外れた月の原因を整理する',
   'LEARN.MONTHLY': '実績から補正を学び直す（次の予測に効く）', 'REVIEW.GENERATE': 'AI の見直し案を作る', 'REVIEW.APPLY': '承認した見直し案を反映する',
   'EVAL.DASHBOARD': '指標の更新', 'INPUT.SAVE': '入力の保存', 'BUDGET.SAVE': '予算の保存', 'INSIGHT.SAVE': '振り返りの記入の保存', 'REVIEW.DECIDE': '見直し案の判断の保存', 'SETUP.PEOPLE': '担当者の保存',
-  'CALIBRATION.SET': '補正の値を書く（所有者が承認した値）' };
+  'CALIBRATION.SET': '承認した補正の値を書く' };
 function actName(a){ return FC_ACTION_FULL[a] || plainMsg(a || ''); }
 function actShort(a){ return FC_ACTION_SHORT[a] || actName(a); }
 /** サーバーの文に残る旧来の番号（A-2 など。後ろの旧来の名前も）を、ふつうの言葉に直す（エラーの知らせ・エラーの欄・進みのメモ） */
@@ -1986,7 +2004,7 @@ function homePlans(h){ return (h.plans || []).filter(function(p){ return String(
 function viewHome(){
   if (!B.allowed) return '<h1>Trends2Targets</h1>' + guide('guide', 'この画面を使う権限がありません。管理者に連絡してください。');
   if (!B.setUp) {
-    if (B.user.isOwner) return '<h1>はじめに</h1>' + guide('explain', 'データ本体・操作の記録・バックアップの置き場所を作ります。所有者だけが実行できます。何度実行しても同じ結果になります。'
+    if (B.user.isOwner) return '<h1>はじめに</h1>' + guide('explain', '利用を始めるには初期設定が必要です。'
       + '<div class="row"><button class="btn" onclick="homeSetup()">初期設定を実行</button></div>');
     return '<h1>Trends2Targets</h1>' + guide('observe', '準備中です。もうしばらくお待ちください。');
   }
@@ -2222,49 +2240,14 @@ function homeOwnerTip(){ return ''; }
 function homeSysItems(sys){
   var it = [];
   if (!sys) return it;
-  var hk = sys.housekeeping, b = sys.backup, ba = sys.backupAuto || {}, ar = sys.autoResearch;
-  if (hk && hk.ok === false) it.push(['毎日の手入れ', '毎日の手入れで、確認が ' + (hk.problems || []).length + ' 件あります',
-    (hk.problems || []).slice(0, 3).map(function(x){ return '・' + plainMsg(x); }).join('\n') + '\n' + homeOwnerTip('{"action":"health"}', '中身が分かります')]);
-  // 手入れは毎日 3 時ごろ（バックアップの数分後、別の実行）。始めたときに印を書くので、時間切れなどで止まると「始めたまま」が残る（サーバーが stalled を付ける）
-  if (hk && hk.stalled) it.push(['毎日の手入れ', '毎日の手入れが途中で止まりました（' + String(hk.startedAt || hk.at || '').replace('T', ' ').slice(0, 16) + ' に始めて、終わりの記録がありません）',
-    '1 回の実行の時間切れ（6 分）などで止まると、結果を控えられません。次の日の手入れがもう一度動き、止まったことも要確認として残します\n'
-    + homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"HOUSEKEEPING"}', '動いた時刻と理由が分かります')]);
-  // 終わらない日が続いても気づけるよう、最後に終わってからの時間も見る（lastDoneAt。前の版のサーバーは at）
-  var hkH = hk && !hk.stalled ? homeHours(hk.lastDoneAt || hk.finishedAt || hk.at) : null;
-  if (hkH !== null && hkH > 26 && !(b && b.enabled === false)) it.push(['毎日の手入れ', '毎日の手入れが、最後に終わってから ' + hkH + ' 時間たっています',
-    '毎日 3 時ごろに動きます。途中で止まっている（時間切れ・トリガーが無い）と、結果が新しくなりません。止まっている間は、市場の自動の調べも見送ります\n'
-    + homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"HOUSEKEEPING"}', '最後に動いた時刻と理由が分かります')]);
-  if (b) {
-    if (b.error) it.push(['バックアップ', 'バックアップの状態を読めません', homeOwnerTip('{"action":"health"}', '状態が分かります')]);
-    // 毎日のバックアップのトリガーは、所有者が開いたときに自動で作る（2026-10-07）。ba = 止めるスイッチ（off）と、最後に確かめた結果（reason）・今日もう確かめたか（checkedToday）
-    else if (b.enabled === false && ba.off) it.push(['バックアップ', '毎日のバックアップが、まだ動いていません', '自動で有効にしないよう止めてあります']);
-    else if (b.enabled === false && (ba.reason === 'TRIGGER_LIMIT' || ba.reason === 'FAILED')) it.push(['バックアップ', '毎日のバックアップを、自動で有効にできませんでした',
-      (ba.reason === 'TRIGGER_LIMIT' ? 'トリガーの数に余裕がありません。' : '') + '次の日、所有者が開いたときにもう一度試します\n' + homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"BACKUP.ENSURE"}', '理由が分かります')]);
-    // 今日もう確かめたのにトリガーが無い（確かめた後にアプリの外で消した・確かめる途中で止まった）: その日のうちは確かめ直さない
-    else if (b.enabled === false && ba.checkedToday) it.push(['バックアップ', '毎日のバックアップは、明日以降に所有者が開いたときに自動で有効になります',
-      '所有者が開いたときに確かめるのは 1 日 1 回で、今日の分は済んでいます\n' + homeOwnerTip('{"action":"enableBackup"}', '今すぐ有効になり、毎日 3 時ごろに取るようになります')]);
-    else if (b.enabled === false) it.push(['バックアップ', '毎日のバックアップは、所有者が次に開いたときに自動で有効になります', '所有者が開いたときに（1 日 1 回）、毎日 3 時ごろに取るように設定します']);
-    else if (b.count === 0) it.push(['バックアップ', 'バックアップが、まだ 1 つもありません', homeOwnerTip('{"action":"runBackup"}', 'すぐに 1 つ取ります。毎日の分は 3 時ごろに取ります')]);
-    else if (isNum(b.ageHours) && b.ageHours > 26) it.push(['バックアップ', '最後のバックアップから ' + b.ageHours + ' 時間たっています', homeOwnerTip('{"action":"health"}', '状態が分かります')]);
-  }
+  // 市場の情報に影響する失敗・古さだけを伝え、保守・バックアップの運用説明は出さない。
+  var ar = sys.autoResearch;
   if (ar) {
-    var last = ar.lastResult ? '最後の結果: ' + String(ar.lastResult.at || '').replace('T', ' ').slice(0, 16) + ' ' + (ar.lastResult.statusLabel || '') + (ar.lastResult.error ? '（' + plainMsg(ar.lastResult.error) + '）' : '') + '\n' : '';
-    if (ar.error) it.push(['市場の自動の調べ', '市場の自動の調べの状態を読めません', homeOwnerTip('{"action":"health"}', '状態が分かります')]);
-    else if (ar.enabled === false) it.push(['市場の自動の調べ', '市場の自動の調べを止めてあります', '所有者が止めています']);
-    else if (ar.failures7d > 0) it.push(['市場の自動の調べ', '市場の自動の調べが、この 7 日で ' + ar.failures7d + ' 回うまくいきませんでした',
-      last + homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"AUTO.RESEARCH"}', '失敗の理由が分かります')]);
-    else {
-      // 失敗の数に出ない止まり方: トリガーが無い・毎日の回が動いていない（見送りが続く）・市場の調べが古いままの計画がある
-      var tickH = homeHours(ar.lastTickAt), why = ar.lastTick && ar.lastTick.reasonLabel ? '最後の回: ' + (ar.lastTick.statusLabel || '') + '（' + ar.lastTick.reasonLabel + '）\n' : '';
-      var old = (ar.stalePlans || []).filter(function(p){ var d = homeDays(p.lastAt); return d !== null && d >= 14; });
-      var arLog = homeOwnerTip('{"action":"listAudit","kind":"RUN","query":"AUTO.RESEARCH"}', '動いた時刻と理由が分かります');
-      if (ar.trigger && ar.trigger.installed === false && ar.trigger.reason) it.push(['市場の自動の調べ', '市場の自動の調べのトリガーを作れていません',
-        (ar.trigger.reasonLabel ? '理由: ' + ar.trigger.reasonLabel + '\n' : '') + '所有者が開いたときに（1 日 1 回）もう一度作ります\n' + arLog]);
-      else if (tickH !== null && tickH > 48) it.push(['市場の自動の調べ', '市場の自動の調べが、' + Math.floor(tickH / 24) + ' 日動いていません',
-        '毎日 ' + ((ar.schedule && ar.schedule.label) || '4:15 ごろ') + 'に動きます\n' + why + last + arLog]);
-      else if (old.length) it.push(['市場の自動の調べ', old.length + ' メーカーの市場の調べが、14 日以上新しくなっていません',
-        '週に 1 回集め直す決まりです。準備ができていない・見送りが続くと古いままになります\n' + why + arLog]);
-    }
+    if (ar.error) it.push(['市場の調査', '市場の調査の状態を確認できません', '']);
+    else if (ar.failures7d > 0) it.push(['市場の調査', '市場の調査が、この 7 日で ' + ar.failures7d + ' 回うまくいきませんでした',
+      ar.lastResult && ar.lastResult.error ? plainMsg(ar.lastResult.error) : '']);
+    var old = (ar.stalePlans || []).filter(function(p){ var d = homeDays(p.lastAt); return d !== null && d >= 14; });
+    if (old.length) it.push(['市場の調査', old.length + ' メーカーの市場の情報が、14 日以上新しくなっていません', '']);
   }
   // 全部の計画をまとめて動かした結果で、まだ片付いていない計画（確認が要った・止まった。その後に済ませた計画はサーバーが外す）
   var bk = sys.bulk;
@@ -2328,9 +2311,9 @@ function yomiSays(h){
   // 測る専用の計画だけの年度は「計画が無い」とは言わない（予算を立てる計画が無いと言い、測る専用の数を添える）
   var nM = (h.plans || []).filter(function(p){ return String(p.fy) === String(h.fy) && planMeasure(p); }).length;
   var past = h.thisFy && Number(h.fy) < Number(h.thisFy);
-  if (!plans.length) add(11, 'info', 'guide', nM ? 'FY' + h.fy + ' の予算を立てる計画は' + (past ? 'ありません' : 'まだありません') + '（測る専用 ' + nM + '）。'
+  if (!plans.length) add(11, 'info', 'guide', nM ? 'FY' + h.fy + ' の予算は' + (past ? 'ありません。' : 'まだありません。')
     : past ? 'FY' + h.fy + ' の計画はありません。この年度の見通しと実績は記録されていません。ほかの年度を選んでください。'
-    : 'FY' + h.fy + ' の計画はまだありません。所有者が計画を作ると、ここに見通しが出ます。', nM ? MEASURE_TIP : '', null);
+    : 'FY' + h.fy + ' の計画はまだありません。', '', null);
   out.sort(function(a, b){ return a.rank - b.rank; });
   if (!out.length) out.push({ rank: 99, lvl: 'ok', pose: 'done', text: '今日の観測では、大きな崩れはありません。予報です。FY' + h.fy + ' の見通しは、おおむね晴れでしょう。', tip: '', act: mk });
   return out;
@@ -2374,7 +2357,7 @@ function mkHead(title){
 function viewMakers(){
   var h = mkHead('予測一覧');
   if (h.wait) return h.wait;
-  if (!h.rows.length) return h.head + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここに並びます。');
+  if (!h.rows.length) return h.head + guide('guide', 'まだ計画がありません。');
   return h.head + '<div class="card"><div class="card-head"><h2>見通し' + tip('年間の売上の見通し（全メーカー同じ目盛り）。名前で予測結果へ') + '</h2>'
     + '<span class="mkb-keys" aria-hidden="true"><span><i class="k-band"></i>80% の幅</span><span><i class="k-mid"></i>中心</span><span><i class="k-dot"></i>着地の推定</span></span></div>'
     + '<div class="tblwrap">' + mkForecastTable(h.rows) + '</div></div>';
@@ -2382,16 +2365,15 @@ function viewMakers(){
 function viewBudgets(){
   var h = mkHead('予算一覧');
   if (h.wait) return h.wait;
-  if (!h.rows.length) return h.head + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここに並びます。');
-  var rows = h.rows, bud = rows.filter(function(p){ return !planMeasure(p); }), nM = rows.length - bud.length;
+  if (!h.rows.length) return h.head + guide('guide', 'まだ計画がありません。');
+  var rows = h.rows, bud = rows.filter(function(p){ return !planMeasure(p); });
   var count = function(st){ return bud.filter(function(p){ return mkState(p) === st; }).length; };
   // 承認待ちのうち、前の版が承認済みのメーカー（ホームの「承認済み」はこれも数える）
   var both = bud.filter(function(p){ return p.pendingNo && p.officialNo; }).length;
   var stTip = { official: '公式版が承認されたメーカー', pending: '出した版を承認者が確認しているメーカー' + (both ? '\nうち ' + both + ' は前の版が承認済みです（ホームの「承認済み」にも数えます）' : ''),
     draft: '予測はあるが、公式版をまだ出していないメーカー', none: 'まだ予測がないメーカー' };
   // 札は進む順（未着手 → 承認済み。2026-10-16 村井さん）
-  var summary = ['none', 'draft', 'pending', 'official'].map(function(st){ return '<span class="chip ' + MK_STATES[st][1] + '" data-tip="' + esc(stTip[st]) + '">' + MK_STATES[st][0] + ' ' + count(st) + '</span>'; }).join('')
-    + (nM ? '<span class="chip off" data-tip="' + esc(MEASURE_TIP) + '">測る専用 ' + nM + '</span>' : '');
+  var summary = ['none', 'draft', 'pending', 'official'].map(function(st){ return '<span class="chip ' + MK_STATES[st][1] + '" data-tip="' + esc(stTip[st]) + '">' + MK_STATES[st][0] + ' ' + count(st) + '</span>'; }).join('');
   return h.head + '<div class="card"><div class="card-head"><h2>予算と予実' + tip('FY' + h.fy + ' の計画があるメーカーの、空模様・予算策定の状態・年間予算・暫定実績・着地の推定です。予実の棒は、着地の推定 ÷ 年間予算（縦の線が 100%）。名前を押すと予算策定を開きます') + '</h2>'
     + '<span class="mk-sum">' + summary + '</span></div><div class="tblwrap">' + mkTable(rows) + '</div></div>';
 }
@@ -2467,7 +2449,7 @@ function mkTable(rows){
   var r = homeRange(bud), all = bud.length;
   // 合計の行: 予算と着地は、値のあるメーカーの数が違うことがある（その数を数字の下に出す）。最初のセルは名前の列と同じく左に残る
   var cnt = function(n){ return n < all ? '<div class="note">' + n + ' メーカー分</div>' : ''; };
-  var foot = !all ? '' : '<tr class="total"><td>合計</td><td colspan="2"' + (ms.length ? ' data-tip="' + esc('測る専用の ' + ms.length + ' メーカーは入れていません') + '"' : '') + '>' + all + ' メーカー</td><td class="num">' + yen(tot.budget) + cnt(nB) + '</td><td class="num">' + yen(tot.actual) + '</td>'
+  var foot = !all ? '' : '<tr class="total"><td>合計</td><td colspan="2">' + all + ' メーカー</td><td class="num">' + yen(tot.budget) + cnt(nB) + '</td><td class="num">' + yen(tot.actual) + '</td>'
     + '<td class="num" data-tip="' + esc(homeRangeTip(r, all)) + '">' + yen(r ? r.landing : null) + cnt(r ? r.n : 0) + '</td></tr>';
   // 列の幅: カードの幅いっぱいに割り振る（名前 24%・空模様 16%・ステータス 15%・金額 15% ずつ）。左に寄せて右を空けない（2026-10-13 村井さん「左に寄りすぎ。バランスを」）。
   // 「開く」の列は置かない（名前を押すと開く）
@@ -2733,23 +2715,24 @@ function fcHeadSel(fy){
   if (fy && fys.indexOf(fy) < 0) fys = fys.concat([fy]).sort();
   var fySel = !fys.length ? '' : '<select class="inp sm" id="fc_fy" aria-label="年度" onchange="fcSetFy(this.value)">'
     + fys.map(function(x){ return '<option value="' + esc(x) + '"' + (x === fy ? ' selected' : '') + '>FY' + esc(x) + '</option>'; }).join('') + '</select>';
-  var mkSel = list.length ? '<select class="inp sm" id="fc_mk" aria-label="メーカー" onchange="fcSwitch(this.value)"' + selW(list.map(function(p){ return p.clientName; })) + '>'
-    + list.map(function(p){ return '<option value="' + esc(p.planId) + '"' + (p.planId === f.planId ? ' selected' : '') + '>' + esc(p.clientName) + '</option>'; }).join('') + '</select>' : '';
+  var mkSel = list.length ? '<select class="inp sm" id="fc_mk" aria-label="メーカー" onchange="fcSwitch(this.value)">'
+    + list.map(function(p){ return '<option value="' + esc(p.planId) + '"' + (p.planId === f.planId ? ' selected' : '') + '>' + esc(p.clientName) + '</option>'; }).join('') + '</select>'
+    : '<select class="inp sm" id="fc_mk" aria-label="メーカー" disabled><option>メーカーなし</option></select>';
   return '<span class="fc-sels" data-near="1">' + fySel + mkSel + '</span>';
 }
 /** 計画の一覧を読むまでの選ぶ欄（押せない。読めたら同じ場所に入る。スマホで題の下の段が後から増えない） */
 function fcHeadSelWait(fy){
-  return '<span class="fc-sels" data-near="1"><select class="inp sm" aria-label="年度" disabled><option>' + (fy ? 'FY' + esc(fy) : '') + '</option></select>'
-    + '<select class="inp sm" aria-label="メーカー" disabled><option></option></select></span>';
+  return '<span class="fc-sels" data-near="1"><select class="inp sm" aria-label="年度" disabled><option>' + (fy ? 'FY' + esc(fy) : '年度') + '</option></select>'
+    + '<select class="inp sm" aria-label="メーカー" disabled><option>メーカー</option></select></span>';
 }
 function viewForecast(){
   var f = S.fc, d = f.data, v = f.view, title = FC_VIEW_TITLE[S.view] || '予測結果';
   if (!f.plans && !f.planId) return '<div class="page-head"><h1>' + title + '</h1>' + fcHeadSelWait(fcFy()) + '</div>' + (S.ld.fcPlans && S.ld.fcPlans.error ? slot('fcPlans', '計画の一覧を読み込んでいます', 'fcLoadPlans()') : fcSkelPage());
-  var fy = fcFy(), sel = f.plans && f.plans.length ? fcHeadSel(fy) : f.plans ? '' : fcHeadSelWait(fy);
+  var fy = fcFy(), sel = f.plans ? fcHeadSel(fy) : fcHeadSelWait(fy);
   if (!f.planId) {
     var head0 = '<div class="page-head"><h1>' + title + '</h1>' + sel + '</div>';
-    if (!f.plans.length) return head0 + guide('guide', 'まだ計画がありません。所有者が計画を作ると、ここで見られます。');
-    if (!fcFyPlans(fy).length) return head0 + guide('guide', 'FY' + esc(fy) + ' の計画はまだありません。所有者が計画を作ると、ここで見られます。');
+    if (!f.plans.length) return head0 + guide('guide', 'まだ計画がありません。');
+    if (!fcFyPlans(fy).length) return head0 + guide('guide', 'FY' + esc(fy) + ' の計画はまだありません。');
     return head0 + fcSkelPage();
   }
   // 締め済み・測る専用の札は題のすぐ後ろに（選ぶ欄の前）
@@ -2875,7 +2858,7 @@ function fcPaused(action){
   var v = S.fc.view, a = ((v && v.actions) || []).filter(function(x){ return x.action === action; })[0];
   if (a && a.paused) return plainMsg(a.paused);
   var L = fcLearnInfo(v);
-  if (action === 'LEARN.MONTHLY' && L.autoUpdate === false) return '自動の学びを止めています' + (fcOwnerSet(L) ? '（' + fcOwnerSet(L) + ' 所有者が設定）' : '') + '。今は動かしても補正は変わりません。';
+  if (action === 'LEARN.MONTHLY' && L.autoUpdate === false) return '自動の学びを止めています。今は動かしても補正は変わりません。';
   return '';
 }
 /** 計画の補正の状態（旧来の画面の学びの中身: autoUpdate・biasFactor・note など。無ければ空） */
@@ -2889,7 +2872,7 @@ function fcRun(action){ var planId = S.fc.planId; ask(actName(action) + ' を実
 function fcForecastRun(){ var planId = S.fc.planId, go1 = function(){ startJob('FORECAST.RUN', { planId: planId }); }; if (fcDirty()) ask('予測を実行しますか？' + fcDirtyNote(), '実行する', go1, true); else go1(); }
 function fcEdit(action, args){ startJob('PLAN.EDIT', { planId: S.fc.planId, action: action, args: args, inputHash: S.fc.view.inputHash }); }
 function fcNum(v){ return v === null || v === undefined || v === '' ? '' : Number(v); }
-function fcSourceNote(){ return S.fc.view && !S.fc.view.sourceReady ? 'ZAC の実績のスプレッドシートが決まると使えます（所有者が決めます）。' : ''; }
+function fcSourceNote(){ return S.fc.view && !S.fc.view.sourceReady ? '実績のデータが未設定のため、まだ使えません。' : ''; }
 /**
  * 金額のまとめ: 大きな数は短く（3.2億・3,400万）、正確な金額はカーソルで出す（枠からはみ出さない）。signed: 増減（+ を付ける）。
  * opt（省ける）: { sub: 数字の下の小さな行, after: 説明の金額の後ろに足す行 }（試しの数を添えるとき）
@@ -2957,7 +2940,7 @@ function fcConfirmCard(){
 function fcForecastTab(d, v){ return fcMonthlyTab(d, v, 'result'); }
 /** 予算策定: 予測を参考に、採用予測と上乗せを決めて保存する（営業の判断が入る）。測る専用の計画は予算を立てない */
 function fcBudgetTab(d, v){
-  if (fcMeasure()) return guide('observe', '測る専用の計画なので、予算は立てません。');
+  if (fcMeasure()) return guide('observe', 'この計画では予算を設定できません。');
   return fcMonthlyTab(d, v, 'budget');
 }
 /** 月次の点推定は表示専用。旧保存データ・月の不一致・年度合計の不一致は従来表示へ戻す。中央値や予算は書き換えない。 */
@@ -3458,7 +3441,7 @@ function fcBasisTab(d, v){
     // 所有者が承認した値で書いたとき・自動の学びを止めているときは、そのことを言う（「補正を学び直す」で決まるとは言わない。2026-10-07 所有者の決定）。
     // 旗が 0 の間は、補正を学び直す・見直しを反映のどちらでも値は変わらない（所有者の書いた跡が無くても、そう言う）
     var L = fcLearnInfo(v), own = fcOwnerSet(L), off = L.autoUpdate === false;
-    var cTip = own ? '所有者が承認した値（' + own + '）で決めた、予測の直し方です' : off ? '今の値のまま使う、予測の直し方です' : '「補正を学び直す」と「見直しを反映」で決まる、予測の直し方です';
+    var cTip = own ? '承認した値（' + own + '）で決めた、予測の直し方です' : off ? '今の値のまま使う、予測の直し方です' : '「補正を学び直す」と「見直しを反映」で決まる、予測の直し方です';
     if (off) cTip += '\n自動の学びを止めているので、「補正を学び直す」と「見直しを反映」では変わりません';
     // 見える一文: 違えば出している予測のこと（倍率が違えば倍率・月ごとだけ違えば月ごとの補正）。同じなら今の補正（倍率が無くて月ごとだけ直していれば、そう言う）
     var calSay = shownDiff ? fcCalShown(apF, nowF, apHasMb ? fcMonthBiasList(r.applied.residual_month_bias_json) : [], nowList, !factorDiff)
@@ -3889,7 +3872,7 @@ function fcRvProposals(q){
     : '判断を保存してから、承認した案を設定に反映します（3〜6 分ほど）。判断を選んでいない案は承認になります';
   return '<div class="card"><div class="card-head"><h2>AI の見直し案' + tip('承認して反映した案だけ、次の予測から効きます' + (hist ? '\nこれまでの見直し:\n' + hist : '')) + '</h2>'
     + (applied ? '<span class="chip ok" data-tip="' + esc(appliedTip) + '">反映済み</span>'
-      : withdrawn ? '<span class="chip off" data-tip="所有者が取り下げた案。反映しません">取り下げ</span>'
+      : withdrawn ? '<span class="chip off" data-tip="取り下げた案。反映しません">取り下げ</span>'
       : '<span class="chip warn" data-tip="' + esc(offNote || '承認者が判断して反映すると、次の予測から効きます') + '">未反映</span>')
     // 承認して反映は、判断を選ぶ表のすぐ上の見出しの右（2026-10-16 村井さん「適切な位置に」）
     + (edit ? actBtn('<button class="btn" ' + (busyNow ? 'disabled ' : '') + 'onclick="fcRvGo()">承認して反映</button>', goTip) : '') + '</div>'
@@ -4026,8 +4009,8 @@ function fcVersionTab(d, v){
   if (!r || r.planId !== S.fc.planId) return slot('fcVer', '公式版を読み込んでいます', 'fcLoadVersions()') || loading('公式版を読み込んでいます');
   var off = r.official, pend = r.pending, cur = r.current, html = '';
   // 測る専用の計画は公式版を出さない（サーバーも断る）。前に出した版があれば、一覧だけ見せる
-  if (r.measure && !(r.versions || []).length) return guide('explain', '測る専用の計画なので、公式版は出しません。');
-  if (r.measure) html += guide('explain', '測る専用の計画なので、公式版は出しません。前に出した版だけを並べます。');
+  if (r.measure && !(r.versions || []).length) return guide('explain', 'この計画では公式版を発行できません。');
+  if (r.measure) html += guide('explain', '過去に発行した公式版を表示しています。');
   // 予測がまだ無い（数字がそろっていない）ときは出せない（サーバーも受け付けない）。版も無ければ「-」の数字を並べず、よみの案内 1 枚
   var ready = !!(cur && cur.annual && isNum(cur.annual.p50));
   if (!off && !pend && !ready && !(r.versions || []).length) return guide('explain', r.can.submit ? '予測がまだありません。予測を実行してから、公式版として出してください。' : 'まだ公式版はありません。予算策定担当が予測を実行して公式版を出すと、ここに出ます。');
@@ -4225,7 +4208,7 @@ function anPlanTip(p, more){
 // ---- 1 カラムの分析 ----
 function anOverview(d){
   var plans = (d.plans || []).slice();
-  if (!plans.length) return guide('guide', 'FY' + esc(d.fy) + ' の計画はまだありません。所有者が計画を作ると、ここにメーカーが並びます。');
+  if (!plans.length) return guide('guide', 'FY' + esc(d.fy) + ' の計画はまだありません。');
   // 測る専用の計画（予算を立てない）は、合計・予算と比べるグラフ・全体の読み解きに入れない。外れ幅・読みのクセ・見直しの流れには入れる（版 10 の 3-9）
   var bud = plans.filter(function(p){ return !planMeasure(p); }), ms = plans.filter(planMeasure);
   var miss = [], parts = (bud.length ? [
@@ -4414,11 +4397,7 @@ function anDivChip(sp){
   return '<span class="chip" data-tip="' + esc('各社のぶれの合計 ' + anYen(sum) + ' → 全体のぶれ ' + anYen(all) + '\nメーカーが分かれているぶん、全体は締まっています') + '">分散効果 ' + (sum / all).toFixed(1) + ' 倍</span>';
 }
 /** 測る専用の計画の数（名前と、どこに入れたかはカーソルで）。無ければ空 */
-function anMeasure(ms){
-  if (!ms.length) return '';
-  return '<p class="note anx" data-tip="' + esc('測る専用の計画です。予算は立てず、合計・空模様・予算と比べるグラフには入れません（外れ幅・読みのクセ・見直しの流れには入れます）\n'
-    + ms.slice().sort(anByName).map(function(p){ return p.clientName; }).join('\n')) + '">測る専用 ' + ms.length + '</p>';
-}
+function anMeasure(){ return ''; }
 /** 合計の 4 つ（年間予算・着地の推定・予算を超える見込みのメーカー・霧）。大きな金額は短い形で、正確な金額はカーソルで */
 function anTotals(d, plans){
   var t = d.totals || {}, z = 1.2815515655446004;
@@ -4660,7 +4639,7 @@ function anBacktestCard(d){
     + '統計だけ（人の入力・AI・補正なし。4/1 に 1〜12 か月先）は同じ 4/1 の単純な方法と、本番（各月が始まる前の予測。多くは 1 か月先）は同じ時点の単純な方法（前年同月 × 伸び）と比べます。'
     + '時点の違う予測どうしは、情報の差だけで外れに差が出るので比べません。';
   // 前の数え方の回だけ（3 月の売上を 4/1 に使った・時点の違う方法と比べた回）: 動かし直すよう言う
-  if (!b.plans) return anCard('物差し', tip, '<p class="note">数え方を直す前の回だけです（' + (b.oldCalcRuns || 0) + ' 回）。所有者が物差しを動かし直すと、ここに出ます。</p>');
+  if (!b.plans) return anCard('物差し', tip, '<p class="note">数え方を直す前の回だけです（' + (b.oldCalcRuns || 0) + ' 回）。更新後に比較結果が表示されます。</p>');
   var ms = AN_BT_ORDER.map(function(k){ return b.methods.filter(function(m){ return m.method === k; })[0]; }).filter(Boolean);
   var rows = ms.map(function(m){
     var nm = AN_BT[m.method], band = m.method === 'STAT_ONLY' || m.method === 'LIVE';
@@ -5285,7 +5264,7 @@ function lrDecision(x, saved){
   if (/承認|approv/i.test(s)) return ['承認', 'ok', '承認しました' + on + '。まだ反映していません'];
   if (/却下|reject/i.test(s)) return ['却下', 'ng', '却下しました' + on];
   if (/保留|hold|defer/i.test(s)) return ['保留', 'warn', '保留にしました' + on];
-  if (/取り下げ/.test(s)) return ['取り下げ', 'off', '所有者が取り下げました' + on + '。反映しません'];
+  if (/取り下げ/.test(s)) return ['取り下げ', 'off', '取り下げられました' + on + '。反映しません'];
   // 判断を保存して、まだ反映していない（振り返りで保存した判断。AI の学びの「承認待ち」から）
   if (/承認/.test(saved || '')) return ['承認', 'ok', '判断を保存しました（承認）。まだ反映していません'];
   if (/却下/.test(saved || '')) return ['却下', 'ng', '判断を保存しました（却下）。まだ反映していません'];
@@ -5573,13 +5552,13 @@ function lrEffectsCard(e){
   var f2 = function(v){ return isNum(v) ? v.toFixed(2) : '-'; };
   var band = function(m, sd){ return isNum(m) && isNum(sd) ? f2(Math.max(0, m - 1.2816 * sd)) + '〜' + f2(m + 1.2816 * sd) : ''; };
   var say = function(b){ return !isNum(b) ? '' : b >= 0.9 && b <= 1.1 ? 'ほぼ押したとおり' : b > 1.1 ? '押したより強く効いた' : b < 0.1 ? 'ほとんど効いていない' : '押した分の ' + Math.round(b * 100) + '% が当たった'; };
-  var st = function(p){ return p.capped ? ['止めた', 'warn', '1 回に動ける幅（±0.2）か範囲（0〜2）で止めました。所有者が確かめてください'] : p.basis === 'POSTERIOR' ? ['学び中', 'ok', '締まった月の実績から学んでいます'] : ['初めの値', 'off', 'まだ締まった月の記録が少ないので、押したとおり（1）です'] };
+  var st = function(p){ return p.capped ? ['止めた', 'warn', '1 回に動ける幅（±0.2）か範囲（0〜2）の上限に達しました'] : p.basis === 'POSTERIOR' ? ['学び中', 'ok', '締まった月の実績から学んでいます'] : ['初めの値', 'off', 'まだ締まった月の記録が少ないので、押したとおり（1）です'] };
   var cell = function(p, b, sd, who){ return { h: f2(b), tip: who + 'の効き ' + f2(b) + '（' + say(b) + '）' + (band(b, sd) ? '\n80% の幅 ' + band(b, sd) : '') }; };
   var table = lrTable([['メーカー', 'lr-wr', LR_CM, '締まった月の点の数は、メーカーの下に出ます'],
     ['人の効き', 'num', LR_C1, '製品・メーカー全体・見解の入力で押した分が、実績でどれだけ当たったか（1 = 押したとおり・0 = 効いていない）'],
     ['AI の効き', 'num', LR_C1, 'AI の市場調査で押した分が、実績でどれだけ当たったか（1 = 押したとおり・0 = 効いていない）'],
     ['残る偏り', 'num', LR_C1, '補正を掛けた後に残る偏り（プラスは予測が低め）。見せるだけで、予測には掛けません（全体の偏りは「補正を学び直す」が直します）'],
-    ['状態', 'ctr', LR_C1, '学び中・初めの値・止めた（幅で止めたので所有者が確かめる）']],
+    ['状態', 'ctr', LR_C1, '学び中・初めの値・止めた（変更幅の上限に達した状態）']],
     ps.map(function(p){ var s0 = st(p);
       return [{ h: esc(lrName(p, multi)) + '<span class="lr-sub meta">' + (p.own || 0) + ' か月</span>', tip: lrName(p, multi) + '\nこのメーカーの点 ' + (p.own || 0) + ' か月・全体 ' + (p.points || 0) + ' か月（' + (p.makers || 0) + ' 社）' },
         cell(p, p.betaHuman, p.sdHuman, '人'), cell(p, p.betaAi, p.sdAi, 'AI'), { h: pct1(p.alpha), tip: '補正の後に残る偏り ' + pct1(p.alpha) + (isNum(p.alphaSd) ? '（±' + pct1(p.alphaSd).replace('+', '') + '）' : '') },
@@ -5660,7 +5639,7 @@ function lrCalCard(cal, health){
   }
   var path = cur.path || [], isBias = function(p){ return p.factor === 'bias_correction_factor' && isNum(p.new); };
   var src = function(p){ var auto = p.source === 'AUTO-MONTHLY', owner = p.source === 'OWNER-APPROVED';
-    return { short: auto ? '自動' : owner ? '所有者' : '見直し', full: auto ? '月次の自動学習' : owner ? '所有者が承認した値' : '承認した見直し案' }; };
+    return { short: auto ? '自動' : owner ? '承認' : '見直し', full: auto ? '月次の自動学習' : owner ? '承認した値' : '承認した見直し案' }; };
   var bias = path.filter(isBias), pts = [];
   // 倍率は「何 % 下げ・上げ」で見せる（振り返り・根拠と同じ言い方。元の倍率はカーソルで）
   var fx = function(v){ return qrValue('bias_correction_factor', v); }, raw = function(v){ return isNum(v) ? '（倍率 ' + v.toFixed(3) + '）' : ''; };
@@ -5674,7 +5653,7 @@ function lrCalCard(cal, health){
     : '<p class="note">この計画の補正は、まだ変わっていません</p>';
   var sel = '<select class="inp md" id="lr_cal" aria-label="メーカー" onchange="S.lr.calPlan=this.value;render()">' + cal.map(function(c){ return '<option value="' + esc(c.planId) + '"' + (c === cur ? ' selected' : '') + '>' + esc(lrName(c, multi)) + '</option>'; }).join('') + '</select>';
   var now = isNum(cur.factorNow) ? '<span class="chip" data-tip="' + esc('今の補正（予測に掛けている倍率 ' + cur.factorNow.toFixed(3) + '。1 = 補正なし）') + '">今 ' + esc(fx(cur.factorNow)) + '</span>' : '';
-  return lrCard('補正の履歴', 'これまでの外れ方から、予測をどれだけ下げ・上げているかの移り変わりです（0% = 補正なし）。月次の自動学習・承認した見直し案・所有者が承認した値で変わります。表には信頼度の変更も出ます',
+  return lrCard('補正の履歴', 'これまでの外れ方から、予測をどれだけ下げ・上げているかの移り変わりです（0% = 補正なし）。月次の自動学習・承認した見直し案・承認した値で変わります。表には信頼度の変更も出ます',
     chartOrTable('lrCal', chart, table), now + sel);
 }
 /** [値, 札] の並びを言う: 札が全部同じなら最後に 1 つ（「A・B（札）」）、違えばそれぞれに（「A（札1）・B（札2）」） */
@@ -5698,13 +5677,13 @@ function lrLandingCard(x){
   if (l.tauLearned) learned.push([T(l.tau), used(u.tauSet, u.tau, l.tau, landTau)]);
   if (l.wLearned) learned.push([W(l.w), used(u.wSet, u.w, l.w, landW)]);
   var kind = function(set){ return set ? '（承認した値）' : '（決まった値）'; };
-  var since = function(set, from){ return set ? '（所有者が承認' + (from ? ' ' + fcDate(from) + ' から' : '') + '）' : '（決まった値）'; };
+  var since = function(set, from){ return set ? '（承認' + (from ? ' ' + fcDate(from) + ' から' : '') + '）' : '（決まった値）'; };
   var now = '今の値: ' + tagJoin([[T(u.tau), kind(u.tauSet)], [W(u.w), kind(u.wSet)]]);
   var line = '全計画から学んだ値（試し）: ' + (learned.length ? tagJoin(learned) : 'まだありません');
   var tipText = '着地見込みの幅を決める 2 つの値です。年の水準のぶれ = 1 年の売上の水準が、予測からどれだけずれうるか。幅の倍率 = 月の見通しの幅を何倍に広げるか\n'
     + '今使っている値: ' + tagJoin([[T(u.tau), since(u.tauSet, u.tauFrom)], [W(u.w), since(u.wSet, u.wFrom)]]) + '\n'
     + '学んだ値は、全計画の締まった月から学んだ試しの値です（年の水準のぶれは締まった月が 3 か月以上ある計画が 3 つ以上・幅の倍率は 12 か月以上で学びます。今は ' + (l.planCount || 0) + ' 計画・' + (l.monthCount || 0) + ' か月）。'
-    + '所有者が承認するまで、着地見込み・予算に届く見込みには使いません';
+    + '承認するまで、着地見込み・予算に届く見込みには使いません';
   return lrCard('着地の幅の学び', tipText, '<p class="note">' + esc(now) + '</p><p class="note">' + esc(line) + '</p>');
 }
 // ==== END REGION: LEARNING ====

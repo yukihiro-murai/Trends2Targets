@@ -11,10 +11,10 @@
 
 /** 測る専用の計画で断る、計画への保存・実行（PLAN.EDIT・PLAN.RUN の action）と、その理由（始める前に断る・画面のボタンの説明） */
 const APP_MEASURE_REFUSED = {
-  'BUDGET.SAVE': '測る専用の計画なので、予算は立てません。',
-  'AI.RESEARCH': '測る専用の計画なので、市場は調べません（費用のため）。'
+  'BUDGET.SAVE': 'この計画では予算を設定できません。',
+  'AI.RESEARCH': 'この計画では市場調査を実行できません。'
 };
-const APP_MEASURE_VERSION_REFUSED = '測る専用の計画なので、公式版は出しません。';
+const APP_MEASURE_VERSION_REFUSED = 'この計画では公式版を発行できません。';
 
 /** 頼まれた印を、表に書く値にする（空 = 予算を立てる計画・MEASURE = 測る専用）。ほかの値なら止める */
 function appPlanPurposeOf_(v) {

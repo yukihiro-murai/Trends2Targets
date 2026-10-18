@@ -339,7 +339,7 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   assert.match(tips(lc), /4 計画・24 か月/);
   const lc2 = card({ learned: { tau: 0.2466, w: 1, tauLearned: true, wLearned: false, planCount: 4, monthCount: 6 }, used: { tau: 0.2466, w: 1, tauSet: true, wSet: false, tauFrom: '2026-10-08', wFrom: '' } });
   assert.match(lc2, /全計画から学んだ値（試し）: 年の水準のぶれ 24\.7%（承認して使っています）/, '幅の倍率は学べていなければ言わない');
-  assert.match(tips(lc2), /（所有者が承認 2026\/10\/08 から）/);
+  assert.match(tips(lc2), /（承認 2026\/10\/08 から）/);
   noCodes(lc.replace(/<[^>]*>/g, ' ') + tips(lc) + tips(lc2), '学び');
   // 本物の応答で、AI の学びの画面に出る（学べる計画が足りないときは出さない）
   const ai = env.call('apiAiLearning()');

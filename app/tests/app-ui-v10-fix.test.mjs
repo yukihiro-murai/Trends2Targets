@@ -112,7 +112,8 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
     assert.doesNotMatch(m, /<div class="k">最終予算<\/div>/, '最終予算の数字を出さない');
     assert.equal((m.match(/<div class="kpi[ "]/g) || []).length, 3, '下振れ・中心・上振れの 3 つ（同じ 4 つの格子のまま）');
     assert.match(m, /<h2>月ごとの見通し<span class="tip"/, '題は「月ごとの見通し」');
-    assert.match(m, /測る専用の計画なので、予算は立てません。/, '予算策定の画面は、予算を立てないことだけを言う');
+    assert.match(m, /この計画では予算を設定できません。/, '予算を設定できない理由は内部区分を出さずに伝える');
+    assert.doesNotMatch(m, /測る専用/, '内部区分は札や説明にも出さない');
     assert.doesNotMatch(m, /月ごとの見通しと予算|月ごとの見通しと最終予算/);
     assert.doesNotMatch(visible(m), /最終予算|採用予測|上乗せ/, '見える文字に予算の言葉を出さない（' + (table ? '表' : 'グラフ') + '）');
     assert.doesNotMatch(m, /fcBudget\(|fcSaveBudget\(\)/);
@@ -156,18 +157,19 @@ const task = (env, t) => { env.props.OWNER_TASK = JSON.stringify(t); return env.
   const home = env.call('apiHome()');
   run('B.home = __h; S.view = "home"', { __h: home });
   const says = JSON.parse(run('JSON.stringify(yomiSays(B.home))'));
-  const say = says.filter((x) => /計画はまだありません/.test(x.text));
+  const say = says.filter((x) => /の予算はまだありません/.test(x.text));
   assert.equal(say.length, 1, says.map((x) => x.text).join(' | '));
-  assert.equal(say[0].text, 'FY' + home.fy + ' の予算を立てる計画はまだありません（測る専用 1）。');
-  assert.ok(say[0].tip.startsWith('測る専用の計画です。'), '説明はカーソルで');
+  assert.equal(say[0].text, 'FY' + home.fy + ' の予算はまだありません。');
+  assert.equal(say[0].tip, '', '内部区分の説明はカーソルにも出さない');
   assert.equal(say[0].act, null, 'よみの話にリンクのボタンは付けない（行き来は左のメニューから。2026-10-13）');
   const h = run('viewHome()');
   assert.doesNotMatch(h, /計画はまだありません。所有者が/);
-  assert.match(h, /予算を立てる計画はまだありません（測る専用 1）/);
+  assert.match(h, /の予算はまだありません。/);
+  assert.doesNotMatch(h, /測る専用/);
   // 計画の無い年度は今までどおり
   const empty = JSON.parse(run('JSON.stringify(yomiSays({ fy: "2099", plans: __p, approvals: [], mine: [], system: null }))', { __p: home.plans }));
   assert.deepEqual(empty.filter((x) => /計画はまだありません/.test(x.text)).map((x) => [x.text, x.tip, x.act]),
-    [['FY2099 の計画はまだありません。所有者が計画を作ると、ここに見通しが出ます。', '', null]], 'ほかの年度の測る専用の計画は数えない');
+    [['FY2099 の計画はまだありません。', '', null]], 'ほかの年度の内部区分は数えず、運用説明も出さない');
 }
 
 // ==== 4. 小さな言葉と並び ====
