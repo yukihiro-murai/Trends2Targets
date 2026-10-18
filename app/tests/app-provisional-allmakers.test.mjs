@@ -85,6 +85,10 @@ function inputSnapshot(env, planId) {
 {
   const env = fixture(['通常保全製薬', '再利用製薬', '新規製薬']);
   const normal = seedNormal(env, '通常保全製薬'), reused = makeMeasure(env, '再利用製薬');
+  // Keep an eligible plan for the older bulk entry point, so its mutual
+  // exclusion check cannot be mistaken for an empty-queue validation error.
+  assert.equal(env.runJob('PLAN.RUN', { planId: reused, action: 'IMPORT.SALES' }).status, 'DONE');
+  assert.equal(env.runJob('PLAN.RUN', { planId: reused, action: 'SALES.AGGREGATE' }).status, 'DONE');
   const save = env.runJob('PLAN.EDIT', { planId: reused, action: 'INPUT.SAVE', args: { kind: 'opinions', rows: [
     { person: '既存入力者', ym: '2026-06', step: '5', conf: 0.8, note: '暫定実行でも残す' },
   ] } });
