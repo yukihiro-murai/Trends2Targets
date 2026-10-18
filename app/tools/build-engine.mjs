@@ -43,7 +43,7 @@ export const ENGINE_EXPORTS = [
   'applyDefaultAlignmentForAllSheets_', 'clearAllTabColors_', 'hideNonUserSheets_', 'saveInitialSetupSettings', 'getClientCandidatesForSetup_',
   // 物差し（Backtest.js。表の版 10 の 3-7・決定 9 (b)）: A-9（runForecastFYCore_）の統計の部分を、同じ順で外から呼ぶ。
   // 未確定の月の補完・傾向と季節の当てはめ・残りの分布・季節加重・混合のシミュレーション（中身は変えない）
-  'N_SIM', 'KNOWN_SPOT_OFFSET_RATE', 'KNOWN_SPOT_BG_SUPPRESS_RATE', 'normalizeClientName_', 'readSales48Months_', 'sumAcrossProducts_',
+  'N_SIM', 'KNOWN_SPOT_OFFSET_RATE', 'KNOWN_SPOT_BG_SUPPRESS_RATE', 'normalizeClientName_', 'classifyServiceType_', 'toDate_', 'isSameClient_', 'readSales48Months_', 'sumAcrossProducts_',
   'readModelTuningFromConfig_', 'createDefaultCalibrationState_', 'applyCalibrationToTuning_', 'getForecastContext_', 'adjustForUnclosedMonths_',
   'fitOpsModelTrendSeason_', 'buildResidualPool_', 'percentile_', 'readDlmEngineMode_', 'computeDlmFyForecast_', 'readDlmPrimarySpotCapBasis_',
   'forecastByResidualQuantiles_', 'fitSpotRecurringModel_', 'forecastMonteCarloMixed_', 'forecastSeasonalWeighted48_', 'readForecastClosedMonthMode_', 'buildHistoryAnnualAnchor_', 'buildHistorySpotTiming_', 'redistributeHistorySpotTiming_',

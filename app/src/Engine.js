@@ -583,3 +583,29 @@ function appProvisionalFreshSetupBook_(book, opts, orderKeys, clientName, fy, pe
     return {version:eng.VERSION,sourceSha256:eng.SOURCE_SHA256};
   });
 }
+
+/** Bounded source reader for the owner verified offline handoff. */
+function appOfflineEngineSourceInfo_(sourceId) {
+  return SpreadsheetApp.openById(sourceId).getSheets().filter(s=>s.getName().startsWith('*')&&s.getName().endsWith('_actual_value')).map(s=>({name:s.getName(),maxRows:s.getMaxRows(),maxColumns:s.getMaxColumns(),lastRow:s.getLastRow()}));
+}
+function appOfflineEngineSourcePart_(sourceId,meta,rowStart,count,projection) {
+  const sh=SpreadsheetApp.openById(sourceId).getSheetByName(meta.name);
+  appOfflineAssert_(sh&&sh.getLastRow()===meta.lastRow&&sh.getMaxRows()===meta.maxRows&&sh.getMaxColumns()===meta.maxColumns,'source dimensions changed');
+  return count>0?sh.getRange(rowStart,1,count,66).getValues().map(r=>projection.map(col=>{const e=appCellEncode_(r[col-1],'');return e[0]+e[1];})):[];
+}
+
+/** Exact legacy source classification on the frozen six-column projection. */
+function appOfflineEngineClassifyPart_(m,meta,rowStart,rows) {
+  const eng=appLegacyEngine_(appLegacyServices_({}, {asOfMs:m.asOfMs,seed:'offline-source-classification',actor:m.actor}));
+  appOfflineAssert_(typeof eng.classifyServiceType_==='function'&&typeof eng.toDate_==='function'&&typeof eng.isSameClient_==='function','native source classifier exports unavailable');
+  const out={};m.reservations.forEach(r=>out[r.reservationKey]=[]);
+  rows.forEach((cells,i)=>{
+    if(rowStart+i===1)return;
+    const r=cells.map(s=>appCellDecode_(s.charAt(0),s.slice(1))),rawClient=String(r[0]||'').trim(),service=eng.classifyServiceType_(String(r[1]||'').trim());if(service==='OTHER')return;
+    const dt=eng.toDate_(r[4])||eng.toDate_(r[3]);if(!dt)return;
+    const ym=Utilities.formatDate(new Date(dt.getFullYear(),dt.getMonth(),1),APP_TZ,'yyyy/MM');if(ym<m.sourceStart||ym>m.cutoff)return;
+    const amount=Number(r[5]||0);if(!isFinite(amount))return;
+    const record=[eng.normalizeClientName_(rawClient),service,String(r[2]||'').trim()||service,ym,amount];
+    m.reservations.forEach(x=>{if(eng.isSameClient_(rawClient,eng.normalizeClientName_(x.clientName)))out[x.reservationKey].push(record);});
+  });return out;
+}
