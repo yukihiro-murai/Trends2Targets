@@ -2982,6 +2982,22 @@ function fcMonthlyPlanning(p, ms, annual, shown){
   if (provisional && (p.provisional !== true || p.validationStatus !== 'in_progress')) return null;
   return valid && sum === p.annualTarget ? Object.assign({ version: p.version, points: points, annualTarget: p.annualTarget }, provisional ? { provisional: true } : {}) : null;
 }
+/** 結果は最新runの保存済み12か月を使う。OUTPUTの欠落や古い月額と混ぜない（予算は従来のOUTPUT）。 */
+function fcResultMonthly(d){
+  var l = d && d.latest, p = d && d.plan, fy = p && Number(p.fy), rows = d && d.monthly;
+  if (!l || !p || typeof p.planId !== 'string' || !p.planId || l.plan_id !== p.planId || typeof l.run_id !== 'string' || !l.run_id
+      || (S.fc.planId && S.fc.planId !== p.planId) || !/^\d{4}$/.test(String(p.fy)) || !Array.isArray(rows) || rows.length !== 12) return null;
+  var risk = function(r, keys){ return keys.every(function(k){ return isNum(r[k]) && r[k] >= 0; }) && r[keys[0]] <= r[keys[1]] && r[keys[1]] <= r[keys[2]]; };
+  if (!risk(l, ['annual_p10', 'annual_p50', 'annual_p90'])) return null;
+  var expected = Array.from({ length: 12 }, function(_, i){ var m = i + 4; return (m > 12 ? fy + 1 : fy) + '/' + ('0' + (m > 12 ? m - 12 : m)).slice(-2); });
+  var byMonth = {}, valid = true;
+  rows.forEach(function(r){
+    var match = r && /^(\d{4})[\/-](0[1-9]|1[0-2])$/.exec(String(r.ym || '')), key = match ? match[1] + '/' + match[2] : '';
+    if (!r || r.plan_id !== p.planId || r.run_id !== l.run_id || !key || expected.indexOf(key) < 0 || byMonth[key] || !risk(r, ['p10', 'p50', 'p90'])) { valid = false; return; }
+    byMonth[key] = r;
+  });
+  return valid && expected.every(function(ym){ return !!byMonth[ym]; }) ? expected.map(function(ym){ return Object.assign({}, byMonth[ym], { month: ym }); }) : null;
+}
 /** 月ごとの表とグラフ（mode = result: 見通しだけ・budget: 中心と予算の欄） */
 function fcMonthlyTab(d, v, mode){
   var html = '', l = d.latest, canPlan = fcCan('plan');
@@ -2989,13 +3005,16 @@ function fcMonthlyTab(d, v, mode){
   var annual = l ? { p10: l.annual_p10, p50: l.annual_p50, p90: l.annual_p90 } : (d.stored && d.stored.annual) || {};
   var O = v.boot && v.boot.output, sec = O && O.sections && O.sections[0];
   var ms = (sec && sec.monthly) || [];
+  var savedMonths = mode === 'result' ? fcResultMonthly(d) : null;
+  var invalidSavedMonths = mode === 'result' && d.monthly !== undefined && !savedMonths;
+  if (savedMonths) { ms = savedMonths; sec = { annual: annual, monthly: ms }; }
   // 予測がまだ無い計画（サーバーは空の値の行を返す）: 「-」の数字と空の表を並べず、よみの案内 1 枚
   var ran = !!l || isNum(annual.p50) || ms.some(function(m){ return isNum(m.p50); });
   var sh = d.shadow && d.shadow.planId === S.fc.planId ? d.shadow : null, al = sh && sh.aligned;   // 試しの数（年度の見込み・予算に届く見込み。保存している数字は変えない）
   // 本番の計画（判断 10・24）: 年度の下振れ・中心・上振れは画面に出す年度の値（shadow.annual）。旧来の計算の年度合計は説明に出す
   var lv = sh && sh.live && sh.annual ? sh.annual : null, ka = lv || annual, lvBand = lv ? fcLiveBandTip(lv, al) : '';
   if (!ran || !sec) return guide(canPlan ? 'explain' : 'observe', canPlan ? 'まだ予測がありません。予測準備で実行すると、ここに出ます。' : 'まだ予測がありません。');
-  var planning = mode === 'result' ? fcMonthlyPlanning(d.planning, ms, annual, ka) : null;
+  var planning = mode === 'result' && !invalidSavedMonths ? fcMonthlyPlanning(d.planning, ms, annual, ka) : null;
   var planningV2 = !!planning && planning.version === 'HISTORY_MONTHLY_POINT_V2';
   var planningTip = planningV2 ? '過去の実績に基づく月別の見込額。月中央値とは異なる' : '年間の中心額を過去の月別傾向で配分した見込額。月中央値とは異なる';
   if (planning && planning.provisional) planningTip = '暫定：過去の実績のみから計算した月別の見込額。精度は検証中です';
