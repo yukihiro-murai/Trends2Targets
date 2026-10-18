@@ -152,6 +152,21 @@ function appForecastPlanningOf_(raw, fy, annualRawP50) {
       timingKeys.forEach(k => { out[k] = Array.isArray(value[k]) ? value[k].slice() : value[k]; });
     }
   }
+  if (out.method === 'W_COMPONENT_EVENT_HALF_SHAPE_BLEND') {
+    const half = [0, 1].map(h => out.months.slice(h * 6, h * 6 + 6).reduce((s, m) => s + m.point, 0));
+    if (!v2 || value.provisional !== true || value.validationStatus !== 'in_progress' ||
+        !Array.isArray(value.halfTargets) || value.halfTargets.length !== 2 ||
+        !value.halfTargets.every((n, h) => integer(n) && n === half[h]) ||
+        !Array.isArray(value.provisionalWeights) || value.provisionalWeights.length !== 2 ||
+        !value.provisionalWeights.every(n => finite(n) && n >= 0 && n <= 1) ||
+        !Array.isArray(value.provisionalFolds) || value.provisionalFolds.length > 2 ||
+        !value.provisionalFolds.every((y, i, a) => Number.isInteger(y) && y >= 2024 && y < year && (!i || y > a[i - 1])) ||
+        ['complete_S', 'validated_event_calendar'].indexOf(value.provisionalMode) < 0) return null;
+    Object.assign(out, { provisional: true, validationStatus: 'in_progress', halfTargets: half,
+      provisionalWeights: value.provisionalWeights.slice(), provisionalFolds: value.provisionalFolds.slice(),
+      provisionalMode: value.provisionalMode });
+    if (typeof value.provisionalRescue === 'string' && /^[A-Za-z0-9_]{1,120}$/.test(value.provisionalRescue)) out.provisionalRescue = value.provisionalRescue;
+  }
   return appUtf8Bytes_(JSON.stringify(out)) <= 4000 ? out : null;
 }
 
@@ -163,6 +178,7 @@ function appForecastRunBuild_(ctx, p, job) {
   const plan = appPlanOf_(p.planId);
   const jobStart = new Date().getTime();
   return appWithLock_(() => {
+    appProvisionalRequireWritable_(p);
     if (!p.build) appJournalRecover_(ctx);   // 前の保存が途中で止まっていれば、先に書き終える
     const inputHash = appPlanInputHash_(plan.plan_id);
     if (p.build && inputHash !== p.inputHash) throw new Error('組み立てている間にデータ本体が変わりました。もう一度実行してください。');
@@ -185,6 +201,7 @@ function appForecastRunCalc_(ctx, p) {
   const plan = appPlanOf_(p.planId);
   const t0 = new Date().getTime();
   return appWithLock_(() => {
+    appProvisionalRequireWritable_(p);
     if (!p.build || !appScratchOwnedBy_(p.build.token)) throw new Error('計算用ブックがほかの処理で使われました。もう一度実行してください。');
     if (appPlanInputHash_(plan.plan_id) !== p.inputHash) throw new Error('予測を計算している間にデータ本体が変わりました。もう一度実行してください。');
     const scratch = appWorkScratch_(plan);
@@ -196,7 +213,8 @@ function appForecastRunCalc_(ctx, p) {
     const eff = appLearnEffects_(ctx, plan, p.asOfMs);
     const run = appRunLegacyForecast_(scratch, { asOfMs: p.asOfMs, seed: eng => appForecastSeed_(plan, forecastInputHash, eng), uuidSeed: p.runId,
       confirms: p.confirms || [], actor: ctx.actor, triWeights: tri.weights, effects: appEffForEngine_(eff),
-      allowMissingUserInputs: appPlanIsMeasure_(plan) });   // 測る専用は過去の売上だけでも試す。今ある入力はそのまま読む
+      allowMissingUserInputs: appPlanIsMeasure_(plan),
+      provisionalHistoryPoint: appPlanIsMeasure_(plan) });   // 追加入力なしの計画には履歴のみの暫定月額を保存する。入力の値は変更しない
     if (!run.ok) return { needConfirm: run.needConfirm, planId: plan.plan_id, audit: { entityId: plan.plan_id, clientId: plan.client_id } };
     const headline = appForecastHeadline_(scratch);
     const planning = appForecastPlanningOf_(run.planning, plan.fy, headline && headline.annual && headline.annual.p50);
@@ -213,6 +231,7 @@ function appForecastRunSave_(ctx, p) {
   const plan = appPlanOf_(p.planId);
   const t0 = new Date().getTime();
   return appWithLock_(() => {
+    appProvisionalRequireWritable_(p);
     appJournalRecover_(ctx);   // 書きかけの控えを先に書き終える（途中の表から控えを作らない）
     if (!p.build || !appScratchOwnedBy_(p.build.token)) throw new Error('計算用ブックがほかの処理で使われました。もう一度実行してください。');
     if (appPlanInputHash_(plan.plan_id) !== p.inputHash) throw new Error('予測を計算している間にデータ本体が変わりました。もう一度実行してください。');

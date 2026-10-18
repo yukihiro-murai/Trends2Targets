@@ -543,6 +543,7 @@ function appPlanRunBuild_(ctx, p) {
   const plan = appPlanOf_(p.planId);
   const jobStart = new Date().getTime();
   return appWithLock_(() => {
+    appProvisionalRequireWritable_(p);
     if (!p.build) appJournalRecover_(ctx);
     const inputHash = appPlanInputHash_(plan.plan_id);
     if (p.build && inputHash !== p.inputHash) throw new Error('組み立てている間にデータ本体が変わりました。もう一度実行してください。');
@@ -566,6 +567,7 @@ function appPlanRunCalc_(ctx, p) {
   const plan = appPlanOf_(p.planId);
   const t0 = new Date().getTime();
   return appWithLock_(() => {
+    appProvisionalRequireWritable_(p);
     if (!p.build || !appScratchOwnedBy_(p.build.token)) throw new Error('計算用ブックがほかの処理で使われました。もう一度実行してください。');
     if (appPlanInputHash_(plan.plan_id) !== p.inputHash) throw new Error('計算している間にデータ本体が変わりました。もう一度実行してください。');
     const fetcher = act.ai ? appAiFetcher_(p.actionId, appAiDeadline_(t0), p.aiFreshAfter) : null;
@@ -604,6 +606,7 @@ function appPlanRunSave_(ctx, p, job) {
   const plan = appPlanOf_(p.planId);
   const t0 = new Date().getTime();
   return appWithLock_(() => {
+    appProvisionalRequireWritable_(p);
     appJournalRecover_(ctx);   // 書きかけの控えを先に書き終える（途中の表から控えを作らない）
     if (!p.build || !appScratchOwnedBy_(p.build.token)) throw new Error('計算用ブックがほかの処理で使われました。もう一度実行してください。');
     if (appPlanInputHash_(plan.plan_id) !== p.inputHash) throw new Error('計算している間にデータ本体が変わりました。もう一度実行してください。');

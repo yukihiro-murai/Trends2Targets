@@ -3,7 +3,7 @@
  * app-v10-measure.test.mjs — 表の版 10 の測る専用の印（PLANS.purpose = MEASURE。SCHEMA_PLAN_v10-12_JA.md の 3-9・9 章 9。PlanPurpose.js）。
  *   1. 計画を作るとき（createPlan の purpose）: 印が PLANS に入り、監査に残る。打ち間違いは始める前に断る。所有者でなければ断る
  *   2. 後から（setPlanPurpose）: 所有者だけ・監査に前と後・同じ印なら書かない・締めた年度・承認待ちの公式版・計画の数字（ENG_*）は変えない
- *   3. 5 計画まで（6 つ目は付け直しでも作るときでも断る。保管をやめた計画は数えない）
+ *   3. 全メーカー用の100計画上限（超過は付け直しでも作るときでも断る。保管をやめた計画は数えない）
  *   4. 予算の保存・公式版を出す・手で動かす A-4 を断る（始める前・途中で印が付いたときも）。計画の画面は断る操作を止めている操作と同じに出す
  *   5. 週 1 回の自動の AI 調査・着地の τ・w の学び・ホームと分析の合計に入らない（行には印つきで残る）
  *   6. 年度を締める条件（公式版）に入らない・年度の控えには入る
@@ -137,21 +137,23 @@ const VERSION_REFUSED = 'この計画では公式版を発行できません。'
   assert.equal(plan(env, planA).purpose, 'MEASURE', '書かない');
 }
 
-// ==== 3. 測る専用は 5 計画まで（付け直しでも作るときでも。保管をやめた計画は数えない） ====
+// ==== 3. 全メーカーの暫定計画を100件まで許容。超過とARCHIVED除外は従来どおり ====
 {
   const env = setUpEnv();
   const fy = env.run('appFy_(new Date())');
-  assert.equal(env.call('APP_MEASURE_PLAN_MAX'), 5);
+  assert.equal(env.call('APP_MEASURE_PLAN_MAX'), 100);
+  // 容量だけを使う計画は本体のPLANS行で作る。計算用ブックを95個複製する必要はない。
+  env.call(`appInsertRows_('PLANS', Array.from({length:95}, (_,i)=>({plan_id:'PL-cap-'+i,fy:2026,state:'ACTIVE',purpose:'MEASURE'})))`);
   const ids = ['甲', '乙', '丙', '丁', '戊', '己'].map((c, i) => env.seedPlan(env.makeBook('B' + i, planBook(c + '製薬', fy))));
   ids.slice(0, 5).forEach((id) => assert.equal(task(env, { action: 'setPlanPurpose', planId: id, purpose: 'MEASURE' }).result.changed, true));
-  assert.throws(() => task(env, { action: 'setPlanPurpose', planId: ids[5], purpose: 'MEASURE' }), /測る専用の計画は 5 つまでです（今 5 つ）/);
+  assert.throws(() => task(env, { action: 'setPlanPurpose', planId: ids[5], purpose: 'MEASURE' }), /測る専用の計画は 100 つまでです（今 100 つ）/);
   assert.equal(plan(env, ids[5]).purpose, '');
   assert.equal(audits(env, 'PLAN.PURPOSE', 'END').slice(-1)[0].result, 'FAILED', '断ったことも監査に残る');
   // 作るときも同じ（組み立ての前に断る）
   const r = task(env, { action: 'createPlan', clientName: '庚製薬', fy, peopleCsv: '鷹野', purpose: 'MEASURE' });
   const st = finish(env, r.result.jobId);
   assert.equal(st.status, 'FAILED');
-  assert.match(st.error, /5 つまで/);
+  assert.match(st.error, /100 つまで/);
   assert.equal(env.table('PLANS').filter((x) => x.client_label === '庚製薬').length, 0);
   // すでに測る専用の計画の付け直し（同じ印）は数に関係なく通る
   assert.equal(task(env, { action: 'setPlanPurpose', planId: ids[0], purpose: 'MEASURE' }).result.changed, false);

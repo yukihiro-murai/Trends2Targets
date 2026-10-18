@@ -228,7 +228,7 @@ function planBook(client, fy) {
   assert.match(pv.reason, /公式版のない計画/);
   assert.equal(env.call('appPlanIsMeasure_({ purpose: "MEASURE" })'), true);
   assert.equal(env.call('appPlanIsMeasure_({ purpose: "" })'), false);
-  assert.equal(env.call('APP_MEASURE_PLAN_MAX'), 5);
+  assert.equal(env.call('APP_MEASURE_PLAN_MAX'), 100);
   env.call(`appWithLock_(() => appUpdateByKey_('PLANS', { plan_id: '${planM}' }, { purpose: 'MEASURE' }, APP_ROW_UNCHECKED, '${OWNER}'))`);
   pv = env.task('yearPreview(__in)', { __in: { fy: past } });
   assert.equal(pv.canClose, true, '測る専用の計画は公式版が無くても締められる: ' + pv.reason);

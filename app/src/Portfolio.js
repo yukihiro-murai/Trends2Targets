@@ -47,7 +47,7 @@ function appPlanCreateCheck_(p) {
   if (client && appReadTable_('PLANS').some(x => x.client_id === client.client_id && String(x.fy) === String(fy) && x.state !== 'ARCHIVED')) {
     throw new Error(appClientDisplayName_(client.client_name) + ' の FY' + fy + ' の計画は、すでにあります。');
   }
-  if (purpose === APP_PLAN_MEASURE) appMeasureRequireRoom_(appReadTable_('PLANS'), '');   // 測る専用は 5 計画まで
+  if (purpose === APP_PLAN_MEASURE) appMeasureRequireRoom_(appReadTable_('PLANS'), '');   // 測る専用は 100 計画まで
   return { clientName: clientName, fy: fy, peopleCsv: people.join(','), client: client, normalized: normalized, purpose: purpose };
 }
 
@@ -55,6 +55,7 @@ function appPlanCreateCheck_(p) {
 function appPlanCreateBuild_(ctx, p) {
   const t0 = new Date().getTime();
   return appWithLock_(() => {
+    appProvisionalRequireWritable_(p);
     appJournalRecover_(ctx);
     const c = appPlanCreateCheck_(p);
     appMeasureRequireOwner_(ctx, c.purpose);
@@ -74,6 +75,7 @@ function appPlanCreateBuild_(ctx, p) {
 function appPlanCreateSave_(ctx, p) {
   const t0 = new Date().getTime();
   return appWithLock_(() => {
+    appProvisionalRequireWritable_(p);
     appJournalRecover_(ctx);
     if (!appScratchOwnedBy_(p.token)) throw new Error('計算用ブックがほかの処理で使われました。もう一度作ってください。');
     const c = appPlanCreateCheck_(p);   // 作っている間に、同じ計画がほかで作られていないか（測る専用の数も）
@@ -222,6 +224,8 @@ function appPortfolioData_() {
     const stored = o[26] ? { p10: num(o[26][1]), p50: num(o[26][2]), p90: num(o[26][3]) } : {};
     const latest = rs[0] || null;
     const prev = rs[1] || null;
+    const point = latest ? appForecastPlanningOf_(latest.planning_json, p.fy, latest.annual_p50) : null;
+    const prevPoint = prev ? appForecastPlanningOf_(prev.planning_json, p.fy, prev.annual_p50) : null;
     // 旧来の計算の年度合計（最新の予測の記録、無ければ OUTPUT の 26 行）。本番の計画でも記録はこのまま
     const legacy = { p10: latest ? latest.annual_p10 : stored.p10 === undefined ? null : stored.p10,
       p50: latest ? latest.annual_p50 : stored.p50 === undefined ? null : stored.p50,
@@ -256,6 +260,8 @@ function appPortfolioData_() {
       p10: shown ? shown.p10 : legacy.p10, p50: shown ? shown.p50 : legacy.p50, p90: shown ? shown.p90 : legacy.p90,
       alignedLive: !!shown, annualBand: shown ? shown.band : '', legacyAnnual: legacy, annualShown: shown,
       prevP50: prev ? prev.annual_p50 : null,
+      forecastPointAnnual: point ? point.annualTarget : null, forecastPointProvisional: !!(point && point.provisional),
+      previousForecastPointAnnual: prevPoint ? prevPoint.annualTarget : null,
       lastRunAt: latest ? latest.finished_at : '', runs: rs.length,
       budget: budget,
       mape: a.length && aBase > 0 ? a.reduce((s, x) => s + x.err, 0) / aBase : null, mapeMonths: a.length,

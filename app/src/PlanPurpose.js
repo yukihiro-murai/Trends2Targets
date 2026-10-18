@@ -2,7 +2,7 @@
  * PlanPurpose.js — 測る専用の計画（PLANS.purpose = MEASURE。SCHEMA_PLAN_v10-12_JA.md の 3-9・9 章 9。2026-10-08 村井さん承認「版10はおすすめで」）。
  * 予算を立てないメーカー・前の年度の計画に付ける印。過去の売上だけを取り込み、物差し（BACKTEST）の点を増やすために使う。
  * - 付けるのは所有者だけ: 計画を作るとき（apiOwnerTask の createPlan の purpose）か、後から（setPlanPurpose。監査に前と後の値が残る）。
- *   測る専用は 5 計画まで（APP_MEASURE_PLAN_MAX。保管をやめた計画は数えない。締めた年度の計画は数える＝セルを使うため）。6 つ目は断る。
+ *   測る専用は 100 計画まで（APP_MEASURE_PLAN_MAX。保管をやめた計画は数えない。締めた年度の計画は数える＝セルを使うため）。上限を超える作成は断る。
  * - 印の付いた計画は、次の操作を断る: 予算の保存・公式版を出す・手で動かす A-4（費用のため）。週 1 回の自動の AI 調査の候補にもしない（AutoResearch.js）。
  * - 入れないもの: 着地見込みの全計画の学び（τ・w。Portfolio.js）・ホームと分析の合計（Home.js・Insights.js）・年度を締める条件の公式版（V10.js）。
  *   年度の控えには計画の行として入る（YearSnapshot.js がほかの計画と同じく写す）。
@@ -76,7 +76,7 @@ function appBudgetPlanRows_(rows) {
 
 /**
  * setPlanPurpose（apiOwnerTask。所有者だけ）: 計画の印を付ける・外す。年度を締めた計画・書きかけの保存があるときは止める。
- * 測る専用にするときは、5 計画の上限と、承認待ちの公式版が無いことを確かめる。同じ印なら書かない。
+ * 測る専用にするときは、100 計画の上限と、承認待ちの公式版が無いことを確かめる。同じ印なら書かない。
  * 返り値: { plan: { planId, purpose, rowVersion }, changed, before: { purpose } }（監査の終わりに前と後が残る）
  */
 function appSetPlanPurpose_(ctx, input) {

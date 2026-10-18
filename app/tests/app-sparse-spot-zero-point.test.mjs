@@ -100,9 +100,13 @@ function forecast(clientName) {
 const active = forecast(ACTIVE);
 assert.ok(active.annualRawP50 > 0, '年間中央値が正でも月中央値は全0となる疎な履歴');
 assert.equal(active.point.inactive, false);
-assert.equal(active.point.spotFallback, 'quarter_mean');
-assert.deepEqual(active.point.months.map(m => m.point), [0, 0, 0, 0, 0, 200, 0, 0, 300, 0, 0, 400]);
-assert.equal(active.point.annualTarget, 900, '履歴の金額と過去検証の重みによる点額であり、固定の最低額ではない');
+// MEASUREの主線は暫定Wへ変更。旧V5の四半期位相/900円は専用helper試験で保持する。
+assert.equal(active.point.method, 'W_COMPONENT_EVENT_HALF_SHAPE_BLEND');
+assert.equal(active.point.provisional, true);
+assert.equal(active.point.validationStatus, 'in_progress');
+assert.equal(active.point.months.reduce((s,m)=>s+m.point,0), active.point.annualTarget);
+assert.deepEqual(active.point.halfTargets,[0,1].map(h=>active.point.months.slice(h*6,h*6+6).reduce((s,m)=>s+m.point,0)));
+assert.ok(active.point.annualTarget>0, '固定floorではなく疎な実績の完成方策を保存する');
 assert.ok(active.point.months.some(m => m.point > 0), '旧月中央値が全0でも履歴由来の正額を保存する');
 
 const inactive = forecast(INACTIVE);

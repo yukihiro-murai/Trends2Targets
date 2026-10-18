@@ -248,7 +248,8 @@ function appActiveJobOf_(email) {
 // ---- 始める・動かす・状態を返す ----
 
 /** 画面から渡せる項目（ほかは裏の処理どうしの受け渡し専用。画面から渡されたら捨てる） */
-const APP_JOB_CLIENT_FIELDS = ['planId', 'confirms', 'action', 'args', 'inputHash', 'clientName', 'fy', 'peopleCsv', 'purpose'];
+const APP_JOB_CLIENT_FIELDS = ['planId', 'confirms', 'action', 'args', 'inputHash', 'clientName', 'fy', 'peopleCsv', 'purpose',
+  'provisionalBatchId', 'provisionalIndex', 'provisionalStage', 'provisionalIntentId'];
 
 function appJobClientPayload_(payload) {
   const out = {};
@@ -434,8 +435,12 @@ function appRunJob_(id) {
     if (spec.planScoped) appRequireOpenPlan_(job.payload && job.payload.planId);
     const refused = appMeasureJobRefusal_(job.kind, job.payload);   // 途中で測る専用の印が付いた計画も止める
     if (refused) throw new Error(refused);
+    appProvisionalRequireWritable_(job.payload);
     const res = appJobExecute_(ctx, job);
     if (res && res.__next) {
+      ['provisionalBatchId', 'provisionalIndex', 'provisionalStage', 'provisionalIntentId'].forEach(k => {
+        if (job.payload && job.payload[k] !== undefined) res.__next.payload[k] = job.payload[k];
+      });
       // 続きの処理: 次の処理を待ち行列に入れ、この処理の結果は「続きあり」にする
       // 次の処理を入れるのと同じロックの中で、この処理を「続きあり」で終わりにする（この後で止まっても、画面は次の処理を待てる）
       const next = appWithLock_(() => {
@@ -470,6 +475,7 @@ function appRunJob_(id) {
   try { if (!nextJobId) appAutoResearchAfterJob_(done, status); } catch (e) { Logger.log('自動の AI 調査の続き: ' + (e && e.message ? e.message : e)); }
   // 全部の計画をまとめて動かしている途中なら、次の計画へ（Bulk.js。失敗・確認待ちでも次へ進む）。処理の結果には関係しない
   try { if (!nextJobId) appBulkAfterJob_(done, status); } catch (e) { appLogError_('BULK.NEXT', e, { requestId: id, actor: job.requestedBy }); }
+  try { if (!nextJobId) appProvisionalAfterJob_(done, status); } catch (e) { appLogError_('PROVISIONAL.NEXT', e, { requestId: id, actor: job.requestedBy }); }
   return { id: id, status: status, nextJobId: nextJobId };
 }
 

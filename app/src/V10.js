@@ -11,9 +11,9 @@
 const APP_LOG_PREFIX = { INPUT_LOG: 'INL', AI_RESEARCH_LOG: 'AIR', LAYER_EFFECTS: 'LEF', HIT_RECORDS: 'HIT', LEARNING_LOG: 'LRN',
   PERSON_LINKS: 'PLK', BACKTEST: 'BTP', FORECAST_METHODS: 'FMR', METHOD_WEIGHTS: 'MWT', EFFECT_COEFS: 'EFC', PUSH_RAW: 'PSH' };
 
-/** 測る専用の計画（PLANS.purpose。3-9）と、その数の上限（9 章 9: まず 5 計画） */
+/** 履歴のみの計画（PLANS.purpose）。全メーカーの暫定予測を作れる範囲へ拡大（2026-10-18 利用者承認）。 */
 const APP_PLAN_MEASURE = 'MEASURE';
-const APP_MEASURE_PLAN_MAX = 5;
+const APP_MEASURE_PLAN_MAX = 100;
 
 /** 版 10 の一度だけの写し（名前だけ。関数は動かすときに探す）。それぞれの中身は、その記録を作るときに書く */
 const APP_V10_BACKFILLS = ['appV10BackfillInputLog_', 'appV10BackfillAiResearchLog_', 'appV10BackfillHitRecords_'];

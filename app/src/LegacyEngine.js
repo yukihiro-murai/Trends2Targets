@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.7-dev、SHA-256 c430e2e2f75741abbb0ae733136ed4e843178b3dc05d834ccd0e07aa0c54bba0）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.8-dev、SHA-256 0cb6028ef7b63cfb20b72679a5d82a71d9908632dfa6240f59f5e9ffe0e2f364）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -31,7 +31,7 @@ function appLegacyEngine_(__appSvc) {
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.7-dev';
+const VERSION = '2.7.8-dev';
 // FY2024で固定し既知のFY2025/FY2026上期で確認。月点の合計は年度P50とは別。
 const HISTORY_MONTHLY_POINT_METHOD = 'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
@@ -560,7 +560,7 @@ function isSameClient_(a, b) {
 
 
 /** ====== 予測コア ====== */
-function runForecastFYCore_(fy, clientName) {
+function runForecastFYCore_(fy, clientName, opt) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sales = ss.getSheetByName(SHEETS.SALES_MONTHLY);
   if (!sales) throw new Error('SALES_MONTHLYがありません。');
@@ -842,7 +842,8 @@ function runForecastFYCore_(fy, clientName) {
     productWeightWarning = `PRODUCT に有効行がありますが、kProd が全月1.0です。製品名キー/構成比を確認してください（${productsText}）。`;
   }
 
-  const monthlyPlanning = buildHistoryMonthlyPlanning_(mixed, months, salesData, { closedMonthMode, sourceByMonth });
+  const monthlyPlanning = buildHistoryMonthlyPlanning_(mixed, months, salesData, { closedMonthMode, sourceByMonth,
+    provisionalHistoryPoint: !!(opt && opt.provisionalHistoryPoint === true) });
   return {
     runId: Utilities.getUuid(),
     runAt: runDate,
@@ -5123,6 +5124,27 @@ function buildHistoryMonthlyPlanning_(mixed, months, history, opt) {
   }
   const annualRawP50 = percentile_(aggregateAnnualSim_(matrix), 0.5), means = matrix.map(meanArr_);
   if (!isFinite(annualRawP50) || annualRawP50 < 0 || means.some(v => !isFinite(v))) { meta.reason = 'invalid_point_annual'; return meta; }
+  if (opt.provisionalHistoryPoint === true) {
+    try {
+      const headers = history && history.headerMonths || [];
+      const base = history && history.baseSeries48 || [], spot = history && history.spotSeries48 || [];
+      if (headers.length !== base.length || base.length !== spot.length) throw new Error('Invalid provisional history dimensions');
+      const rows = headers.map((m, i) => ({ ym: fmtYM_(m).replace('/', '-'), base: base[i], spot: spot[i] }));
+      const q = appHistoryProvisionalForecast_(rows, months[0].getFullYear());
+      // q.applied は月形状の再配分だけの印。完全Sを保持する疎な経路も、有効な月次点として保存する。
+      return Object.assign(meta, { applied: true, reason: '', method: q.method,
+        provisional: true, validationStatus: 'in_progress', annualRawP50, annualTarget: q.total,
+        annualBasis: 'sum_monthly_points', trainingThroughYm: anchor.trainingThroughYm,
+        cleanHistoryStartYm: q.profileYears[0] + '/04', historyYearsUsed: q.profileYears.slice(),
+        halfTargets: q.halfTargets.slice(), provisionalWeights: q.weights.slice(),
+        provisionalFolds: q.selectedFoldFYs.slice(), provisionalMode: q.mode,
+        provisionalRescue: String(q.rescue || '').slice(0, 120), inactive: !q.active,
+        months: months.map((m, i) => ({ ym: fmtYM_(m), point: q.points[i],
+          share: q.total > 0 ? q.points[i] / q.total : 0, mean: means[i] })) });
+    } catch (e) {
+      Logger.log('暫定の月次予測は既存方式へ戻します: ' + String(e && e.message || e));
+    }
+  }
   let point;
   try { point = estimateHistoryMonthlyPoint_(months, history, opsMatrix, HISTORY_MONTHLY_POINT_METHOD); }
   catch (e) { Logger.log('月次点予測の数値検証で未適用: ' + String(e && e.message || e)); meta.reason = 'invalid_point_amounts'; return meta; }
@@ -7618,7 +7640,7 @@ function runPhase1Forecast(opt) {
     validateRequiredUserInputsOrThrow_(opt);
     runHierarchicalA9AlertsOrThrow_(fy);
     syncSalesFromSalesInput_(fy, client);
-    const result = runForecastFYCore_(fy, client);
+    const result = runForecastFYCore_(fy, client, opt);
     const aiAllZero = ['Market','Competitor','Channel','DX'].every(k => Math.abs(Number((result.aiScores || {})[k] || 0)) < 1e-9);
     if (aiAllZero) SpreadsheetApp.getActiveSpreadsheet().toast('⚠ AIスコアが全topicで0.0です。AI_RESEARCH_STRUCTUREDの形式を確認してください。', MENU_NAME, 8);
     writeOutputFY_(result);
@@ -10473,6 +10495,1248 @@ function appendCalibrationHistory_(client, quarterLabel, reviewId, factorName, o
 
 
 
+// ===== 履歴のみの暫定月額（2026-10-18 利用者の明示承認。MC・予算・公式版は変更しない） =====
+/**
+ * Private immutable-W GAS numerical port. PROVISIONAL planning, accuracy gates failed.
+ * No Node/VM/fs/RNG/current-time/name/target-outcome dependency in the policy.
+ * Reuses only same-core pure native fitting primitives with fixed TRI prior weights.
+ * Numerical formula/operator order is preserved; diagnostic support SHA fields are omitted.
+ */
+function appHistoryProvisionalNativeApi_() {
+ return {fitOpsModelTrendSeason_:fitOpsModelTrendSeason_,buildResidualPool_:buildResidualPool_,percentile_:percentile_,
+  buildTriangulationBase_:buildTriangulationBase_,forecastByResidualQuantiles_:forecastByResidualQuantiles_,
+  fitSpotRecurringModel_:fitSpotRecurringModel_,TRI_PRIOR_WEIGHTS:TRI_PRIOR_WEIGHTS};
+}
+function appHistoryProvisionalNativeModel_(e,rows,startFY,fy) {
+ const y=rows.map(h=>h.base),spot=rows.map(h=>h.spot),start=new Date(startFY,3,1),closed=new Date(fy,2,1);
+ const model=e.fitOpsModelTrendSeason_(y),residualPct=e.buildResidualPool_(y,model,start,closed),q={p10:e.percentile_(residualPct,.1),p50:e.percentile_(residualPct,.5),p90:e.percentile_(residualPct,.9)};
+ const tri=e.buildTriangulationBase_(y,model,q.p50,e.TRI_PRIOR_WEIGHTS);model.triBase=tri.base;
+ const analyticBaseRef=e.forecastByResidualQuantiles_(model,Array(12).fill(0),q).p50.map(v=>Math.max(0,v));
+ const background=e.fitSpotRecurringModel_(spot,start,closed,analyticBaseRef,{});
+ return {observedMonths:y.length,nativeBASE:y,nativeSPOT:spot,model,residualPct,q,tri,analyticBaseRef,background,weights:e.TRI_PRIOR_WEIGHTS};
+}
+function appHistoryProvisionalFactories_(nativeApi) {
+// Frozen numerical source: median-improvement/candidate_models/forecast-candidates.mjs
+const m0 = (function(){
+
+/** Pure history-only candidates for frozen MONTHLY_MEDIAN_IMPROVEMENT_V2.
+ * No target outcomes, company identifiers, or global data are accepted.
+ */
+const sum=a=>a.reduce((s,v)=>s+v,0);
+function median(a){if(!a.length)throw new Error('No median observations');const b=[...a].sort((a,b)=>a-b),pos=(b.length-1)/2,i=Math.floor(pos),f=pos-i;return b[i]*(1-f)+b[Math.min(i+1,b.length-1)]*f;}
+function integerYen(raw){
+ if(raw.length!==12||raw.some(v=>!Number.isFinite(v)||v<0))throw new Error('Invalid raw monthly points');
+ const total=Math.round(sum(raw));if(!Number.isSafeInteger(total)||total<0)throw new Error('Invalid annual planning sum');
+ const points=raw.map(Math.floor),remain=total-sum(points);
+ if(!Number.isSafeInteger(remain)||remain<0||remain>12)throw new Error('Invalid integer remainder');
+ const order=raw.map((v,i)=>({i,f:v-points[i]})).sort((a,b)=>b.f-a.f||a.i-b.i);
+ for(let k=0;k<remain;k++)points[order[k].i]++;
+ return{total,raw:raw.slice(),points,remain,rank:order.map(x=>x.i)};
+}
+function predict(history,opsP50,fy,baseBasis,phase){
+ if(!Number.isInteger(fy)||!['BASE_MC_P50','BASE_HISTORY_MEDIAN'].includes(baseBasis)||![1,2,3].includes(phase))throw new Error('Invalid candidate');
+ const zero=Array(12).fill(0);
+ const invalid=reason=>({applied:false,reason,points:null});
+ if(!Array.isArray(history)||history.length<24||history.some(h=>!/^\d{4}-\d{2}$/.test(h.ym)||h.ym>=fy+'-04'||!Number.isFinite(h.base)||!Number.isFinite(h.spot)))return invalid('invalid_history');
+ if(!Array.isArray(opsP50)||opsP50.length!==12||opsP50.some(v=>!Number.isFinite(v)||v<0))return invalid('invalid_base_paths');
+ const byMonth=new Map(history.map(h=>[h.ym,h]));
+ if(byMonth.size!==history.length)return invalid('duplicate_history_month');
+ const years=[];
+ for(let year=2022;year<fy;year++){
+  const row=Array.from({length:12},(_,m)=>byMonth.get(new Date(Date.UTC(year,3+m,1)).toISOString().slice(0,7)));
+  if(row.every(Boolean))years.push({year,months:row});
+ }
+ const clean=years.slice(-3);if(clean.length<2)return invalid('insufficient_clean_fiscal_years');
+ const last12=Array.from({length:12},(_,m)=>byMonth.get(new Date(Date.UTC(fy-1,3+m,1)).toISOString().slice(0,7)));
+ const last24=Array.from({length:24},(_,m)=>byMonth.get(new Date(Date.UTC(fy-2,3+m,1)).toISOString().slice(0,7)));
+ if(!last24.every(Boolean))return invalid('incomplete_last24');
+ const baseNet12=sum(last12.map(h=>h.base)),spotNet12=sum(last12.map(h=>h.spot)),combinedNet12=baseNet12+spotNet12;
+ const spotPositiveMonths24=last24.filter(h=>h.spot>0).length,dense=spotPositiveMonths24>12;
+ const positive=a=>a.map(v=>Math.max(0,v));
+ const baseColumns=Array.from({length:12},(_,m)=>clean.map(y=>Math.max(0,y.months[m].base)));
+ const spotColumns=Array.from({length:12},(_,m)=>clean.map(y=>Math.max(0,y.months[m].spot)));
+ const quarterColumns=Array.from({length:4},(_,q)=>clean.map(y=>Math.max(0,sum(y.months.slice(q*3,q*3+3).map(h=>h.spot)))));
+ const meta={applied:true,reason:'',baseBasis,phase,cleanFiscalYears:clean.map(y=>y.year),baseNet12,spotNet12,combinedNet12,spotPositiveMonths24,denseSpot:dense,baseFallback:false,spotFallback:false,baseRaw:zero.slice(),spotRaw:zero.slice(),quarterColumns,quarterAmounts:zero.slice(0,4)};
+ if(!(combinedNet12>0))return{...meta,reason:'inactive_or_nonpositive_prior12_net',active:false,raw:zero.slice(),points:zero.slice(),total:0,integerAllocation:integerYen(zero)};
+ let baseRaw=baseBasis==='BASE_MC_P50'?opsP50.slice():baseColumns.map(median);
+ if(sum(baseRaw)===0&&baseNet12>0){baseRaw=baseColumns.map(v=>sum(v)/v.length);meta.baseFallback=true;}
+ let spotRaw;
+ if(dense){spotRaw=spotColumns.map(median);if(sum(spotRaw)===0&&spotNet12>0){spotRaw=spotColumns.map(v=>sum(v)/v.length);meta.spotFallback=true;}}
+ else{let quarter=quarterColumns.map(median);if(sum(quarter)===0&&spotNet12>0){quarter=quarterColumns.map(v=>sum(v)/v.length);meta.spotFallback=true;}meta.quarterAmounts=quarter;spotRaw=zero.slice();quarter.forEach((v,q)=>{spotRaw[q*3+phase-1]=v;});}
+ const raw=baseRaw.map((v,m)=>v+spotRaw[m]),allocation=integerYen(raw);
+ return{...meta,active:true,baseRaw,spotRaw,raw,points:allocation.points,total:allocation.total,integerAllocation:allocation};
+}
+
+return {sum,median,integerYen,predict};
+})();
+
+// Frozen numerical source: median-improvement/candidate_models/capped-net12/forecast-candidates.mjs
+const m1 = (function(){
+const predictV2 = m0["predict"];
+const sum = m0["sum"];
+const integerYen = m0["integerYen"];
+const median = m0["median"];
+/** Exact frozen V2 candidates plus frozen V3 independent component net12 caps. */
+
+
+function predict(history,opsP50,fy,baseBasis,phase){
+ const p=predictV2(history,opsP50,fy,baseBasis,phase);if(!p.applied)return p;
+ const baseBefore=sum(p.baseRaw),spotBefore=sum(p.spotRaw),baseCap=Math.max(0,p.baseNet12),spotCap=Math.max(0,p.spotNet12);
+ const factor=(cap,total)=>cap<=0?0:total>0?Math.min(1,cap/total):1;
+ const baseFactor=factor(baseCap,baseBefore),spotFactor=factor(spotCap,spotBefore);
+ const baseRaw=p.baseRaw.map(v=>v*baseFactor),spotRaw=p.spotRaw.map(v=>v*spotFactor),raw=baseRaw.map((v,m)=>v+spotRaw[m]),allocation=integerYen(raw);
+ return{...p,v2Points:p.points.slice(),baseRawBeforeCap:p.baseRaw.slice(),spotRawBeforeCap:p.spotRaw.slice(),baseRaw,spotRaw,quarterAmountsBeforeCap:p.quarterAmounts.slice(),quarterAmounts:p.quarterAmounts.map(v=>v*spotFactor),raw,points:allocation.points,total:allocation.total,integerAllocation:allocation,caps:{baseCap,spotCap,baseBefore,spotBefore,baseFactor,spotFactor,baseAfter:sum(baseRaw),spotAfter:sum(spotRaw),baseReduction:baseBefore-sum(baseRaw),spotReduction:spotBefore-sum(spotRaw),baseBinding:baseBefore>baseCap+1e-6,spotBinding:spotBefore>spotCap+1e-6}};
+}
+
+return {sum,median,predict};
+})();
+
+// Frozen numerical source: median-improvement/candidate_models/capped-net12-whole-yen/forecast-candidates.mjs
+const m2 = (function(){
+const predictV3 = m1["predict"];
+const sum = m1["sum"];
+const median = m1["median"];
+const integerYen = m0["integerYen"];
+/** Exact V3 plus pre-frozen V3.1 whole-yen economic history fallback. */
+
+
+
+function predict(history,opsP50,fy,baseBasis,phase){
+ const p=predictV3(history,opsP50,fy,baseBasis,phase),common={...p,zeroRoundedFallback:'none',subyenException:!!(p.applied&&p.total===0&&p.combinedNet12>0&&p.combinedNet12<1)};
+ if(!p.applied||p.total!==0||!(p.combinedNet12>=1))return common;
+ const prior12=history.slice(-12),baseProfile=prior12.map(h=>Math.max(0,h.base)),spotProfile=prior12.map(h=>Math.max(0,h.spot));
+ const baseCap=Math.max(0,p.baseNet12),spotCap=Math.max(0,p.spotNet12),baseBefore=sum(baseProfile),spotBefore=sum(spotProfile),factor=(cap,total)=>cap<=0?0:total>0?Math.min(1,cap/total):1;
+ const baseFactor=factor(baseCap,baseBefore),spotFactor=factor(spotCap,spotBefore),baseRaw=baseProfile.map(v=>v*baseFactor),spotRaw=spotProfile.map(v=>v*spotFactor),raw=baseRaw.map((v,m)=>v+spotRaw[m]),allocation=integerYen(raw);
+ return{...common,modelBeforeZeroRoundedGuard:{baseRaw:p.baseRaw,spotRaw:p.spotRaw,raw:p.raw,points:p.points,total:p.total,caps:p.caps},baseRaw,spotRaw,raw,points:allocation.points,total:allocation.total,integerAllocation:allocation,zeroRoundedFallback:'prior12_component_profile',wholeYenFallbackCaps:{baseCap,spotCap,baseBefore,spotBefore,baseFactor,spotFactor,baseAfter:sum(baseRaw),spotAfter:sum(spotRaw)}};
+}
+
+return {predict,sum,median};
+})();
+
+// Frozen numerical source: median-improvement/candidate_models/routing-v4/forecast-router.mjs
+const m3 = (function(){
+const predictV31 = m2["predict"];
+const sum = m2["sum"];
+const median = m2["median"];
+const integerYen = m0["integerYen"];
+/** Frozen V4 past-only routing. No company identifier or current-target actual input. */
+
+
+
+const monthsOfFy=fy=>Array.from({length:12},(_,m)=>new Date(Date.UTC(fy,3+m,1)).toISOString().slice(0,7));
+function gateSpotModule(trainingYears){
+ if(!Array.isArray(trainingYears)||trainingYears.length<1||trainingYears.length>2)throw new Error('Gate training requires1or2completeFYs');
+ const latest=trainingYears[trainingYears.length-1],trainSpotNet=sum(latest.spot),cap=Math.max(0,trainSpotNet),trainingMonths=trainingYears.length*12,positiveMonths=trainingYears.flatMap(y=>y.spot).filter(v=>v>0).length,dense=positiveMonths>trainingMonths/2;
+ let raw=Array(12).fill(0),quarterAmounts=Array(4).fill(0),meanFallback=false,wholeYenFallback='none';
+ if(trainSpotNet>0){
+  if(dense){const columns=Array.from({length:12},(_,m)=>trainingYears.map(y=>Math.max(0,y.spot[m])));raw=columns.map(median);if(sum(raw)===0){raw=columns.map(a=>sum(a)/a.length);meanFallback=true;}}
+  else{const cols=Array.from({length:4},(_,q)=>trainingYears.map(y=>Math.max(0,sum(y.spot.slice(q*3,q*3+3)))));quarterAmounts=cols.map(median);if(sum(quarterAmounts)===0){quarterAmounts=cols.map(a=>sum(a)/a.length);meanFallback=true;}quarterAmounts.forEach((v,q)=>{raw[q*3+2]=v;});}
+ }
+ const preCapRaw=raw.slice(),preCapSum=sum(raw),factor=cap<=0?0:preCapSum>0?Math.min(1,cap/preCapSum):1;raw=raw.map(v=>v*factor);let allocation=integerYen(raw);
+ if(allocation.total===0&&trainSpotNet>=1){const profile=latest.spot.map(v=>Math.max(0,v)),total=sum(profile),profileFactor=total>0?Math.min(1,cap/total):1;raw=profile.map(v=>v*profileFactor);allocation=integerYen(raw);wholeYenFallback='prior12_component_profile';}
+ return{trainSpotNet,active:trainSpotNet>0,trainingMonths,positiveMonths,dense,quarterAmounts,meanFallback,wholeYenFallback,preCapRaw,preCapSum,cap,capFactor:factor,raw,points:allocation.points,total:allocation.total};
+}
+function historicalSpotGate(history,targetFy){
+ const heldoutFy=targetFy-1,byMonth=new Map(history.map(h=>[h.ym,h])),heldoutMonths=monthsOfFy(heldoutFy),heldout=heldoutMonths.map(ym=>byMonth.get(ym));
+ const empty=reason=>({gatePassed:false,reason,heldoutFy,heldoutMonths,trainFYs:[],spotLoss:null,zeroLoss:null});
+ if(!heldout.every(h=>h&&Number.isFinite(h.spot)))return empty('incomplete_heldout_year');
+ const available=[];
+ for(let fy=2022;fy<heldoutFy;fy++){const months=monthsOfFy(fy),cells=months.map(ym=>byMonth.get(ym));if(cells.every(h=>h&&Number.isFinite(h.spot)))available.push({fy,months,spot:cells.map(h=>h.spot)});}
+ const training=available.slice(-2);if(training.length<1)return empty('insufficient_past_clean_fiscal_years');
+ const module=gateSpotModule(training),actualSpot=heldout.map(h=>h.spot),spotLoss=sum(module.points.map((v,m)=>Math.abs(v-actualSpot[m]))),zeroLoss=sum(actualSpot.map(Math.abs));
+ return{gatePassed:spotLoss<zeroLoss,reason:spotLoss<zeroLoss?'strict_past_spot_loss_improvement':'no_strict_past_spot_loss_improvement',heldoutFy,heldoutMonths,trainFYs:training.map(y=>y.fy),training,heldoutSpot12:actualSpot,spotLoss,zeroLoss,module};
+}
+function route(history,opsP50,oldTotalP50,targetFy){
+ if(oldTotalP50.length!==12||oldTotalP50.some(v=>!Number.isFinite(v)||v<0))throw new Error('Invalid old totalP50');
+ if(history.some(h=>h.ym>=targetFy+'-04'))throw new Error('Current target observations forbidden in routing history');
+ const gate=historicalSpotGate(history,targetFy),v31=predictV31(history,opsP50,targetFy,'BASE_MC_P50',3),currentRecentNet=v31.combinedNet12,oldAllRoundedZero=oldTotalP50.every(v=>Math.round(v)===0),rescue=oldAllRoundedZero&&currentRecentNet>=1,useV31=rescue||gate.gatePassed;
+ if(useV31&&!v31.applied)throw new Error('Requested V31 route unavailable: '+v31.reason);
+ const finalRoute=rescue?'V31_ECONOMIC_ZERO_RESCUE':gate.gatePassed?'V31_GATE_PASSED':'OLD_TOTAL_P50';
+ return{gate,currentRecentNet,oldAllRoundedZero,rescue,finalRoute,planningApplied:useV31,points:useV31?v31.points.slice():oldTotalP50.slice(),oldTotalP50:oldTotalP50.slice(),v31};
+}
+
+return {gateSpotModule,historicalSpotGate,route,sum,median};
+})();
+
+// Frozen numerical source: stable-improvement-20261017/candidates/round3-det-anchor-convolution/finite-distributions.mjs
+const m4 = (function(){
+
+/** Finite nonnegative distributions; no stochastic simulation or outcome access. */
+
+const sum=a=>a.reduce((s,v)=>s+v,0);
+function kahanSum(a){let total=0,c=0;for(const v of a){const y=v-c,t=total+y;c=(t-total)-y;total=t;}return total;}
+function mergeSupport(rows){
+ const byValue=new Map();for(const row of rows){if(!Number.isFinite(row.value)||row.value<0||!Number.isFinite(row.weight)||row.weight<0)throw new Error('Invalid finite support');if(!byValue.has(row.value))byValue.set(row.value,[]);byValue.get(row.value).push(row.weight);}
+ const out=[...byValue].map(([value,weights])=>({value,weight:kahanSum(weights)})).sort((a,b)=>a.value-b.value);if(!(kahanSum(out.map(r=>r.weight))>0))throw new Error('Empty probability mass');return out;
+}
+function lowerWeightedMedian(rows){
+ const support=mergeSupport(rows),totalWeight=kahanSum(support.map(r=>r.weight)),half=totalWeight/2,tolerance=64*Number.EPSILON*Math.max(1,totalWeight);let cumulative=0,comp=0,previous=0,previousValue=null;
+ for(let i=0;i<support.length;i++){const r=support[i],y=r.weight-comp,t=cumulative+y;comp=(t-cumulative)-y;previous=cumulative;cumulative=t;if(r.weight>0&&cumulative+tolerance>=half){return{value:r.value,totalWeight,half,cumulative,previousCumulative:previous,mass:r.weight,previousValue,nextValue:support[i+1]?.value??null,tolerance,nearBoundary:Math.abs(cumulative-half)<=tolerance,gap:cumulative-half,supportCount:support.length,supportSha256:null /* diagnostic support hash omitted; numeric support unchanged */};}previousValue=r.value;}
+ throw new Error('No finite lower median');
+}
+function distributionMean(rows){const s=mergeSupport(rows),weight=kahanSum(s.map(r=>r.weight));return kahanSum(s.map(r=>r.value*r.weight))/weight;}
+function nativeSpotSupport(model,m){
+ const p=Math.max(0,Math.min(1,Number(model.occurrenceProbByMonth?.[m]||0))),samples=model.severitySamplesByMonth?.[m]||[0],weights=model.severityWeightsByMonth?.[m];
+ const weighted=Array.isArray(weights)&&weights.length===samples.length;
+ let severity;if(weighted){const total=weights.reduce((s,w)=>s+Number(w||0),0);severity=total>0?samples.map((v,i)=>({value:Math.max(0,Number(v||0)),weight:Number(weights[i]||0)/total})):[{value:0,weight:1}];}
+ else severity=samples.length?samples.map(v=>({value:Math.max(0,Number(v||0)),weight:1/samples.length})):[{value:0,weight:1}];
+ return mergeSupport([{value:0,weight:1-p},...severity.map(r=>({value:r.value,weight:p*r.weight}))]);
+}
+function mixSpotPhases(native){if(native.length!==12)throw new Error('12 SPOT months required');return native.map((own,m)=>mergeSupport([...own.map(r=>({value:r.value,weight:.5*r.weight})),...native.flatMap(s=>s.map(r=>({value:r.value,weight:r.weight/24})))]));}
+function convolve(base,spot){return mergeSupport(base.flatMap(b=>spot.map(s=>({value:b.value+s.value,weight:b.weight*s.weight}))));}
+function expectationAnchor(base,spot,observedMonths,targetAnnual){
+ if(base.length!==12||spot.length!==12||!Number.isFinite(targetAnnual)||targetAnnual<0)throw new Error('Invalid expectation anchor');
+ const meanBase=base.map(distributionMean),meanSpot=spot.map(distributionMean),annualExpectation=kahanSum(meanBase.map((v,m)=>v+meanSpot[m]));if(!Number.isFinite(annualExpectation)||annualExpectation<0)throw new Error('Invalid annual expectation');
+ const eligible=observedMonths>=24,applied=eligible&&annualExpectation>=1,scale=applied?targetAnnual/annualExpectation:1;if(!Number.isFinite(scale)||scale<0)throw new Error('Invalid expectation scale');
+ return{observedMonths,eligible,applied,reason:!eligible?'insufficient_history':!applied?'zero_or_subyen_expected_baseline':'',annualExpectation,targetAnnual,scale,meanBase,meanSpot,scaledReferenceAnnualExpectation:scale*annualExpectation};
+}
+
+return {sum,kahanSum,mergeSupport,lowerWeightedMedian,distributionMean,nativeSpotSupport,mixSpotPhases,convolve,expectationAnchor};
+})();
+
+// Frozen numerical source: stable-improvement-20261017/candidates/round3-det-anchor-convolution/distribution-kernel.mjs
+const m5 = (function(){
+const mergeSupport = m4["mergeSupport"];
+const nativeSpotSupport = m4["nativeSpotSupport"];
+const mixSpotPhases = m4["mixSpotPhases"];
+const lowerWeightedMedian = m4["lowerWeightedMedian"];
+const convolve = m4["convolve"];
+const expectationAnchor = m4["expectationAnchor"];
+const kahanSum = m4["kahanSum"];
+const monthsOf=fy=>Array.from({length:12},(_,m)=>new Date(Date.UTC(fy,3+m,1)).toISOString().slice(0,7));
+function nativeDistribution(history,fy){
+ if(!Array.isArray(history)||!Number.isInteger(fy)||history.some(h=>!/^\d{4}-\d{2}$/.test(h.ym)||h.ym>=fy+'-04'||!Number.isFinite(h.base)||!Number.isFinite(h.spot)))throw new Error('Invalid or future native history');
+ const by=new Map(history.map(h=>[h.ym,h]));if(by.size!==history.length)throw new Error('Duplicate native month');for(let i=1;i<history.length;i++){const a=history[i-1].ym.split('-').map(Number);if(new Date(Date.UTC(a[0],a[1],1)).toISOString().slice(0,7)!==history[i].ym)throw new Error('Noncontinuous native history');}
+ if(history[history.length-1]?.ym!==fy+'-03')throw new Error('Native history must end before targetFY');const years=[];for(let y=fy-4;y<fy;y++){const cells=monthsOf(y).map(m=>by.get(m));if(cells.every(Boolean))years.push({fy:y,months:cells});}if(!years.length)throw new Error('No complete nativeFY');if(years[years.length-1].fy!==fy-1||years.some((v,i)=>i>0&&v.fy!==years[i-1].fy+1))throw new Error('Missing complete nativeFY');const rows=years.flatMap(y=>y.months);
+ const native=appHistoryProvisionalNativeModel_(nativeApi,rows,years[0].fy,fy);
+ if(!native.residualPct.length||native.residualPct.some(v=>!Number.isFinite(v)))throw new Error('Invalid residual support');const baseSupport=native.tri.base.map(b=>mergeSupport(native.residualPct.map(e=>({value:Math.max(0,b*(1+e)),weight:1/native.residualPct.length})))),spotSupport=Array.from({length:12},(_,m)=>nativeSpotSupport(native.background,m)),mixedSpotSupport=mixSpotPhases(spotSupport),baseMedian=baseSupport.map(lowerWeightedMedian),totalMedian=baseSupport.map((b,m)=>lowerWeightedMedian(convolve(b,mixedSpotSupport[m]))),last=history.slice(-12),bNet12=last.reduce((s,h)=>s+h.base,0),sNet12=last.reduce((s,h)=>s+h.spot,0),net12=bNet12+sNet12,anchor=expectationAnchor(baseSupport,spotSupport,native.observedMonths,Math.max(0,net12));
+ const phaseNativeMean=kahanSum(anchor.meanSpot),phaseMixedMean=kahanSum(mixedSpotSupport.map(s=>{const total=kahanSum(s.map(r=>r.weight));return kahanSum(s.map(r=>r.value*r.weight))/total;}));
+ return{fy,nativeYears:years.map(y=>y.fy),nativeHistoryStart:rows[0].ym,nativeHistoryEnd:rows[rows.length-1].ym,discardedLeadingMonths:history.filter(h=>h.ym<rows[0].ym).map(h=>h.ym),native,baseSupport,spotSupport,mixedSpotSupport,baseMedian,totalMedian,bNet12,sNet12,net12,anchor,phaseNativeMean,phaseMixedMean};
+}
+
+return {nativeDistribution};
+})();
+
+// Frozen numerical source: stable-improvement-20261017/candidates/round3-det-anchor-convolution/forecast-h-only.mjs
+const m6 = (function(){
+const historicalSpotGate = m3["historicalSpotGate"];
+const nativeDistribution = m5["nativeDistribution"];
+/** Pure deterministic history-only policies from expectation proposal-v3+scopeaddendum. No target actual or seed input. */
+
+
+const sum=a=>a.reduce((s,v)=>s+v,0);
+function median(a){if(!a.length||a.some(v=>!Number.isFinite(v)))throw new Error('Invalid median');const b=[...a].sort((a,b)=>a-b),x=(b.length-1)/2,i=Math.floor(x),f=x-i;return b[i]*(1-f)+b[Math.min(i+1,b.length-1)]*f;}
+function integerYen(raw){if(raw.length!==12||raw.some(v=>!Number.isFinite(v)||v<0))throw new Error('Invalid monthly amount');const total=Math.round(sum(raw)),points=raw.map(Math.floor),remain=total-sum(points);if(!Number.isSafeInteger(total)||total<0||!Number.isInteger(remain)||remain<0||remain>12)throw new Error('Invalid JPY total');const order=raw.map((v,i)=>({i,f:v-points[i]})).sort((a,b)=>b.f-a.f||a.i-b.i);for(let i=0;i<remain;i++)points[order[i].i]++;return{total,points,raw:raw.slice(),remain,rank:order.map(v=>v.i)};}
+const fiscalMonths=fy=>Array.from({length:12},(_,m)=>new Date(Date.UTC(fy,3+m,1)).toISOString().slice(0,7));
+function cap(raw,net){const limit=Math.max(0,net),before=sum(raw),factor=limit<=0?0:before>0?Math.min(1,limit/before):1;return{raw:raw.map(v=>v*factor),net,limit,before,factor};}
+function setup(history,fy,inner){
+ if(!Array.isArray(history)||history.some(h=>!/^\d{4}-\d{2}$/.test(h.ym)||h.ym>=fy+'-04'||!Number.isFinite(h.base)||!Number.isFinite(h.spot)))throw new Error('Invalid or future history');
+ const by=new Map(history.map(h=>[h.ym,h]));if(by.size!==history.length)throw new Error('Duplicate history');
+ for(let i=1;i<history.length;i++){const a=history[i-1].ym.split('-').map(Number),next=new Date(Date.UTC(a[0],a[1],1)).toISOString().slice(0,7);if(history[i].ym!==next)throw new Error('Noncontinuous history');}
+ const latest=fiscalMonths(fy-1).map(m=>by.get(m));if(!latest.every(Boolean))throw new Error('Incomplete prior12');
+ const clean=[];for(let y=2022;y<fy;y++){const months=fiscalMonths(y).map(m=>by.get(m));if(months.every(Boolean))clean.push({fy:y,months});}const years=clean.slice(-3);if(years.length<(inner?1:2))throw new Error('Insufficient clean FYs');
+ if(!inner&&!fiscalMonths(fy-2).every(m=>by.has(m)))throw new Error('Incomplete prior24');
+ const densityRows=history.filter(h=>h.ym>='2022-04').slice(-24),positive=densityRows.filter(h=>h.spot>0).length,dense=positive>densityRows.length/2;
+ const bNet=sum(latest.map(h=>h.base)),sNet=sum(latest.map(h=>h.spot)),net=bNet+sNet;if(![bNet,sNet,net].every(Number.isFinite))throw new Error('Invalid prior net');
+ const baseColumns=Array.from({length:12},(_,m)=>years.map(y=>Math.max(0,y.months[m].base))),spotColumns=Array.from({length:12},(_,m)=>years.map(y=>Math.max(0,y.months[m].spot))),quarterColumns=Array.from({length:4},(_,q)=>years.map(y=>Math.max(0,sum(y.months.slice(q*3,q*3+3).map(h=>h.spot)))));
+ return{fy,inner,years:years.map(y=>y.fy),yearRows:years,latest,bNet,sNet,net,active:net>0,baseColumns,spotColumns,quarterColumns,densityObservedMonths:densityRows.length,spotPositiveMonths:positive,dense};
+}
+function actualProfile(c){const b=cap(c.latest.map(h=>Math.max(0,h.base)),c.bNet),s=cap(c.latest.map(h=>Math.max(0,h.spot)),c.sNet);return{baseRaw:b.raw,spotRaw:s.raw,baseCap:b,spotCap:s};}
+function buildA(history,fy,c,kernel){
+ const deterministicBase=kernel(c);let baseFallback='none',spotFallback='none',b=deterministicBase.center.slice(),s=Array(12).fill(0),quarters=Array(4).fill(0);
+ if(c.active&&sum(b)===0&&c.bNet>0){b=c.baseColumns.map(a=>sum(a)/a.length);baseFallback='monthly_mean';}
+ if(c.dense){s=c.spotColumns.map(median);if(c.active&&sum(s)===0&&c.sNet>0){s=c.spotColumns.map(a=>sum(a)/a.length);spotFallback='monthly_mean';}}
+ else{quarters=c.quarterColumns.map(median);if(c.active&&sum(quarters)===0&&c.sNet>0){quarters=c.quarterColumns.map(a=>sum(a)/a.length);spotFallback='quarter_mean';}quarters.forEach((v,q)=>{s[q*3+2]=v;});}
+ if(!c.active){b=Array(12).fill(0);s=Array(12).fill(0);quarters=Array(4).fill(0);}const baseCap=cap(b,c.bNet),spotCap=cap(s,c.sNet);b=baseCap.raw;s=spotCap.raw;if(!c.active){b=Array(12).fill(0);s=Array(12).fill(0);}
+ let raw=b.map((v,m)=>v+s[m]),allocation=integerYen(raw),zeroRoundedFallback='none',preShrinkEconomicProfile=null;
+ if(allocation.total===0&&c.net>=1){preShrinkEconomicProfile=actualProfile(c);b=preShrinkEconomicProfile.baseRaw.slice();s=preShrinkEconomicProfile.spotRaw.slice();raw=b.map((v,m)=>v+s[m]);allocation=integerYen(raw);zeroRoundedFallback='prior12_component_profile';}
+ const past=historicalSpotGate(history,fy),predicted=past.module?.points||Array(12).fill(0),heldout=past.heldoutSpot12||Array(12).fill(null),supportByMonth=predicted.map((v,m)=>({ym:past.heldoutMonths[m],prediction:v,heldoutRawSpot:heldout[m],support:v>0,hit:v>0&&heldout[m]>0})),n=supportByMonth.filter(m=>m.support).length,h=supportByMonth.filter(m=>m.hit).length,w=(h+1)/(n+2),timing={heldoutFy:past.heldoutFy,trainingFYs:past.trainFYs,n,h,weight:w,supportByMonth,module:past.module||null,pastReason:past.reason};
+ const beforeWeight={baseRaw:b.slice(),spotRaw:s.slice(),raw:raw.slice(),allocation};s=s.map(v=>v*w);raw=b.map((v,m)=>v+s[m]);allocation=integerYen(raw);let timingRescue=!c.active?'inactive':'none',postShrinkEconomicProfile=null;
+ if(allocation.total===0&&c.net>=1){postShrinkEconomicProfile=actualProfile(c);b=postShrinkEconomicProfile.baseRaw.slice();s=postShrinkEconomicProfile.spotRaw.map(v=>v*w);raw=b.map((v,m)=>v+s[m]);allocation=integerYen(raw);timingRescue='prior12_weighted_profile';if(allocation.total===0){s=postShrinkEconomicProfile.spotRaw.slice();raw=b.map((v,m)=>v+s[m]);allocation=integerYen(raw);timingRescue='prior12_unweighted_profile';}}
+ return{id:'H_DET_EXPECTATION_BASE_V5_SPOT',deterministicBase,fy,active:c.active,net12:c.net,baseNet12:c.bNet,spotNet12:c.sNet,years:c.years,dense:c.dense,densityObservedMonths:c.densityObservedMonths,spotPositiveMonths:c.spotPositiveMonths,baseFallback,spotFallback,quarterAmountsBeforeCap:quarters,baseCap,spotCap,zeroRoundedFallback,preShrinkEconomicProfile,beforeWeight,timing,timingRescue,postShrinkEconomicProfile,baseRaw:b,spotRaw:s,raw,points:allocation.points,total:allocation.total,allocation};
+}
+function forecastHOnly(history,fy){
+ const context=setup(history,fy,false),distribution=nativeDistribution(history,fy),prediction=buildA(history,fy,context,()=>({center:distribution.baseMedian.map(m=>m.value*distribution.anchor.scale),baseCDF:distribution.baseMedian,anchor:distribution.anchor,nativeYears:distribution.nativeYears}));
+ if(prediction.total!==sum(prediction.points)||prediction.points.some(v=>!Number.isSafeInteger(v)||v<0))throw new Error('Invalid Hpoints');if(context.net>=1&&prediction.total<1)throw new Error('H economic all0 guard failed');if(!context.active&&prediction.total!==0)throw new Error('Inactive Hpositive');return{fy,historyStart:history[0].ym,historyEnd:history[history.length-1].ym,context,nativeDistribution:distribution,prediction};
+}
+
+return {sum,median,integerYen,fiscalMonths,forecastHOnly};
+})();
+
+// Frozen numerical source: spot-joint-improvement-20261017/round3-g-m-barrier-blend/forecast-g-only.mjs
+const m7 = (function(){
+const forecastHOnly = m6["forecastHOnly"];
+const integerYen = m6["integerYen"];
+const sum = m6["sum"];
+/** Frozen G policy only: same buildB formula, with the complete frozen H policy as its zero rescue. */
+
+
+/** Exported for synthetic formula checks; forecastGOnly supplies the frozen native model and full H. */
+function buildGFromFrozenParts(c,a,distribution){
+ let raw=distribution.totalMedian.map(m=>m.value*distribution.anchor.scale);if(!c.active)raw=Array(12).fill(0);const beforeRescue=integerYen(raw);let rescue='none';if(beforeRescue.total===0&&c.net>=1){raw=a.points.slice();rescue='total_CDF_zero_rescued_by_H';}const allocation=integerYen(raw);return{id:'G_DET_EXPECTATION_TOTAL_CDF_MEDIAN',fy:c.fy,active:c.active,net12:c.net,years:c.years,totalMedian:distribution.totalMedian,anchor:distribution.anchor,beforeRescue,rescue,raw,points:allocation.points,total:allocation.total,allocation};
+}
+
+function forecastGOnly(history,fy){
+ const h=forecastHOnly(history,fy),prediction=buildGFromFrozenParts(h.context,h.prediction,h.nativeDistribution);
+ if(prediction.total!==sum(prediction.points)||prediction.points.some(v=>!Number.isSafeInteger(v)||v<0))throw new Error('Invalid G points');
+ if(h.context.net>=1&&prediction.total<1)throw new Error('G economic all0 guard failed');
+ if(!h.context.active&&prediction.total!==0)throw new Error('Inactive G positive');
+ return{fy,historyStart:history[0].ym,historyEnd:history[history.length-1].ym,context:h.context,prediction,endpointH:h.prediction};
+}
+
+return {buildGFromFrozenParts,forecastGOnly};
+})();
+
+// Frozen numerical source: spot-joint-improvement-20261017/round2-unit-mean-prior/spot-joint-models.mjs
+const m8 = (function(){
+const nativeDistribution = m5["nativeDistribution"];
+/** Own-history-only L/M unit-mean-prior research. No outer actual, company identity, MC seed or random input. */
+
+
+const METHODS=Object.freeze(['L_HALF_MEAN_LOCAL_TIMING_UNIT_MEAN_MAP','M_HALF_MEAN_UNIFORM_TIMING_UNIT_MEAN_MAP']);
+const sum=a=>a.reduce((s,v)=>s+v,0);
+const fiscalMonths=fy=>Array.from({length:12},(_,m)=>new Date(Date.UTC(fy,3+m,1)).toISOString().slice(0,7));
+
+function integerYen(raw){
+ if(raw.length!==12||raw.some(v=>!Number.isFinite(v)||v<0))throw new Error('Invalid monthly amount');
+ const total=Math.round(sum(raw)),points=raw.map(Math.floor),remain=total-sum(points);
+ if(!Number.isSafeInteger(total)||total<0||!Number.isInteger(remain)||remain<0||remain>12)throw new Error('Invalid JPY total');
+ const order=raw.map((v,i)=>({i,f:v-points[i]})).sort((a,b)=>b.f-a.f||a.i-b.i);
+ for(let i=0;i<remain;i++)points[order[i].i]++;
+ return{total,points,raw:raw.slice(),remain,rank:order.map(v=>v.i)};
+}
+
+function cap(raw,net){
+ const limit=Math.max(0,net),before=sum(raw),factor=limit<=0?0:before>0?Math.min(1,limit/before):1;
+ return{raw:raw.map(v=>v*factor),net,limit,before,factor};
+}
+
+function context(history,fy,inner){
+ if(!Array.isArray(history)||!Number.isInteger(fy)||history.some(h=>!/^\d{4}-\d{2}$/.test(h.ym)||h.ym>=fy+'-04'||!Number.isFinite(h.base)||!Number.isFinite(h.spot)))throw new Error('Invalid or future history');
+ const by=new Map(history.map(h=>[h.ym,h]));if(by.size!==history.length)throw new Error('Duplicate history');
+ for(let i=1;i<history.length;i++){const a=history[i-1].ym.split('-').map(Number);if(new Date(Date.UTC(a[0],a[1],1)).toISOString().slice(0,7)!==history[i].ym)throw new Error('Noncontinuous history');}
+ if(history[history.length-1]?.ym!==fy+'-03')throw new Error('History must end priorMarch');
+ const latest=fiscalMonths(fy-1).map(ym=>by.get(ym));if(!latest.every(Boolean))throw new Error('Incomplete prior12');
+ if(!inner&&!fiscalMonths(fy-2).every(ym=>by.has(ym)))throw new Error('Incomplete prior24');
+ const clean=[];for(let y=2022;y<fy;y++){const rows=fiscalMonths(y).map(ym=>by.get(ym));if(rows.every(Boolean))clean.push({fy:y,rows});}
+ const years=clean.slice(-3);if(years.length<(inner?1:2))throw new Error('Insufficient clean FYs');
+ const bNet12=sum(latest.map(h=>h.base)),sNet12=sum(latest.map(h=>h.spot)),net12=bNet12+sNet12;
+ if(![bNet12,sNet12,net12].every(Number.isFinite))throw new Error('Invalid net');
+ return{fy,inner,years,latest,bNet12,sNet12,net12,active:net12>0};
+}
+
+function nativeBase(history,fy,c){
+ const distribution=nativeDistribution(history,fy);
+ return{center:distribution.baseMedian.map(m=>m.value*distribution.anchor.scale),
+  anchor:distribution.anchor,nativeYears:distribution.nativeYears,
+  nativeHistoryStart:distribution.nativeHistoryStart,nativeHistoryEnd:distribution.nativeHistoryEnd,
+  source:'fixed H finite BASE component before old-SPOT-dependent rescue'};
+}
+
+/** Aggregate amount-weighted month shape, NOT a mean of per-year normalized shapes. */
+function uncalibrated(history,fy,method,inner,baseKernel){
+ if(!METHODS.includes(method))throw new Error('Unknown method');
+ const c=context(history,fy,inner),deterministicBase=baseKernel(history,fy,c);
+ let b=deterministicBase.center.slice(),baseFallback='none';
+ if(b.length!==12||b.some(v=>!Number.isFinite(v)||v<0))throw new Error('Invalid BASE kernel');
+ if(c.active&&sum(b)===0&&c.bNet12>0){b=Array.from({length:12},(_,m)=>sum(c.years.map(y=>Math.max(0,y.rows[m].base)))/c.years.length);baseFallback='clean_monthly_mean';}
+ const baseCap=cap(b,c.bNet12);b=c.active?baseCap.raw:Array(12).fill(0);
+ const halves=Array.from({length:2},(_,h)=>{
+  const start=h*6,yearNet=c.years.map(y=>({fy:y.fy,rawNet:sum(y.rows.slice(start,start+6).map(r=>r.spot))}));
+  const positiveNet=yearNet.map(y=>Math.max(0,y.rawNet)),amountMean=sum(positiveNet)/positiveNet.length;
+  const monthMass=Array.from({length:6},(_,m)=>sum(c.years.map(y=>Math.max(0,y.rows[start+m].spot))));
+  const monthMassTotal=sum(monthMass),ownShape=monthMassTotal>0?monthMass.map(v=>v/monthMassTotal):Array(6).fill(1/6);
+  const nActive=yearNet.filter(y=>y.rawNet>0).length;
+  const shape=method===METHODS[0]?ownShape.slice():ownShape.map(v=>(nActive*v+1/6)/(nActive+1));
+  return{half:h,yearNet,positiveNet,amountMean,monthMass,monthMassTotal,nActive,ownShape,shape};
+ });
+ const annualMean=sum(halves.map(h=>h.amountMean)),limit=Math.max(0,c.sNet12),spotCapFactor=limit<=0?0:annualMean>0?Math.min(1,limit/annualMean):1;
+ const s=halves.flatMap(h=>h.shape.map(v=>c.active?v*h.amountMean*spotCapFactor:0));
+ return{method,fy,context:c,deterministicBase,baseFallback,baseCap,baseRaw:b,halves,
+  spotPreCalibrationCap:{limit,before:annualMean,factor:spotCapFactor},spotRaw:s};
+}
+
+function multiplierObjective(observations,scale,lambda){
+ return sum(observations.map(o=>Math.abs(o.base+lambda*o.spot-o.actual)))/scale+2*lambda-Math.log(2*lambda)-1;
+}
+
+/** Convex MAP solution, enumerating finite kinks; no grid or fitted limits. */
+function fitPositiveTotalMultiplier(observations){
+ if(!Array.isArray(observations)||observations.some(o=>!Number.isFinite(o.base)||o.base<0||!Number.isFinite(o.spot)||o.spot<0||!Number.isFinite(o.actual)||!Number.isInteger(o.foldFY)))throw new Error('Invalid calibration observation');
+ const foldFYs=[...new Set(observations.map(o=>o.foldFY))].sort((a,b)=>a-b);
+ const foldSpotSums=foldFYs.map(foldFY=>({foldFY,spotSum:sum(observations.filter(o=>o.foldFY===foldFY).map(o=>o.spot))}));
+ const informativeFoldFYs=foldSpotSums.filter(f=>f.spotSum>0).map(f=>f.foldFY),informativeFoldCount=informativeFoldFYs.length;
+ const spotSum=sum(observations.map(o=>o.spot)),scale=informativeFoldCount?spotSum/informativeFoldCount:0;
+ if(!(scale>0))return{lambda:.5,status:'no_past_positive_spot_scale',foldFYs,foldSpotSums,informativeFoldFYs,informativeFoldCount,scale,spotSum,knots:[],observations};
+ let slope=0;const knotMap=new Map();
+ for(const o of observations){
+  if(o.spot===0)continue;
+  const knot=(o.actual-o.base)/o.spot;
+  if(knot>0){slope-=o.spot;knotMap.set(knot,(knotMap.get(knot)||0)+o.spot);}
+  else slope+=o.spot;
+ }
+ const knots=[...knotMap].map(([value,mass])=>({value,mass})).sort((a,b)=>a.value-b.value);
+ let previous=0;const intervals=[];
+ const finish=(lambda,status,derivativeLeft,derivativeRight)=>{
+  if(!(lambda>0)||!Number.isFinite(lambda))throw new Error('Invalid positive multiplier');
+  return{lambda,status,foldFYs,foldSpotSums,informativeFoldFYs,informativeFoldCount,scale,spotSum,impliedLowerBound:1/(informativeFoldCount+2),
+   derivativeLeft,derivativeRight,objective:multiplierObjective(observations,scale,lambda),
+   objectiveAt1:multiplierObjective(observations,scale,1),knots,intervals,observations};
+ };
+ for(const k of knots){
+  const denominator=2+slope/scale,root=denominator>0?1/denominator:null;
+  intervals.push({left:previous,right:k.value,slope,root});
+  if(root!==null&&root>previous&&root<k.value)return finish(root,'interval_root',0,0);
+  const derivativeLeft=2-1/k.value+slope/scale,nextSlope=slope+2*k.mass,
+   derivativeRight=2-1/k.value+nextSlope/scale;
+  if(derivativeLeft<=0&&derivativeRight>=0)return finish(k.value,'knot_root',derivativeLeft,derivativeRight);
+  slope=nextSlope;previous=k.value;
+ }
+ const root=1/(2+slope/scale);intervals.push({left:previous,right:null,slope,root});
+ if(root>=previous)return finish(root,'final_interval_root',0,0);
+ throw new Error('Multiplier finite-knot solver did not locate optimum');
+}
+
+function actualProfile(c){
+ const b=cap(c.latest.map(r=>Math.max(0,r.base)),c.bNet12),s=cap(c.latest.map(r=>Math.max(0,r.spot)),c.sNet12);
+ return{baseRaw:b.raw,spotRaw:s.raw,baseCap:b,spotCap:s};
+}
+
+function finalize(c,b,s,lambdas){
+ let baseRaw=b.slice(),spotRaw=s.map((v,m)=>v*lambdas[Math.floor(m/6)]),raw=baseRaw.map((v,m)=>v+spotRaw[m]),allocation=integerYen(raw),rescue='none',economicProfile=null;
+ if(!c.active){baseRaw=Array(12).fill(0);spotRaw=Array(12).fill(0);raw=Array(12).fill(0);allocation=integerYen(raw);rescue='inactive_or_nonpositive_prior12_net';}
+ if(allocation.total===0&&c.net12>=1){
+  economicProfile=actualProfile(c);baseRaw=economicProfile.baseRaw.slice();spotRaw=economicProfile.spotRaw.map((v,m)=>v*lambdas[Math.floor(m/6)]);raw=baseRaw.map((v,m)=>v+spotRaw[m]);allocation=integerYen(raw);rescue='prior12_calibrated_component_profile';
+  if(allocation.total===0){spotRaw=economicProfile.spotRaw.slice();raw=baseRaw.map((v,m)=>v+spotRaw[m]);allocation=integerYen(raw);rescue='prior12_unscaled_component_profile';}
+ }
+ if(c.net12>=1&&allocation.total<1)throw new Error('Economic full-yearzero guard failed');
+ if(!c.active&&allocation.total!==0)throw new Error('Inactive fabricated amount');
+ return{baseRaw,spotRaw,raw,points:allocation.points,total:allocation.total,allocation,rescue,economicProfile};
+}
+
+/** No target outcome/name/seed is accepted. baseKernel override is for synthetic unit checks only. */
+function forecastCandidate(history,fy,method,{baseKernel=nativeBase}={}){
+ const outer=uncalibrated(history,fy,method,false,baseKernel),folds=[];
+ for(let y=2023;y<fy;y++){
+  const heldout=fiscalMonths(y).map(ym=>history.find(r=>r.ym===ym));if(!heldout.every(Boolean))continue;
+  const train=history.filter(r=>r.ym<y+'-04');let module;
+  try{module=uncalibrated(train,y,method,true,baseKernel);}catch(error){
+   if(['Incomplete prior12','History must end priorMarch','Insufficient clean FYs'].includes(error.message))continue;
+   throw error;
+  }
+  folds.push({fy:y,historyStart:train[0].ym,historyEnd:train[train.length-1].ym,cleanFYs:module.context.years.map(y=>y.fy),
+   baseRaw:module.baseRaw,spotRaw:module.spotRaw,halves:module.halves,
+   spotPreCalibrationCap:module.spotPreCalibrationCap,actualMonthly:heldout.map(r=>r.base+r.spot)});
+ }
+ const selectedFolds=folds.slice(-2),calibration=Array.from({length:2},(_,h)=>fitPositiveTotalMultiplier(selectedFolds.flatMap(f=>Array.from({length:6},(_,m)=>({foldFY:f.fy,month:h*6+m,base:f.baseRaw[h*6+m],spot:f.spotRaw[h*6+m],actual:f.actualMonthly[h*6+m]})))));
+ const lambdas=calibration.map(v=>v.lambda),final=finalize(outer.context,outer.baseRaw,outer.spotRaw,lambdas);
+ return{method,fy,active:outer.context.active,net12:outer.context.net12,baseNet12:outer.context.bNet12,spotNet12:outer.context.sNet12,
+  cleanFYs:outer.context.years.map(y=>y.fy),historyStart:history[0].ym,historyEnd:history[history.length-1].ym,
+  uncalibrated:outer,selectedFoldFYs:selectedFolds.map(f=>f.fy),folds:selectedFolds,calibration,lambdas,...final};
+}
+
+function forecastCandidates(history,fy,options={}){
+ return METHODS.map(method=>forecastCandidate(history,fy,method,options));
+}
+
+return {METHODS,sum,fiscalMonths,integerYen,fitPositiveTotalMultiplier,forecastCandidate,forecastCandidates};
+})();
+
+// Frozen numerical source: spot-joint-improvement-20261017/round3-g-m-barrier-blend/forecast-n-only.mjs
+const m9 = (function(){
+const forecastGOnly = m7["forecastGOnly"];
+const forecastCandidate = m8["forecastCandidate"];
+const METHODS = m8["METHODS"];
+const integerYen = m8["integerYen"];
+const fiscalMonths = m8["fiscalMonths"];
+const sum = m8["sum"];
+/** Strictly-past Beta(2,2) L1 mixture of complete frozen G/M JPY policies. No outer actual/name/seed input. */
+
+
+
+const METHOD='N_PAST_BARRIER_G_M_TOTAL_BLEND';
+
+/** Unique smooth-interval root. C is the normalized signed TOTAL loss slope. */
+function betaBarrierRoot(C){
+ if(!Number.isFinite(C))throw new Error('Invalid barrier slope');
+ if(C<0)return 1-betaBarrierRoot(-C);
+ return 2/(C+2+Math.sqrt(C*C+4));
+}
+
+function barrierObjective(rows,D,w){
+ return sum(rows.map(r=>Math.abs((1-w)*r.g+w*r.m-r.actual)))/D-Math.log(4*w*(1-w));
+}
+
+/** Finite-knot convex solver. Complete endpoint points, signed differences, and SUM loss are retained. */
+function fitPastBlendWeight(rows){
+ if(!Array.isArray(rows)||rows.some(r=>!Number.isFinite(r.g)||r.g<0||!Number.isFinite(r.m)||r.m<0||!Number.isFinite(r.actual)||!Number.isInteger(r.foldFY)))throw new Error('Invalid blend observations');
+ const foldFYs=[...new Set(rows.map(r=>r.foldFY))].sort((a,b)=>a-b);
+ const foldDifferenceSums=foldFYs.map(foldFY=>({foldFY,differenceSum:sum(rows.filter(r=>r.foldFY===foldFY).map(r=>Math.abs(r.m-r.g)))}));
+ const informativeFoldFYs=foldDifferenceSums.filter(r=>r.differenceSum>0).map(r=>r.foldFY),informativeFoldCount=informativeFoldFYs.length;
+ const differenceSum=sum(foldDifferenceSums.filter(r=>r.differenceSum>0).map(r=>r.differenceSum)),D=informativeFoldCount?differenceSum/informativeFoldCount:0;
+ if(!Number.isFinite(D)||!Number.isFinite(differenceSum))throw new Error('Invalid blend scale');
+ if(!(D>0))return{weight:.5,status:'no_past_endpoint_differences',foldFYs,foldDifferenceSums,informativeFoldFYs,informativeFoldCount,D,differenceSum,knots:[],intervals:[],observations:rows};
+ let slope=0;const knotMap=new Map();
+ for(const r of rows){
+  const d=r.m-r.g;if(d===0)continue;
+  const knot=(r.actual-r.g)/d,mass=Math.abs(d);
+  if(knot>0){slope-=mass;if(knot<1)knotMap.set(knot,(knotMap.get(knot)||0)+mass);}
+  else slope+=mass;
+ }
+ const knots=[...knotMap].map(([value,mass])=>({value,mass})).sort((a,b)=>a.value-b.value),intervals=[];
+ let previous=0;
+ const finish=(weight,status,derivativeLeft,derivativeRight)=>{
+  if(!(weight>0&&weight<1)||!Number.isFinite(weight))throw new Error('Invalid interior blend weight');
+  return{weight,status,foldFYs,foldDifferenceSums,informativeFoldFYs,informativeFoldCount,D,differenceSum,
+   impliedLowerBound:betaBarrierRoot(informativeFoldCount),impliedUpperBound:1-betaBarrierRoot(informativeFoldCount),
+   derivativeLeft,derivativeRight,objective:barrierObjective(rows,D,weight),objectiveAtHalf:barrierObjective(rows,D,.5),knots,intervals,observations:rows};
+ };
+ for(const k of knots){
+  const C=slope/D,root=betaBarrierRoot(C);intervals.push({left:previous,right:k.value,slope,C,root});
+  if(root>previous&&root<k.value)return finish(root,'interval_root',0,0);
+  const nextSlope=slope+2*k.mass,derivativeLeft=C-1/k.value+1/(1-k.value),derivativeRight=nextSlope/D-1/k.value+1/(1-k.value);
+  if(derivativeLeft<=0&&derivativeRight>=0)return finish(k.value,'knot_root',derivativeLeft,derivativeRight);
+  slope=nextSlope;previous=k.value;
+ }
+ const C=slope/D,root=betaBarrierRoot(C);intervals.push({left:previous,right:1,slope,C,root});
+ if(root>=previous&&root<1)return finish(root,'final_interval_root',0,0);
+ throw new Error('Blend finite-knot solver did not locate optimum');
+}
+
+function historyContext(history,fy){
+ if(!Number.isInteger(fy)||!Array.isArray(history)||history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||r.ym>=fy+'-04'||!Number.isFinite(r.base)||!Number.isFinite(r.spot)))throw new Error('Invalid or future blend history');
+ const by=new Map(history.map(r=>[r.ym,r]));if(by.size!==history.length)throw new Error('Duplicate blend history');
+ for(let i=1;i<history.length;i++){
+  const [y,m]=history[i-1].ym.split('-').map(Number);
+  if(new Date(Date.UTC(y,m,1)).toISOString().slice(0,7)!==history[i].ym)throw new Error('Noncontinuous blend history');
+ }
+ if(history[history.length-1]?.ym!==fy+'-03')throw new Error('Blend history must end priorMarch');
+ const latest=fiscalMonths(fy-1).map(ym=>by.get(ym));if(!latest.every(Boolean))throw new Error('Incomplete blend prior12');
+ if(!fiscalMonths(fy-2).every(ym=>by.has(ym)))throw new Error('Incomplete blend prior24');
+ const cleanFYs=[];for(let y=2022;y<fy;y++)if(fiscalMonths(y).every(ym=>by.has(ym)))cleanFYs.push(y);
+ if(cleanFYs.length<2)throw new Error('Insufficient blend clean FYs');
+ const baseNet12=sum(latest.map(r=>r.base)),spotNet12=sum(latest.map(r=>r.spot)),net12=baseNet12+spotNet12;
+ if(![baseNet12,spotNet12,net12].every(Number.isFinite))throw new Error('Invalid blend prior net');
+ return{fy,baseNet12,spotNet12,net12,active:net12>0,cleanFYs:cleanFYs.slice(-3)};
+}
+
+function validateEndpoints(pair,c){
+ if(!pair||!pair.g||!pair.m)throw new Error('Missing complete G/M endpoints');
+ for(const endpoint of [pair.g,pair.m]){
+  if(!Array.isArray(endpoint.points)||endpoint.points.length!==12||endpoint.points.some(v=>!Number.isSafeInteger(v)||v<0)||
+     !Number.isSafeInteger(endpoint.total)||sum(endpoint.points)!==endpoint.total)throw new Error('Invalid complete endpoint JPY');
+  if(c.net12>=1&&endpoint.total<1)throw new Error('Endpoint economic all0 failure');
+  if(!c.active&&endpoint.total!==0)throw new Error('Inactive endpoint positive');
+  if(endpoint.net12!==undefined&&endpoint.net12!==c.net12)throw new Error('Endpoint history net mismatch');
+ }
+ return pair;
+}
+
+function fixedEndpoints(history,fy){
+ if(METHODS[1]!=='M_HALF_MEAN_UNIFORM_TIMING_UNIT_MEAN_MAP')throw new Error('Frozen M identity changed');
+ return{g:forecastGOnly(history,fy).prediction,m:forecastCandidate(history,fy,METHODS[1])};
+}
+
+/** Final operator acts on complete JPY policies, never on their raw or uncalibrated amounts. */
+function finalizeBlend(g,m,weights,net12){
+ if(!Number.isFinite(net12)||!Array.isArray(weights)||weights.length!==2||weights.some(w=>!Number.isFinite(w)||w<=0||w>=1))throw new Error('Invalid blend finalization');
+ const c={net12,active:net12>0};validateEndpoints({g,m},c);
+ let raw=g.points.map((v,i)=>(1-weights[Math.floor(i/6)])*v+weights[Math.floor(i/6)]*m.points[i]),allocation=integerYen(raw),rescue='none';
+ if(!c.active){raw=Array(12).fill(0);allocation=integerYen(raw);rescue='inactive_or_nonpositive_prior12_net';}
+ if(allocation.total===0&&net12>=1){raw=g.points.slice();allocation=integerYen(raw);rescue='blend_zero_rescued_by_G';}
+ if(net12>=1&&allocation.total<1)throw new Error('Blend economic all0 failure');
+ return{raw,points:allocation.points,total:allocation.total,allocation,rescue};
+}
+
+/** Endpoint override is solely for synthetic interface tests. Default uses immutable complete G/M imports. */
+function forecastNOnly(history,fy,{endpointPair=fixedEndpoints}={}){
+ const c=historyContext(history,fy),outer=validateEndpoints(endpointPair(history,fy),c),eligible=[],folds=[];
+ for(let y=2024;y<fy;y++){
+  const heldout=fiscalMonths(y).map(ym=>history.find(r=>r.ym===ym));if(!heldout.every(Boolean))continue;
+  const train=history.filter(r=>r.ym<y+'-04');let inner;
+  try{inner=historyContext(train,y);}catch(error){
+   if(['Blend history must end priorMarch','Incomplete blend prior12','Incomplete blend prior24','Insufficient blend clean FYs'].includes(error.message))continue;
+   throw error;
+  }
+  eligible.push({y,train,inner,heldout});
+ }
+ for(const {y,train,inner,heldout}of eligible.slice(-2)){
+  const pair=validateEndpoints(endpointPair(train,y),inner);
+  folds.push({fy:y,historyStart:train[0].ym,historyEnd:train[train.length-1].ym,cleanFYs:inner.cleanFYs,
+   endpointG:pair.g.points.slice(),endpointM:pair.m.points.slice(),actualMonthly:heldout.map(r=>r.base+r.spot),endpoints:pair});
+ }
+ const selected=folds.slice(-2),calibration=Array.from({length:2},(_,h)=>fitPastBlendWeight(selected.flatMap(f=>Array.from({length:6},(_,m)=>({foldFY:f.fy,month:h*6+m,g:f.endpointG[h*6+m],m:f.endpointM[h*6+m],actual:f.actualMonthly[h*6+m]})))));
+ const weights=calibration.map(f=>f.weight),final=finalizeBlend(outer.g,outer.m,weights,c.net12);
+ return{method:METHOD,fy,active:c.active,net12:c.net12,baseNet12:c.baseNet12,spotNet12:c.spotNet12,cleanFYs:c.cleanFYs,
+  historyStart:history[0].ym,historyEnd:history[history.length-1].ym,selectedFoldFYs:selected.map(f=>f.fy),folds:selected,calibration,weights,
+  endpointG:outer.g.points.slice(),endpointM:outer.m.points.slice(),endpoints:outer,...final};
+}
+
+return {METHOD,betaBarrierRoot,fitPastBlendWeight,finalizeBlend,forecastNOnly};
+})();
+
+// Frozen numerical source: annual-tail-improvement-20261018/candidates/own-spot-half.mjs
+const m10 = (function(){
+const forecastHOnly = m6["forecastHOnly"];
+const integerYen = m6["integerYen"];
+const sum = m6["sum"];
+const mergeSupport = m4["mergeSupport"];
+const nativeSpotSupport = m4["nativeSpotSupport"];
+const lowerWeightedMedian = m4["lowerWeightedMedian"];
+const distributionMean = m4["distributionMean"];
+const convolve = m4["convolve"];
+const expectationAnchor = m4["expectationAnchor"];
+const kahanSum = m4["kahanSum"];
+const forecastNOnly = m9["forecastNOnly"];
+/** Frozen P/Q research: own-SPOT zeroBASE law, half-phase mixing, complete-policy H blend. */
+
+
+
+
+
+
+
+
+const METHODS=Object.freeze({P:'P_OWN_SPOT_HALF_PHASE_CDF_H_BLEND',Q:'Q_OWN_SPOT_HALF_PHASE_MEAN_H_BLEND'});
+function checkKind(kind){if(!Object.prototype.hasOwnProperty.call(METHODS,kind))throw new Error('P/Q kind must be P or Q');}
+
+/** 0.5 own month + 0.5 uniform native law within the original fiscal half, never across halves. */
+function halfPhase(nativeSupports){
+ if(!Array.isArray(nativeSupports)||nativeSupports.length!==12)throw new Error('12 native SPOT supports required');
+ const native=nativeSupports.map(rows=>mergeSupport(rows));
+ return native.map((own,m)=>{
+  const start=Math.floor(m/6)*6;
+  return mergeSupport([...own.map(r=>({value:r.value,weight:.5*r.weight})),
+   ...native.slice(start,start+6).flatMap(s=>s.map(r=>({value:r.value,weight:r.weight/12})))]);
+ });
+}
+
+/**
+ * No supplied name, seed, target actual or precomputed outer model is accepted.
+ * The complete frozen H provides unchanged native BASE and the economic rescue.
+ */
+function ownSpotDistribution(history,fy){
+ const h=forecastHOnly(history,fy),original=h.nativeDistribution;
+ const a=original.nativeHistoryStart.split('-').map(Number);
+ const ownBackground=nativeApi.fitSpotRecurringModel_(original.native.nativeSPOT.slice(),new Date(a[0],a[1]-1,1),new Date(fy,2,1),Array(12).fill(0),{});
+ const baseSupport=original.baseSupport,spotSupport=Array.from({length:12},(_,m)=>nativeSpotSupport(ownBackground,m)),mixedSpotSupport=halfPhase(spotSupport);
+ const totalSupport=baseSupport.map((b,m)=>convolve(b,mixedSpotSupport[m])),totalMedian=totalSupport.map(lowerWeightedMedian),totalMean=totalSupport.map(distributionMean);
+ const anchor=expectationAnchor(baseSupport,spotSupport,original.native.observedMonths,Math.max(0,original.net12));
+ const phaseNativeMean=kahanSum(spotSupport.map(distributionMean)),phaseMixedMean=kahanSum(mixedSpotSupport.map(distributionMean));
+ const halfNativeMean=[0,6].map(start=>kahanSum(spotSupport.slice(start,start+6).map(distributionMean)));
+ const halfMixedMean=[0,6].map(start=>kahanSum(mixedSpotSupport.slice(start,start+6).map(distributionMean)));
+ return{fy,nativeYears:original.nativeYears,nativeHistoryStart:original.nativeHistoryStart,nativeHistoryEnd:original.nativeHistoryEnd,
+  discardedLeadingMonths:original.discardedLeadingMonths,native:{...original.native,background:ownBackground},ownBackground,
+  originalNativeBackground:original.native.background,baseSupport,spotSupport,mixedSpotSupport,totalSupport,totalMedian,totalMean,
+  bNet12:original.bNet12,sNet12:original.sNet12,net12:original.net12,anchor,phaseNativeMean,phaseMixedMean,halfNativeMean,halfMixedMean,
+  context:h.context,endpointH:h.prediction};
+}
+
+function validateH(endpoint,context){
+ if(!endpoint||!Array.isArray(endpoint.points)||endpoint.points.length!==12||endpoint.points.some(v=>!Number.isSafeInteger(v)||v<0)||
+  !Number.isSafeInteger(endpoint.total)||sum(endpoint.points)!==endpoint.total)throw new Error('Invalid complete frozen H endpoint');
+ if(context.net>=1&&endpoint.total<1)throw new Error('Frozen H economic all0 failure');
+ if(!context.active&&endpoint.total!==0)throw new Error('Inactive H positive');
+ if(endpoint.net12!==undefined&&endpoint.net12!==context.net)throw new Error('H history net mismatch');
+}
+
+/** Synthetic interface: context={fy,active,net,years}, completeH={points,total}, distribution={totalMedian,totalMean,anchor}. */
+function buildEndpoint(context,completeH,distribution,kind){
+ checkKind(kind);
+ if(!context||!Number.isInteger(context.fy)||!Number.isFinite(context.net)||context.active!==(context.net>0))throw new Error('Invalid own-SPOT context');
+ validateH(completeH,context);
+ const center=kind==='P'?distribution?.totalMedian?.map(r=>r.value):distribution?.totalMean;
+ if(!Array.isArray(center)||center.length!==12||center.some(v=>!Number.isFinite(v)||v<0)||
+  !Number.isFinite(distribution?.anchor?.scale)||distribution.anchor.scale<0)throw new Error('Invalid own-SPOT center or anchor');
+ let raw=center.map(v=>v*distribution.anchor.scale),rescue='none';
+ if(!context.active)raw=Array(12).fill(0);
+ const beforeRescue=integerYen(raw);
+ if(beforeRescue.total===0&&context.net>=1){raw=completeH.points.slice();rescue='own_SPOT_total_zero_rescued_by_complete_H';}
+ const allocation=integerYen(raw);
+ if(context.net>=1&&allocation.total<1)throw new Error('Own-SPOT economic all0 guard failed');
+ if(!context.active&&allocation.total!==0)throw new Error('Inactive own-SPOT positive');
+ return{id:kind+'_OWN_SPOT_HALF_PHASE_TOTAL_'+(kind==='P'?'LOWER_CDF_MEDIAN':'MEAN'),kind,fy:context.fy,
+  active:context.active,net12:context.net,years:context.years,centerMethod:kind==='P'?'lower_weighted_CDF_median':'finite_TOTAL_expectation',
+  center:center.slice(),totalMedian:distribution.totalMedian,totalMean:distribution.totalMean,anchor:distribution.anchor,
+  beforeRescue,rescue,raw,points:allocation.points,total:allocation.total,allocation};
+}
+
+/** Legacy N slot m/endpointM means complete immutable H here; no original M/J/K/L policy or lambda is used. */
+function forecastPQ(history,fy,kind){
+ checkKind(kind);
+ const endpointPair=(prefix,originFY)=>{
+  const distribution=ownSpotDistribution(prefix,originFY);
+  return{g:buildEndpoint(distribution.context,distribution.endpointH,distribution,kind),m:distribution.endpointH,
+   distribution,slotRoles:{g:'own_SPOT_complete_'+kind,m:'immutable_complete_H',weight:'complete_H'}};
+ };
+ const blended=forecastNOnly(history,fy,{endpointPair});
+ return{...blended,method:METHODS[kind],kind,legacyBlendMethod:blended.method,
+  slotRoles:{g:'own_SPOT_complete_'+kind,m:'immutable_complete_H',endpointG:'own_SPOT_complete_'+kind,endpointM:'immutable_complete_H',weight:'complete_H'}};
+}
+
+return {METHODS,halfPhase,ownSpotDistribution,buildEndpoint,forecastPQ};
+})();
+
+// Frozen numerical source: half-tail-fixed-ui-20261018/candidates/forecast-rs.mjs
+const m11 = (function(){
+const forecastGOnly = m7["forecastGOnly"];
+const forecastPQ = m10["forecastPQ"];
+const finalizeBlend = m9["finalizeBlend"];
+const integerYen = m6["integerYen"];
+const fiscalMonths = m6["fiscalMonths"];
+const sum = m6["sum"];
+/** Frozen R/S planning research. Pure history, no company/target/seed inputs and no stochastic sampling. */
+
+
+
+
+
+const METHODS=Object.freeze({R:'R_JOINT_LOSS_G_Q_BLEND',S:'S_DENSE_GROWTH_G_BLEND'});
+const MAX=Number.MAX_SAFE_INTEGER,BELOW_ONE=1-Number.EPSILON/2;
+const numberProof=v=>Number.isFinite(v)?v:v===Infinity?'Infinity':v===-Infinity?'-Infinity':'NaN';
+function checkKind(kind){if(!Object.prototype.hasOwnProperty.call(METHODS,kind))throw new Error('R/S kind must be R or S');}
+function contextOf(history,fy){
+ if(!Number.isInteger(fy)||!Array.isArray(history)||history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||r.ym>=fy+'-04'||!Number.isFinite(r.base)||!Number.isFinite(r.spot)))throw new Error('Invalid or future R/S history');
+ const by=new Map(history.map(r=>[r.ym,r]));if(by.size!==history.length)throw new Error('Duplicate R/S history');
+ for(let i=1;i<history.length;i++){const[y,m]=history[i-1].ym.split('-').map(Number);if(new Date(Date.UTC(y,m,1)).toISOString().slice(0,7)!==history[i].ym)throw new Error('Noncontinuous R/S history');}
+ if(history[history.length-1]?.ym!==fy+'-03')throw new Error('R/S history must end priorMarch');
+ const latest=fiscalMonths(fy-1).map(ym=>by.get(ym));if(!latest.every(Boolean))throw new Error('Incomplete R/S prior12');
+ if(!fiscalMonths(fy-2).every(ym=>by.has(ym)))throw new Error('Incomplete R/S prior24');
+ const clean=[];for(let y=2022;y<fy;y++)if(fiscalMonths(y).every(ym=>by.has(ym)))clean.push(y);
+ if(clean.length<2)throw new Error('Insufficient R/S clean FYs');
+ const baseNet12=sum(latest.map(r=>r.base)),spotNet12=sum(latest.map(r=>r.spot)),net12=baseNet12+spotNet12;
+ if(![baseNet12,spotNet12,net12].every(Number.isFinite))throw new Error('Invalid R/S prior net');
+ return{fy,baseNet12,spotNet12,net12,active:net12>0,cleanFYs:clean.slice(-3),historyStart:history[0].ym,historyEnd:history[history.length-1].ym,observedMonths:history.length};
+}
+function validPolicy(policy,c,label){
+ if(!policy||!Array.isArray(policy.points)||policy.points.length!==12||policy.points.some(v=>!Number.isSafeInteger(v)||v<0)||!Number.isSafeInteger(policy.total)||policy.total<0||sum(policy.points)!==policy.total)throw new Error('Invalid complete '+label+' policy');
+ if(policy.net12!==undefined&&policy.net12!==c.net12)throw new Error(label+' history net mismatch');
+ if(c.net12>=1&&policy.total<1)throw new Error(label+' economic all0 failure');
+ if(!c.active&&policy.total!==0)throw new Error('Inactive '+label+' positive');
+ return policy;
+}
+function sourcePrefix(c){return{fy:c.fy,historyStart:c.historyStart,historyEnd:c.historyEnd,observedMonths:c.observedMonths,cleanFYs:c.cleanFYs.slice()};}
+/** Retain complete-policy points/flags and strict-prefix calibration without repeated finite-distribution matrices. */
+function compactPolicy(p){
+ const q={};for(const k of ['id','method','kind','fy','active','net12','baseNet12','spotNet12','historyStart','historyEnd','rescue','mode','applied','fallbackReason','growthReason','growthFactor','densityPositiveMonths','densityObservedMonths','dense','levelNetMonthly','level','latest6Net','priorSame6Net','annualRaw','allocationInputSum','numericGuardDetail','sourcePrefix','growthMonthSlices','netAggregation','levelAggregation','calendarAssumption','slotRoles','rightEndpointRole','weights','selectedFoldFYs','cleanFYs','years','centerMethod'])if(p[k]!==undefined)q[k]=p[k];
+ q.points=p.points.slice();q.total=p.total;if(Array.isArray(p.raw))q.raw=p.raw.slice();
+ if(p.allocation)q.allocation=p.allocation;if(p.beforeRescue)q.beforeRescue=p.beforeRescue;
+ if(p.calibration)q.calibration=p.calibration;
+ if(p.folds)q.folds=p.folds.map(f=>({fy:f.fy,historyStart:f.historyStart,historyEnd:f.historyEnd,cleanFYs:f.cleanFYs,endpointG:f.endpointG?.slice(),endpointM:f.endpointM?.slice()}));
+ if(p.fallbackPolicy)q.fallbackPolicy=compactPolicy(p.fallbackPolicy);
+ return q;
+}
+
+/** Synthetic override q is a COMPLETE Q policy, never a raw endpoint. No outer-model cache is accepted. */
+function buildGrowthEndpoint(history,fy,{q}={}){
+ const c=contextOf(history,fy),totals=history.map(r=>r.base+r.spot);
+ const meta={id:'T_DENSE_TOTAL_DAMPED_GROWTH_UNIFORM',fy,active:c.active,net12:c.net12,baseNet12:c.baseNet12,spotNet12:c.spotNet12,
+  densityObservedMonths:24,densityPositiveMonths:null,dense:null,levelNetMonthly:null,level:null,latest6Net:null,priorSame6Net:null,growthFactor:null,growthReason:'not_computed_nonfinite_monthly_TOTAL',annualRaw:null,
+  sourcePrefix:sourcePrefix(c),growthMonthSlices:{latest6:history.slice(-6).map(r=>r.ym),priorSame6:history.slice(-18,-12).map(r=>r.ym)},
+  netAggregation:'legacy_sum_BASE_plus_sum_SPOT',levelAggregation:'sum_monthly_raw_TOTAL',calendarAssumption:'uniform_future12_for_dense_activity'};
+ if(q!==undefined)validPolicy(q,c,'Q');
+ let cachedQ=q;
+ const completeQ=()=>validPolicy(cachedQ??(cachedQ=forecastPQ(history,fy,'Q')),c,'Q');
+ const fallback=(reason,detail=null)=>{const policy=completeQ(),allocation=integerYen(policy.points);return{...meta,mode:'complete_Q',applied:false,fallbackReason:reason,numericGuardDetail:detail,
+  raw:policy.points.slice(),points:policy.points.slice(),total:policy.total,allocation,rescue:reason,fallbackPolicy:compactPolicy(policy)};};
+ // Finite source components may overflow only when added. Preserve primitive validation above,
+ // but use a valid complete Q rather than interpreting those derived totals as density or level.
+ if(totals.some(v=>!Number.isFinite(v)))return fallback('numeric_complete_Q','nonfinite_monthly_TOTAL');
+ const densityPositiveMonths=totals.slice(-24).filter(v=>v>0).length,dense=densityPositiveMonths>12;
+ const levelNetMonthly=sum(totals.slice(-12)),level=Math.max(0,levelNetMonthly),latest6Net=sum(totals.slice(-6)),priorSame6Net=sum(totals.slice(-18,-12));
+ let growthFactor=1,growthReason='half_nets_below_one';
+ if(latest6Net>=1&&priorSame6Net>=1){growthFactor=Math.sqrt(latest6Net/priorSame6Net);growthReason='sqrt_same_half_ratio';}
+ const annualRaw=level*growthFactor;
+ Object.assign(meta,{densityPositiveMonths,dense,levelNetMonthly,level,latest6Net,priorSame6Net,growthFactor,growthReason,annualRaw});
+ if(!c.active){const raw=Array(12).fill(0),allocation=integerYen(raw);return{...meta,mode:'inactive',applied:false,fallbackReason:null,raw,points:allocation.points,total:allocation.total,allocation,rescue:'inactive_or_nonpositive_prior12_net'};}
+ if(!dense)return fallback('sparse_complete_Q');
+ if(![levelNetMonthly,level,latest6Net,priorSame6Net,growthFactor,annualRaw].every(Number.isFinite))return fallback('numeric_complete_Q','nonfinite_growth_or_annual');
+ if(!Number.isSafeInteger(Math.round(annualRaw))||annualRaw<0)return fallback('numeric_complete_Q','unsafe_annual_round');
+ const raw=Array(12).fill(annualRaw/12),allocationInputSum=sum(raw);
+ if(raw.some(v=>!Number.isFinite(v)||v<0)||!Number.isFinite(allocationInputSum)||!Number.isSafeInteger(Math.round(allocationInputSum)))return fallback('numeric_complete_Q','unsafe_allocation_input_sum');
+ let allocation;try{allocation=integerYen(raw);}catch(error){return fallback('numeric_complete_Q','integerYen:'+error.message);}
+ if(allocation.total===0&&c.net12>=1)return fallback('currency_zero_complete_Q');
+ return{...meta,mode:'dense_growth_uniform',applied:true,fallbackReason:null,allocationInputSum,raw,points:allocation.points,total:allocation.total,allocation,rescue:'none'};
+}
+
+function normalizeRows(rows){
+ if(!Array.isArray(rows))throw new Error('Joint fit rows must be an array');
+ return rows.map(r=>{
+  if(!r||!Number.isInteger(r.foldFY))throw new Error('Invalid joint fold year');
+  const left=r.left??r.g,right=r.right??r.m;
+  if(r.left!==undefined&&r.g!==undefined&&r.left!==r.g||r.right!==undefined&&r.m!==undefined&&r.right!==r.m)throw new Error('Conflicting joint endpoint aliases');
+  if(!Number.isSafeInteger(left)||left<0||!Number.isSafeInteger(right)||right<0||!Number.isFinite(r.actual)||Math.abs(r.actual)>MAX)throw new Error('Invalid joint fit observation');
+  return{foldFY:r.foldFY,...(r.month!==undefined?{month:r.month}:{}),left,right,actual:r.actual,d:right-left};
+ });
+}
+function machineInterior(weight){
+ if(!Number.isFinite(weight)||weight<0||weight>1)throw new Error('Invalid numerical joint root');
+ if(weight===0)return{weight:Number.MIN_VALUE,clamp:{applied:true,from:0,to:Number.MIN_VALUE,reason:'rounded_zero_machine_interior'}};
+ if(weight===1)return{weight:BELOW_ONE,clamp:{applied:true,from:1,to:BELOW_ONE,reason:'rounded_one_machine_interior'}};
+ return{weight,clamp:{applied:false}};
+}
+
+/** rows={foldFY,month?,left,right,actual}; g/m aliases are accepted for legacy synthetic fixtures. */
+function fitJointBlendWeight(rows){
+ const observations=normalizeRows(rows),foldFYs=[...new Set(observations.map(r=>r.foldFY))].sort((a,b)=>a-b);
+ const foldDifferenceSums=foldFYs.map(foldFY=>{const rr=observations.filter(r=>r.foldFY===foldFY);return{foldFY,differenceSum:sum(rr.map(r=>Math.abs(r.d))),squaredDifferenceSum:sum(rr.map(r=>r.d*r.d))};});
+ const informative=foldDifferenceSums.filter(r=>r.differenceSum>0),informativeFoldFYs=informative.map(r=>r.foldFY),F=informative.length;
+ const differenceSum=sum(informative.map(r=>r.differenceSum)),squaredDifferenceSum=sum(informative.map(r=>r.squaredDifferenceSum)),D=F?differenceSum/F:0,B=F?squaredDifferenceSum/F:0;
+ if(![differenceSum,squaredDifferenceSum,D,B].every(Number.isFinite)||D<0||B<0)throw new Error('Invalid joint fit scales');
+ const base={foldFYs,foldDifferenceSums,informativeFoldFYs,informativeFoldCount:F,D,B,differenceSum,squaredDifferenceSum,observations};
+ if(!(D>0))return{...base,weight:.5,status:'no_past_endpoint_differences',knots:[],intervals:[],bisection:null,machineInteriorClamp:{applied:false}};
+ if(!(B>0))throw new Error('Nonpositive joint square scale');
+ const squareLinearCoefficient=2*sum(observations.map(r=>r.d*(r.left-r.actual)))/B,squareSlopeCoefficient=2*sum(observations.map(r=>r.d*r.d))/B;
+ if(!Number.isFinite(squareLinearCoefficient)||!Number.isFinite(squareSlopeCoefficient))throw new Error('Nonfinite joint square coefficients');
+ const gradient=(w,slope)=>slope/D+squareLinearCoefficient+squareSlopeCoefficient*w-1/w+1/(1-w);
+ let initialL1Slope=0;const knotMap=new Map();
+ for(const r of observations){if(r.d===0)continue;const k=(r.actual-r.left)/r.d,mass=Math.abs(r.d);if(k>0){initialL1Slope-=mass;if(k<1)knotMap.set(k,(knotMap.get(k)||0)+mass);}else initialL1Slope+=mass;}
+ const knots=[...knotMap].map(([value,mass])=>({value,mass})).sort((a,b)=>a.value-b.value),intervals=[];
+ const objective=w=>{const errors=observations.map(r=>r.left+w*r.d-r.actual),absoluteLoss=sum(errors.map(Math.abs))/D,squareLoss=sum(errors.map(e=>e*e))/B,priorPenalty=-Math.log(4*w*(1-w));return{absoluteLoss,squareLoss,priorPenalty,total:absoluteLoss+squareLoss+priorPenalty};};
+ const finish=(rawWeight,status,slope,bisection=null,knotProof=null)=>{
+  const solved=machineInterior(rawWeight),weight=solved.weight;
+  return{...base,weight,status,squareLinearCoefficient,squareSlopeCoefficient,initialL1Slope,knots,intervals,bisection,
+   machineInteriorClamp:solved.clamp,knotProof,gradientAtReturned:numberProof(gradient(weight,slope)),objective:objective(weight),objectiveAtHalf:objective(.5)};
+ };
+ const bisect=(left,right,slope)=>{
+  let lo=left,hi=right,iterations=0,stagnated=false;
+  for(let i=0;i<80;i++){const mid=(lo+hi)/2;if(mid===lo||mid===hi){stagnated=true;break;}const grad=gradient(mid,slope);if(Number.isNaN(grad))throw new Error('NaN joint gradient');if(grad>=0)hi=mid;else lo=mid;iterations++;}
+  const midpoint=(lo+hi)/2;return finish(midpoint,'smooth_interval_bisection',slope,{iterations,maximumIterations:80,stagnated,left:lo,right:hi,rawMidpoint:midpoint,gradientZeroBranch:'upper',fixedIEEEOperation:'(left+right)/2'});
+ };
+ let previous=0,slope=initialL1Slope;
+ for(const k of knots){
+  const leftGradient=gradient(k.value,slope),nextSlope=slope+2*k.mass,rightGradient=gradient(k.value,nextSlope);
+  k.l1SlopeLeft=slope;k.l1SlopeRight=nextSlope;k.gradientLeft=numberProof(leftGradient);k.gradientRight=numberProof(rightGradient);
+  intervals.push({left:previous,right:k.value,l1Slope:slope,gradientAtRight:numberProof(leftGradient)});
+  if(leftGradient>0)return bisect(previous,k.value,slope);
+  if(leftGradient<=0&&rightGradient>=0)return finish(k.value,'finite_knot_root',slope,null,{value:k.value,derivativeLeft:numberProof(leftGradient),derivativeRight:numberProof(rightGradient)});
+  slope=nextSlope;previous=k.value;
+ }
+ intervals.push({left:previous,right:1,l1Slope:slope,gradientAtRight:'Infinity'});
+ return bisect(previous,1,slope);
+}
+
+function buildPair(history,fy,kind){
+ const c=contextOf(history,fy),g=validPolicy(forecastGOnly(history,fy).prediction,c,'G');
+ const right=validPolicy(kind==='R'?forecastPQ(history,fy,'Q'):buildGrowthEndpoint(history,fy),c,kind==='R'?'Q':'T');
+ return{g:compactPolicy(g),m:compactPolicy(right),sourcePrefix:sourcePrefix(c),rightEndpointRole:kind==='R'?'complete_frozen_Q':'complete_T_dense_growth_or_Q'};
+}
+
+/** Same nested strict prefixes as N, but one complete-policy joint L1+L2 fit; S is singleton adoption candidate. */
+function forecastRS(history,fy,kind){
+ checkKind(kind);const c=contextOf(history,fy),outer=buildPair(history,fy,kind),eligible=[],folds=[];
+ for(let y=2024;y<fy;y++){
+  const heldout=fiscalMonths(y).map(ym=>history.find(r=>r.ym===ym));if(!heldout.every(Boolean))continue;
+  const train=history.filter(r=>r.ym<y+'-04');let inner;
+  try{inner=contextOf(train,y);}catch(error){if(['R/S history must end priorMarch','Incomplete R/S prior12','Incomplete R/S prior24','Insufficient R/S clean FYs'].includes(error.message))continue;throw error;}
+  const actualMonthly=heldout.map(r=>r.base+r.spot);
+  eligible.push({y,train,inner,actualMonthly});
+ }
+ for(const f of eligible.slice(-2)){
+  if(f.actualMonthly.some(v=>!Number.isFinite(v)||Math.abs(v)>MAX))throw new Error('Unsafe R/S past TOTAL actual');
+  const pair=buildPair(f.train,f.y,kind);folds.push({fy:f.y,historyStart:f.train[0].ym,historyEnd:f.train[f.train.length-1].ym,cleanFYs:f.inner.cleanFYs,
+   endpointG:pair.g.points.slice(),endpointM:pair.m.points.slice(),endpointRight:pair.m.points.slice(),actualMonthly:f.actualMonthly,endpoints:pair,rightEndpointRole:pair.rightEndpointRole});
+ }
+ const calibration=Array.from({length:2},(_,h)=>fitJointBlendWeight(folds.flatMap(f=>Array.from({length:6},(_,m)=>({foldFY:f.fy,month:h*6+m,left:f.endpointG[h*6+m],right:f.endpointRight[h*6+m],actual:f.actualMonthly[h*6+m]})))));
+ const weights=calibration.map(r=>r.weight),final=finalizeBlend(outer.g,outer.m,weights,c.net12);
+ return{method:METHODS[kind],kind,role:kind==='S'?'fixed_singleton_adoption_candidate':'prespecified_diagnostic_control',fy,active:c.active,net12:c.net12,baseNet12:c.baseNet12,spotNet12:c.spotNet12,
+  cleanFYs:c.cleanFYs,historyStart:c.historyStart,historyEnd:c.historyEnd,sourcePrefix:sourcePrefix(c),selectedFoldFYs:folds.map(f=>f.fy),folds,calibration,weights,
+  endpointG:outer.g.points.slice(),endpointM:outer.m.points.slice(),endpointRight:outer.m.points.slice(),endpoints:outer,rightEndpointRole:outer.rightEndpointRole,
+  slotRoles:{g:'complete_frozen_original_G_CDF',m:outer.rightEndpointRole,endpointM:outer.rightEndpointRole,weight:'complete_right_policy'},...final};
+}
+
+return {METHODS,buildGrowthEndpoint,fitJointBlendWeight,forecastRS};
+})();
+
+// Frozen numerical source: shape-preserving-improvement-20261018/candidates/forecast-uv.mjs
+const m12 = (function(){
+const forecastRS = m11["forecastRS"];
+const fiscalMonths = m6["fiscalMonths"];
+const sum = m6["sum"];
+/** U/V private planning research. Fixed complete-S half masses; history-only, no stochastic sampling. */
+
+
+
+const METHODS=Object.freeze({U:'U_HALF_MASS_HISTORY_SHAPE',V:'V_VALIDATED_HALF_SHAPE_RIDGE_BLEND'});
+const MAX=Number.MAX_SAFE_INTEGER;
+const numericProof=v=>Number.isFinite(v)?v:v===Infinity?'Infinity':v===-Infinity?'-Infinity':'NaN';
+const halfSums=points=>[sum(points.slice(0,6)),sum(points.slice(6))];
+const same=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]);
+
+function contextOf(history,fy){
+ if(!Number.isInteger(fy)||!Array.isArray(history)||history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||r.ym>=fy+'-04'||!Number.isFinite(r.base)||!Number.isFinite(r.spot)))throw new Error('Invalid or future U/V history');
+ const by=new Map(history.map(r=>[r.ym,r]));if(by.size!==history.length)throw new Error('Duplicate U/V history');
+ for(let i=1;i<history.length;i++){const[y,m]=history[i-1].ym.split('-').map(Number);if(new Date(Date.UTC(y,m,1)).toISOString().slice(0,7)!==history[i].ym)throw new Error('Noncontinuous U/V history');}
+ if(history[history.length-1]?.ym!==fy+'-03')throw new Error('U/V history must end priorMarch');
+ if(!fiscalMonths(fy-1).every(ym=>by.has(ym)))throw new Error('Incomplete U/V prior12');
+ if(!fiscalMonths(fy-2).every(ym=>by.has(ym)))throw new Error('Incomplete U/V prior24');
+ const clean=[];for(let y=2022;y<fy;y++)if(fiscalMonths(y).every(ym=>by.has(ym)))clean.push(y);
+ if(clean.length<2)throw new Error('Insufficient U/V clean FYs');
+ const latest=fiscalMonths(fy-1).map(ym=>by.get(ym)),baseNet12=sum(latest.map(r=>r.base)),spotNet12=sum(latest.map(r=>r.spot)),net12=baseNet12+spotNet12;
+ if(![baseNet12,spotNet12,net12].every(Number.isFinite))throw new Error('Invalid U/V prior net');
+ return{fy,baseNet12,spotNet12,net12,active:net12>0,cleanFYs:clean.slice(-3),historyStart:history[0].ym,historyEnd:history[history.length-1].ym,observedMonths:history.length};
+}
+function sourcePrefix(c){return{fy:c.fy,historyStart:c.historyStart,historyEnd:c.historyEnd,observedMonths:c.observedMonths,cleanFYs:c.cleanFYs.slice()};}
+function validS(s,c){
+ if(!s||!Array.isArray(s.points)||s.points.length!==12||s.points.some(v=>!Number.isSafeInteger(v)||v<0)||!Number.isSafeInteger(s.total)||s.total<0||sum(s.points)!==s.total)throw new Error('Invalid complete S policy');
+ if(s.net12!==undefined&&s.net12!==c.net12||s.active!==undefined&&s.active!==c.active||s.fy!==undefined&&s.fy!==c.fy)throw new Error('Complete S context mismatch');
+ if(c.net12>=1&&s.total<1||!c.active&&s.total!==0)throw new Error('Complete S economic boundary failure');
+ if(!s.endpoints?.m||typeof s.endpoints.m.mode!=='string'||typeof s.endpoints.m.applied!=='boolean')throw new Error('Missing complete S outer T metadata');
+ return s;
+}
+function compactS(s,c){
+ return{method:s.method??'S_SYNTHETIC_COMPLETE_POLICY',fy:c.fy,points:s.points.slice(),total:s.total,net12:c.net12,active:c.active,
+  halfTargets:halfSums(s.points),weights:s.weights?.slice()??null,selectedFoldFYs:s.selectedFoldFYs?.slice()??[],rescue:s.rescue??null,
+  outerTMode:s.endpoints.m.mode,outerTApplied:s.endpoints.m.applied,sourcePrefix:sourcePrefix(c)};
+}
+
+/** Explicit six-month integer target. Throws on invalid input or unsafe numeric apportionment. */
+function apportionHalf(weights,H){
+ if(!Array.isArray(weights)||weights.length!==6||weights.some(v=>!Number.isFinite(v)||v<0)||!Number.isSafeInteger(H)||H<0)throw new Error('Invalid half apportion domain');
+ const positiveSupport=weights.flatMap((v,i)=>v>0?[i]:[]),maxWeight=Math.max(...weights);
+ if(H===0)return{points:Array(6).fill(0),total:0,target:0,zeroTarget:true,weights:weights.slice(),positiveSupport,maxWeight,normalizedWeights:null,normalizedSum:null,shares:null,raw:Array(6).fill(0),floors:Array(6).fill(0),fractionalRemainders:Array(6).fill(0),remainder:0,remainderOrder:[],allocatedRemainderIndices:[]};
+ if(!(maxWeight>0))throw new Error('No positive half shape support');
+ const normalizedWeights=weights.map(v=>v/maxWeight);
+ if(normalizedWeights.some((v,i)=>!Number.isFinite(v)||v<0||weights[i]>0&&v===0))throw new Error('Positive half weight underflow');
+ const normalizedSum=sum(normalizedWeights);if(!(normalizedSum>0)||!Number.isFinite(normalizedSum))throw new Error('Invalid normalized half sum');
+ const shares=normalizedWeights.map(v=>v/normalizedSum);
+ if(shares.some((v,i)=>!Number.isFinite(v)||v<0||weights[i]>0&&v===0))throw new Error('Positive half share underflow');
+ const raw=shares.map(v=>H*v),floors=raw.map(Math.floor);
+ if(raw.some(v=>!Number.isFinite(v)||v<0)||floors.some(v=>!Number.isSafeInteger(v)||v<0))throw new Error('Unsafe half raw allocation');
+ const floorSum=sum(floors),remainder=H-floorSum;
+ if(!Number.isSafeInteger(floorSum)||!Number.isSafeInteger(remainder)||remainder<0||remainder>positiveSupport.length)throw new Error('Unsafe half leftover');
+ const fractionalRemainders=raw.map((v,i)=>v-floors[i]),remainderOrder=positiveSupport.slice().sort((a,b)=>fractionalRemainders[b]-fractionalRemainders[a]||a-b),points=floors.slice(),allocatedRemainderIndices=[];
+ for(let i=0;i<remainder;i++){const index=remainderOrder[i];points[index]++;allocatedRemainderIndices.push(index);}
+ const total=sum(points);
+ if(points.some((v,i)=>!Number.isSafeInteger(v)||v<0||weights[i]===0&&v!==0)||!Number.isSafeInteger(total)||total!==H)throw new Error('Half allocation failed exact target');
+ return{points,total,target:H,zeroTarget:false,weights:weights.slice(),positiveSupport,maxWeight,normalizedWeights,normalizedSum,shares,raw,floors,fractionalRemainders,remainder,remainderOrder,allocatedRemainderIndices};
+}
+
+/** The optional s is a complete synthetic S policy. Real callers always regenerate immutable S. */
+function buildShapeEndpoint(history,fy,{s}={}){
+ const c=contextOf(history,fy),completeS=validS(s??forecastRS(history,fy,'S'),c),baseS=compactS(completeS,c),baseSPoints=baseS.points.slice(),halfTargets=halfSums(baseSPoints);
+ const eligible=c.active&&baseS.outerTMode==='dense_growth_uniform'&&baseS.outerTApplied===true;
+ const common={method:METHODS.U,kind:'U',role:'prespecified_diagnostic_control',fy,net12:c.net12,active:c.active,baseNet12:c.baseNet12,spotNet12:c.spotNet12,
+  baseS,baseSPoints,halfTargets,sourcePrefix:sourcePrefix(c),profileYears:c.cleanFYs.slice(),profileRows:[],profileMeans:null,shapeSupport:[],halfAllocations:[],
+  eligible,selectedFoldFYs:[],folds:[],calibration:[],baseSRescue:baseS.rescue};
+ const fallback=(reason,detail=null)=>({...common,mode:eligible?'complete_S_fallback':'complete_S_passthrough',applied:false,fallbackReason:reason,numericGuardDetail:detail,
+  points:baseSPoints.slice(),raw:baseSPoints.slice(),total:baseS.total,weights:[0,0],rescue:reason});
+ if(!eligible)return fallback(!c.active?'inactive_complete_S':'S_outer_not_dense_growth');
+ const by=new Map(history.map(r=>[r.ym,r])),k=c.cleanFYs.length,means=Array(12).fill(0),profileRows=[];
+ try{
+  for(const year of c.cleanFYs){
+   const months=fiscalMonths(year),rawTotal12=months.map(ym=>{const r=by.get(ym);return r.base+r.spot;});
+   if(rawTotal12.some(v=>!Number.isFinite(v)))throw new Error('Nonfinite raw monthly TOTAL');
+   const positiveTotal12=rawTotal12.map(v=>Math.max(0,v)),contribution12=positiveTotal12.map(v=>v/k);
+   for(let m=0;m<12;m++){const next=means[m]+contribution12[m];if(!Number.isFinite(next)||next<0)throw new Error('Nonfinite calendar mean');means[m]=next;}
+   profileRows.push({fy:year,months,rawTotal12,positiveTotal12,contribution12});
+  }
+  common.profileRows=profileRows;common.profileMeans=means.slice();
+  common.shapeSupport=[0,1].map(h=>means.slice(6*h,6*h+6).flatMap((v,i)=>v>0?[6*h+i]:[]));
+  const halfAllocations=[0,1].map(h=>apportionHalf(means.slice(6*h,6*h+6),halfTargets[h]));
+  const points=halfAllocations.flatMap(a=>a.points),total=sum(points);
+  if(total!==baseS.total||!same(halfSums(points),halfTargets))throw new Error('U mass preservation failed');
+  return{...common,mode:'history_shape',applied:true,fallbackReason:null,numericGuardDetail:null,points,raw:halfAllocations.flatMap(a=>a.raw),total,
+   weights:[1,1],halfAllocations,rescue:'none'};
+ }catch(error){
+  common.profileRows=profileRows;
+  return fallback('U_numeric_or_shape_complete_S',error.message);
+ }
+}
+
+function normalizeRows(rows){
+ if(!Array.isArray(rows))throw new Error('Shape fit rows must be an array');
+ return rows.map(r=>{
+  if(!r||!Number.isInteger(r.foldFY))throw new Error('Invalid shape fold year');
+  const s=r.s??r.left,u=r.u??r.right;
+  if(r.s!==undefined&&r.left!==undefined&&r.s!==r.left||r.u!==undefined&&r.right!==undefined&&r.u!==r.right)throw new Error('Conflicting shape endpoint aliases');
+  if(!Number.isSafeInteger(s)||s<0||!Number.isSafeInteger(u)||u<0||!Number.isFinite(r.actual)||Math.abs(r.actual)>MAX)throw new Error('Invalid shape fit observation');
+  return{foldFY:r.foldFY,...(r.month!==undefined?{month:r.month}:{}),s,u,actual:r.actual,d:u-s};
+ });
+}
+
+/** Closed finite-knot solution on [0,1]. rows={foldFY,month?,s,u,actual}; left/right aliases allowed. */
+function fitShapeWeight(rows){
+ const observations=normalizeRows(rows),foldFYs=[...new Set(observations.map(r=>r.foldFY))].sort((a,b)=>a-b);
+ const foldDifferenceSums=foldFYs.map(foldFY=>{const rr=observations.filter(r=>r.foldFY===foldFY);return{foldFY,differenceSum:sum(rr.map(r=>Math.abs(r.d))),squaredDifferenceSum:sum(rr.map(r=>r.d*r.d))};});
+ const informative=foldDifferenceSums.filter(f=>f.differenceSum>0),informativeFoldFYs=informative.map(f=>f.foldFY),F=informative.length;
+ const differenceSum=sum(informative.map(f=>f.differenceSum)),squaredDifferenceSum=sum(informative.map(f=>f.squaredDifferenceSum)),D=F?differenceSum/F:0,B=F?squaredDifferenceSum/F:0;
+ const base={observations,foldFYs,foldDifferenceSums,informativeFoldFYs,informativeFoldCount:F,D,B,differenceSum,squaredDifferenceSum,ridgeCoefficient:1};
+ if(![differenceSum,squaredDifferenceSum,D,B].every(Number.isFinite)||D<0||B<0)throw new Error('Invalid shape fit scales');
+ if(!(D>0))return{...base,theta:0,weight:0,status:'no_past_shape_information',boundary:0,knots:[],intervals:[],root:null};
+ if(!(B>0))throw new Error('Nonpositive shape square scale');
+ const squareLinearCoefficient=2*sum(observations.map(r=>r.d*(r.s-r.actual)))/B,squareSlopeCoefficient=2*sum(observations.map(r=>r.d*r.d))/B+2;
+ if(!Number.isFinite(squareLinearCoefficient)||!Number.isFinite(squareSlopeCoefficient)||!(squareSlopeCoefficient>0))throw new Error('Unsafe shape square coefficients');
+ const gradient=(theta,slope)=>slope/D+squareLinearCoefficient+theta*squareSlopeCoefficient;
+ let initialL1Slope=0;const knotMap=new Map();
+ for(const r of observations){
+  if(r.d===0)continue;const value=(r.actual-r.s)/r.d,mass=Math.abs(r.d);
+  if(!Number.isFinite(value))throw new Error('Nonfinite shape knot');
+  if(value>0){initialL1Slope-=mass;if(value<1)knotMap.set(value,(knotMap.get(value)||0)+mass);}else initialL1Slope+=mass;
+ }
+ if(!Number.isFinite(initialL1Slope))throw new Error('Nonfinite shape slope');
+ const knots=[...knotMap].map(([value,mass])=>({value,mass})).sort((a,b)=>a.value-b.value),intervals=[];
+ const objective=theta=>{const e=observations.map(r=>r.s+theta*r.d-r.actual),absoluteLoss=sum(e.map(Math.abs))/D,squareLoss=sum(e.map(v=>v*v))/B,ridgePenalty=theta*theta;return{absoluteLoss,squareLoss,ridgePenalty,total:absoluteLoss+squareLoss+ridgePenalty};};
+ const finish=(theta,status,slope,root=null,knotProof=null)=>{
+  if(!Number.isFinite(theta)||theta<0||theta>1)throw new Error('Invalid shape root');
+  const at=objective(theta);if(!Object.values(at).every(Number.isFinite))throw new Error('Nonfinite shape objective');
+  return{...base,theta,weight:theta,status,boundary:theta===0?0:theta===1?1:null,squareLinearCoefficient,squareSlopeCoefficient,initialL1Slope,knots,intervals,root,knotProof,
+   gradientAtReturned:numericProof(gradient(theta,slope)),objective:at,objectiveAtZero:objective(0),objectiveAtOne:objective(1)};
+ };
+ const closedRoot=(left,right,slope)=>{
+  const numerator=-(slope/D+squareLinearCoefficient),theta=numerator/squareSlopeCoefficient;
+  if(!Number.isFinite(theta)||theta<left||theta>right||theta<0||theta>1)throw new Error('Unsafe closed shape interval root');
+  return finish(theta,'closed_linear_interval_root',slope,{left,right,numerator,denominator:squareSlopeCoefficient,theta,fixedIEEEOperation:'-(slope/D+squareLinearCoefficient)/squareSlopeCoefficient'});
+ };
+ const rightAtZero=gradient(0,initialL1Slope);if(!Number.isFinite(rightAtZero))throw new Error('Nonfinite shape boundary gradient');
+ if(rightAtZero>=0)return finish(0,'lower_boundary',initialL1Slope,{oneSidedGradient:rightAtZero});
+ let previous=0,slope=initialL1Slope;
+ for(const k of knots){
+  const nextSlope=slope+2*k.mass,leftGradient=gradient(k.value,slope),rightGradient=gradient(k.value,nextSlope);
+  if(![nextSlope,leftGradient,rightGradient].every(Number.isFinite))throw new Error('Nonfinite shape knot gradient');
+  k.l1SlopeLeft=slope;k.l1SlopeRight=nextSlope;k.gradientLeft=leftGradient;k.gradientRight=rightGradient;
+  intervals.push({left:previous,right:k.value,l1Slope:slope,gradientAtRight:leftGradient});
+  if(leftGradient>0)return closedRoot(previous,k.value,slope);
+  if(leftGradient<=0&&rightGradient>=0)return finish(k.value,'finite_knot_root',slope,null,{value:k.value,derivativeLeft:leftGradient,derivativeRight:rightGradient});
+  previous=k.value;slope=nextSlope;
+ }
+ const leftAtOne=gradient(1,slope);if(!Number.isFinite(leftAtOne))throw new Error('Nonfinite shape boundary gradient');
+ intervals.push({left:previous,right:1,l1Slope:slope,gradientAtRight:leftAtOne});
+ if(leftAtOne<=0)return finish(1,'upper_boundary',slope,{oneSidedGradient:leftAtOne});
+ return closedRoot(previous,1,slope);
+}
+
+function compactU(u){
+ const out={};for(const field of ['method','kind','fy','mode','eligible','applied','fallbackReason','numericGuardDetail','net12','active','total','profileYears','profileRows','profileMeans','shapeSupport','halfTargets','sourcePrefix','halfAllocations','rescue','weights'])if(u[field]!==undefined)out[field]=u[field];
+ out.points=u.points.slice();out.baseSPoints=u.baseSPoints.slice();return out;
+}
+function defaultCalibration(reason){return[0,1].map(half=>({half,theta:0,weight:0,status:reason,informativeFoldCount:0,D:0,B:0}));}
+
+/** Fixed singleton V or diagnostic U. No company identity, target actual or outer policy cache accepted. */
+function forecastUV(history,fy,kind){
+ if(!Object.prototype.hasOwnProperty.call(METHODS,kind))throw new Error('U/V kind must be U or V');
+ const c=contextOf(history,fy),u=buildShapeEndpoint(history,fy);
+ if(kind==='U')return u;
+ const baseSPoints=u.baseSPoints.slice(),halfTargets=u.halfTargets.slice(),folds=[],selectedFoldFYs=[],attemptedCalibration=[];
+ const common={method:METHODS.V,kind:'V',role:'fixed_singleton_adoption_candidate',fy,net12:c.net12,active:c.active,baseNet12:c.baseNet12,spotNet12:c.spotNet12,
+  baseS:u.baseS,baseSPoints,halfTargets,sourcePrefix:sourcePrefix(c),profileYears:u.profileYears.slice(),profileMeans:u.profileMeans,shapeSupport:u.shapeSupport,
+  eligible:u.eligible,endpointS:baseSPoints.slice(),endpointU:u.points.slice(),endpoints:{s:u.baseS,u:compactU(u)},folds,selectedFoldFYs,baseSRescue:u.baseSRescue};
+ const fallback=(reason,detail=null)=>({...common,mode:'complete_S',applied:false,fallbackReason:reason,numericGuardDetail:detail,
+  points:baseSPoints.slice(),raw:baseSPoints.slice(),total:u.baseS.total,weights:[0,0],calibration:defaultCalibration(reason),attemptedCalibration:attemptedCalibration.slice(),halfAllocations:[],rescue:reason});
+ if(!u.eligible||!u.applied)return fallback(u.fallbackReason??'outer_complete_S_passthrough',u.numericGuardDetail??null);
+ const eligible=[];
+ for(let year=2024;year<fy;year++){
+  const heldout=fiscalMonths(year).map(ym=>history.find(r=>r.ym===ym));if(!heldout.every(Boolean))continue;
+  const train=history.filter(r=>r.ym<year+'-04');let inner;
+  try{inner=contextOf(train,year);}catch(error){if(['U/V history must end priorMarch','Incomplete U/V prior12','Incomplete U/V prior24','Insufficient U/V clean FYs'].includes(error.message))continue;throw error;}
+  eligible.push({year,train,inner,heldout});
+ }
+ for(const f of eligible.slice(-2)){
+  const actualMonthly=f.heldout.map(r=>r.base+r.spot);
+  if(actualMonthly.some(v=>!Number.isFinite(v)||Math.abs(v)>MAX))return fallback('V_unsafe_past_TOTAL_complete_S');
+  const innerU=buildShapeEndpoint(f.train,f.year);
+  selectedFoldFYs.push(f.year);
+  folds.push({fy:f.year,historyStart:f.train[0].ym,historyEnd:f.train[f.train.length-1].ym,cleanFYs:f.inner.cleanFYs,
+   endpointS:innerU.baseSPoints.slice(),endpointU:innerU.points.slice(),halfTargets:innerU.halfTargets.slice(),actualMonthly,
+   endpoints:{s:innerU.baseS,u:compactU(innerU)}});
+ }
+ let calibration,halfAllocations;
+ try{
+  for(let h=0;h<2;h++)attemptedCalibration.push(fitShapeWeight(folds.flatMap(f=>Array.from({length:6},(_,m)=>({foldFY:f.fy,month:h*6+m,s:f.endpointS[h*6+m],u:f.endpointU[h*6+m],actual:f.actualMonthly[h*6+m]})))));
+  calibration=attemptedCalibration.slice();
+  halfAllocations=calibration.map((fit,h)=>{
+   const s=baseSPoints.slice(h*6,h*6+6),right=u.points.slice(h*6,h*6+6),theta=fit.theta,H=halfTargets[h];
+   if(theta===0||same(s,right))return{mode:'copy_S',theta,target:H,points:s.slice(),raw:s.slice(),total:H};
+   if(theta===1)return{mode:'copy_U',theta,target:H,points:right.slice(),raw:right.slice(),total:H};
+   const raw=s.map((v,m)=>v+theta*(right[m]-v)),allocation=apportionHalf(raw,H);
+   return{mode:'interior_half_apportion',theta,target:H,...allocation};
+  });
+  const points=halfAllocations.flatMap(a=>a.points),total=sum(points);
+  if(!same(halfSums(points),halfTargets)||total!==u.baseS.total||!Number.isSafeInteger(total)||points.some(v=>!Number.isSafeInteger(v)||v<0))throw new Error('V mass preservation failed');
+  return{...common,mode:'validated_history_shape',applied:true,fallbackReason:null,numericGuardDetail:null,weights:calibration.map(f=>f.theta),calibration,
+   points,raw:halfAllocations.flatMap(a=>a.raw),total,halfAllocations,rescue:'none',exactS:same(points,baseSPoints)};
+ }catch(error){return fallback('V_solver_or_allocation_complete_S',error.message);}
+}
+
+return {METHODS,apportionHalf,buildShapeEndpoint,fitShapeWeight,forecastUV};
+})();
+
+// Frozen numerical source: event-calendar-improvement-20261018/candidates/forecast-w.mjs
+const m13 = (function(){
+const forecastRS = m11["forecastRS"];
+const apportionHalf = m12["apportionHalf"];
+const fitShapeWeight = m12["fitShapeWeight"];
+const fiscalMonths = m6["fiscalMonths"];
+const sum = m6["sum"];
+/** Distinct W planning research: complete-S half mass, component-attributed BASE and SPOT incidence calendars. */
+
+
+
+
+const METHODS=Object.freeze({W:'W_COMPONENT_EVENT_HALF_SHAPE_BLEND'});
+const MAX=Number.MAX_SAFE_INTEGER,halfSums=p=>[sum(p.slice(0,6)),sum(p.slice(6))],same=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]);
+function contextOf(history,fy){
+ if(!Number.isInteger(fy)||!Array.isArray(history)||history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||r.ym>=fy+'-04'||!Number.isFinite(r.base)||!Number.isFinite(r.spot)))throw new Error('Invalid or future W history');
+ const by=new Map(history.map(r=>[r.ym,r]));if(by.size!==history.length)throw new Error('Duplicate W history');
+ for(let i=1;i<history.length;i++){const[y,m]=history[i-1].ym.split('-').map(Number);if(new Date(Date.UTC(y,m,1)).toISOString().slice(0,7)!==history[i].ym)throw new Error('Noncontinuous W history');}
+ if(history[history.length-1]?.ym!==fy+'-03')throw new Error('W history must end priorMarch');
+ if(!fiscalMonths(fy-1).every(ym=>by.has(ym)))throw new Error('Incomplete W prior12');
+ if(!fiscalMonths(fy-2).every(ym=>by.has(ym)))throw new Error('Incomplete W prior24');
+ const clean=[];for(let year=2022;year<fy;year++)if(fiscalMonths(year).every(ym=>by.has(ym)))clean.push(year);
+ if(clean.length<2)throw new Error('Insufficient W clean FYs');
+ const latest=fiscalMonths(fy-1).map(ym=>by.get(ym)),baseNet12=sum(latest.map(r=>r.base)),spotNet12=sum(latest.map(r=>r.spot)),net12=baseNet12+spotNet12;
+ if(![baseNet12,spotNet12,net12].every(Number.isFinite))throw new Error('Invalid W prior net');
+ return{fy,baseNet12,spotNet12,net12,active:net12>0,cleanFYs:clean.slice(-3),historyStart:history[0].ym,historyEnd:history[history.length-1].ym,observedMonths:history.length};
+}
+function sourcePrefix(c){return{fy:c.fy,historyStart:c.historyStart,historyEnd:c.historyEnd,observedMonths:c.observedMonths,cleanFYs:c.cleanFYs.slice()};}
+function validS(s,c){
+ if(!s||!Array.isArray(s.points)||s.points.length!==12||s.points.some(v=>!Number.isSafeInteger(v)||v<0)||!Number.isSafeInteger(s.total)||s.total<0||sum(s.points)!==s.total)throw new Error('Invalid complete S policy');
+ if(s.net12!==undefined&&s.net12!==c.net12||s.active!==undefined&&s.active!==c.active||s.fy!==undefined&&s.fy!==c.fy)throw new Error('Complete S context mismatch');
+ if(c.net12>=1&&s.total<1||!c.active&&s.total!==0)throw new Error('Complete S economic boundary failure');
+ if(!s.endpoints?.m||typeof s.endpoints.m.mode!=='string'||typeof s.endpoints.m.applied!=='boolean')throw new Error('Missing complete S outer T metadata');
+ return s;
+}
+function compactS(s,c){return{method:s.method??'S_SYNTHETIC_COMPLETE_POLICY',fy:c.fy,points:s.points.slice(),total:s.total,net12:c.net12,active:c.active,halfTargets:halfSums(s.points),weights:s.weights?.slice()??null,selectedFoldFYs:s.selectedFoldFYs?.slice()??[],rescue:s.rescue??null,outerTMode:s.endpoints.m.mode,outerTApplied:s.endpoints.m.applied,sourcePrefix:sourcePrefix(c)};}
+/** W profile construction only. Immutable U/V arithmetic and final convex mixing are unchanged. */
+function profileAdd(a,b,label){
+ const value=a+b;
+ if(![a,b,value].every(v=>Number.isFinite(v)&&v>=0))throw new Error('Nonfinite or negative profile addition: '+label);
+ if(a>0&&b>0&&(value===a||value===b))throw new Error('Positive profile addend absorbed: '+label);
+ return value;
+}
+function profileSum(values,label){return values.reduce((a,b)=>profileAdd(a,b,label),0);}
+function attributeMonth(r){
+ const rawTotal=r.base+r.spot;if(!Number.isFinite(rawTotal))throw new Error('Nonfinite raw monthly TOTAL');
+ const totalPositive=Math.max(0,rawTotal),basePositive=Math.max(0,r.base),spotPositive=Math.max(0,r.spot);
+ if(totalPositive===0)return{ym:r.ym,base:r.base,spot:r.spot,rawTotal,totalPositive,basePositive,spotPositive,maxPositive:null,scaledBase:null,scaledSpot:null,denominator:null,baseRatio:null,attributedBase:0,attributedSpot:0};
+ const maxPositive=Math.max(basePositive,spotPositive);if(!(maxPositive>0)||!Number.isFinite(maxPositive))throw new Error('Invalid positive component maximum');
+ const scaledBase=basePositive/maxPositive,scaledSpot=spotPositive/maxPositive;
+ if(![scaledBase,scaledSpot].every(v=>Number.isFinite(v)&&v>=0)||basePositive>0&&scaledBase===0||spotPositive>0&&scaledSpot===0)throw new Error('Positive component scaling underflow');
+ const denominator=scaledBase+scaledSpot;if(!(denominator>0)||!Number.isFinite(denominator))throw new Error('Invalid attribution denominator');
+ const baseRatio=scaledBase/denominator,attributedBase=totalPositive*baseRatio,attributedSpot=totalPositive-attributedBase;
+ if(![baseRatio,attributedBase,attributedSpot].every(v=>Number.isFinite(v)&&v>=0)||baseRatio>1||basePositive>0&&attributedBase===0||spotPositive>0&&attributedSpot===0)throw new Error('Positive attributed component lost');
+ return{ym:r.ym,base:r.base,spot:r.spot,rawTotal,totalPositive,basePositive,spotPositive,maxPositive,scaledBase,scaledSpot,denominator,baseRatio,attributedBase,attributedSpot};
+}
+
+/** E is an explanatory endpoint, never an independently selected adoption candidate. Optional s is synthetic complete S. */
+function buildEventEndpoint(history,fy,{s}={}){
+ const c=contextOf(history,fy),completeS=validS(s??forecastRS(history,fy,'S'),c),baseS=compactS(completeS,c),baseSPoints=baseS.points.slice(),halfTargets=halfSums(baseSPoints);
+ const eligible=c.active&&baseS.outerTMode==='dense_growth_uniform'&&baseS.outerTApplied===true;
+ const common={method:'E_COMPONENT_EVENT_HALF_CALENDAR_ENDPOINT',kind:'E',role:'explanatory_endpoint_only',fy,active:c.active,net12:c.net12,baseNet12:c.baseNet12,spotNet12:c.spotNet12,
+  baseS,baseSPoints,halfTargets,eligible,sourcePrefix:sourcePrefix(c),profileYears:c.cleanFYs.slice(),profileRows:[],calendarBase:null,calendarSpotMass:null,incidence:null,halfProfiles:[],baseSRescue:baseS.rescue};
+ const fallback=(reason,detail=null)=>({...common,mode:eligible?'complete_S_fallback':'complete_S_passthrough',applied:false,fallbackReason:reason,numericGuardDetail:detail,points:baseSPoints.slice(),raw:baseSPoints.slice(),total:baseS.total,weights:[0,0],rescue:reason});
+ if(!eligible)return fallback(!c.active?'inactive_complete_S':'S_outer_not_dense_growth');
+ const by=new Map(history.map(r=>[r.ym,r])),profileRows=[],calendarBase=Array(12).fill(0),calendarSpotMass=Array(12).fill(0),incidence=Array(12).fill(0),k=c.cleanFYs.length;
+ try{
+  for(const year of c.cleanFYs){
+   const months=fiscalMonths(year),rows=months.map(ym=>attributeMonth(by.get(ym)));
+   for(let m=0;m<12;m++){
+    const b=profileAdd(calendarBase[m],rows[m].attributedBase,'calendarBase'),a=profileAdd(calendarSpotMass[m],rows[m].attributedSpot,'calendarSpotMass');
+    if(![b,a].every(v=>Number.isFinite(v)&&v>=0))throw new Error('Nonfinite attributed calendar sum');
+    calendarBase[m]=b;calendarSpotMass[m]=a;if(rows[m].attributedSpot>0)incidence[m]++;
+   }
+   profileRows.push({fy:year,months,rows});
+  }
+  common.profileRows=profileRows;common.calendarBase=calendarBase.slice();common.calendarSpotMass=calendarSpotMass.slice();common.incidence=incidence.slice();
+  const halfProfiles=[];
+  for(let h=0;h<2;h++){
+   const H=halfTargets[h],Bm=calendarBase.slice(h*6,h*6+6),Am=calendarSpotMass.slice(h*6,h*6+6),hits=incidence.slice(h*6,h*6+6),Bh=profileSum(Bm,'Bh'),Ah=profileSum(Am,'Ah'),totalAttributedMass=profileAdd(Bh,Ah,'Bh+Ah');
+   if(![Bh,Ah,totalAttributedMass].every(v=>Number.isFinite(v)&&v>=0))throw new Error('Nonfinite attributed half mass');
+   if(H===0){const weights=Array(6).fill(0),allocation=apportionHalf(weights,0);halfProfiles.push({half:h,H,Bm,Am,Bh,Ah,totalAttributedMass,k,hits,rB:null,rA:null,baseShares:null,q:null,spotShares:null,weights,allocation,zeroTarget:true});continue;}
+   if(!(totalAttributedMass>0))throw new Error('No attributed half shape support');
+   const rB=Bh/totalAttributedMass,rA=1-rB;
+   if(![rB,rA].every(v=>Number.isFinite(v)&&v>=0&&v<=1)||Bh>0&&rB===0||Ah>0&&rA===0)throw new Error('Positive half component mix lost');
+   const baseShares=Bh>0?Bm.map(v=>v/Bh):Array(6).fill(0);
+   if(baseShares.some((v,m)=>!Number.isFinite(v)||v<0||Bm[m]>0&&v===0))throw new Error('Positive BASE calendar share underflow');
+   const q=Ah>0?hits.map(n=>(n+1)/(k+2)):null,qSum=q?sum(q):null,spotShares=q?q.map(v=>v/qSum):Array(6).fill(0);
+   if(q&&(!(qSum>0)||!Number.isFinite(qSum))||spotShares.some(v=>!Number.isFinite(v)||v<0)||q&&spotShares.some(v=>v===0))throw new Error('Invalid SPOT incidence calendar');
+   const baseContributions=baseShares.map(v=>rB*v),spotContributions=spotShares.map(v=>rA*v);
+   if(baseContributions.some((v,m)=>!Number.isFinite(v)||v<0||rB>0&&baseShares[m]>0&&v===0)||spotContributions.some((v,m)=>!Number.isFinite(v)||v<0||rA>0&&spotShares[m]>0&&v===0))throw new Error('Positive calendar contribution underflow');
+   const weights=baseContributions.map((v,m)=>profileAdd(v,spotContributions[m],'componentCalendarWeight'));
+   if(weights.some(v=>!Number.isFinite(v)||v<0))throw new Error('Nonfinite component calendar weight');
+   const allocation=apportionHalf(weights,H);
+   halfProfiles.push({half:h,H,Bm,Am,Bh,Ah,totalAttributedMass,k,hits,rB,rA,baseShares,q,qSum,spotShares,baseContributions,spotContributions,weights,allocation,zeroTarget:false});
+  }
+  const points=halfProfiles.flatMap(h=>h.allocation.points),total=sum(points);
+  if(total!==baseS.total||!same(halfSums(points),halfTargets))throw new Error('E mass preservation failed');
+  return{...common,mode:'component_event_calendar',applied:true,fallbackReason:null,numericGuardDetail:null,points,total,raw:halfProfiles.flatMap(h=>h.allocation.raw),weights:[1,1],halfProfiles,rescue:'none'};
+ }catch(error){
+  common.profileRows=profileRows;
+  return fallback('E_numeric_or_support_complete_S',error.message);
+ }
+}
+function compactE(e){
+ const q={};for(const field of ['method','kind','fy','mode','eligible','applied','fallbackReason','numericGuardDetail','net12','active','total','profileYears','profileRows','calendarBase','calendarSpotMass','incidence','halfProfiles','halfTargets','sourcePrefix','rescue','weights'])if(e[field]!==undefined)q[field]=e[field];
+ q.points=e.points.slice();q.baseSPoints=e.baseSPoints.slice();return q;
+}
+function defaultCalibration(reason){return[0,1].map(half=>({half,theta:0,weight:0,status:reason,informativeFoldCount:0,D:0,B:0}));}
+
+/** Fixed W only. Adapter row.u denotes endpoint E; no U policy is called. */
+function forecastW(history,fy){
+ const c=contextOf(history,fy),e=buildEventEndpoint(history,fy),baseSPoints=e.baseSPoints.slice(),halfTargets=e.halfTargets.slice(),folds=[],selectedFoldFYs=[],attemptedCalibration=[];
+ const common={method:METHODS.W,kind:'W',role:'fixed_singleton_adoption_candidate',fy,net12:c.net12,active:c.active,baseNet12:c.baseNet12,spotNet12:c.spotNet12,
+  baseS:e.baseS,baseSPoints,halfTargets,sourcePrefix:sourcePrefix(c),eligible:e.eligible,profileYears:e.profileYears.slice(),endpointS:baseSPoints.slice(),endpointE:compactE(e),
+  endpoints:{s:e.baseS,e:compactE(e)},folds,selectedFoldFYs,baseSRescue:e.baseSRescue,fitAdapter:{s:'complete_immutable_S',u:'complete_event_endpoint_E',forecastsU:false}};
+ const fallback=(reason,detail=null)=>({...common,mode:'complete_S',applied:false,fallbackReason:reason,numericGuardDetail:detail,points:baseSPoints.slice(),raw:baseSPoints.slice(),total:e.baseS.total,weights:[0,0],calibration:defaultCalibration(reason),attemptedCalibration:attemptedCalibration.slice(),halfAllocations:[],rescue:reason});
+ if(!e.eligible||!e.applied)return fallback(e.fallbackReason??'outer_complete_S_passthrough',e.numericGuardDetail??null);
+ const eligible=[];
+ for(let year=2024;year<fy;year++){
+  const heldout=fiscalMonths(year).map(ym=>history.find(r=>r.ym===ym));if(!heldout.every(Boolean))continue;
+  const train=history.filter(r=>r.ym<year+'-04');let inner;
+  try{inner=contextOf(train,year);}catch(error){if(['W history must end priorMarch','Incomplete W prior12','Incomplete W prior24','Insufficient W clean FYs'].includes(error.message))continue;throw error;}
+  eligible.push({year,train,inner,heldout});
+ }
+ for(const f of eligible.slice(-2)){
+  const actualMonthly=f.heldout.map(r=>r.base+r.spot);
+  if(actualMonthly.some(v=>!Number.isFinite(v)||Math.abs(v)>MAX))return fallback('W_unsafe_past_TOTAL_complete_S');
+  const innerE=buildEventEndpoint(f.train,f.year);
+  selectedFoldFYs.push(f.year);
+  folds.push({fy:f.year,historyStart:f.train[0].ym,historyEnd:f.train[f.train.length-1].ym,cleanFYs:f.inner.cleanFYs,endpointS:innerE.baseSPoints.slice(),endpointE:innerE.points.slice(),
+   halfTargets:innerE.halfTargets.slice(),actualMonthly,endpoints:{s:innerE.baseS,e:compactE(innerE)},fitAdapter:{s:'complete_immutable_S',u:'complete_event_endpoint_E',forecastsU:false}});
+ }
+ try{
+  for(let h=0;h<2;h++)attemptedCalibration.push(fitShapeWeight(folds.flatMap(f=>Array.from({length:6},(_,m)=>({foldFY:f.fy,month:h*6+m,s:f.endpointS[h*6+m],u:f.endpointE[h*6+m],actual:f.actualMonthly[h*6+m]})))));
+  const calibration=attemptedCalibration.slice(),halfAllocations=calibration.map((fit,h)=>{
+   const s=baseSPoints.slice(h*6,h*6+6),right=e.points.slice(h*6,h*6+6),theta=fit.theta,H=halfTargets[h];
+   if(theta===0||same(s,right))return{mode:'copy_S',theta,target:H,points:s.slice(),raw:s.slice(),total:H};
+   if(theta===1)return{mode:'copy_E',theta,target:H,points:right.slice(),raw:right.slice(),total:H};
+   const raw=s.map((v,m)=>v+theta*(right[m]-v)),allocation=apportionHalf(raw,H);
+   return{mode:'interior_half_apportion',theta,target:H,...allocation};
+  });
+  const points=halfAllocations.flatMap(a=>a.points),total=sum(points);
+  if(!same(halfSums(points),halfTargets)||total!==e.baseS.total||!Number.isSafeInteger(total)||points.some(v=>!Number.isSafeInteger(v)||v<0))throw new Error('W mass preservation failed');
+  return{...common,mode:'validated_event_calendar',applied:true,fallbackReason:null,numericGuardDetail:null,weights:calibration.map(f=>f.theta),calibration,
+   points,raw:halfAllocations.flatMap(a=>a.raw),total,halfAllocations,rescue:'none',exactS:same(points,baseSPoints)};
+ }catch(error){return fallback('W_solver_or_allocation_complete_S',error.message);}
+}
+
+return {METHODS,buildEventEndpoint,forecastW};
+})();
+
+return m13.forecastW;
+}
+
+/** Complete fixed-W computation. Optional native adapter is for isolated parity tests. */
+function appHistoryProvisionalForecast_(history,fy,nativeAdapter) {
+ const nativeApi=nativeAdapter||appHistoryProvisionalNativeApi_();
+ const forecast=appHistoryProvisionalFactories_(nativeApi)(history,fy);
+ if(forecast.method!=='W_COMPONENT_EVENT_HALF_SHAPE_BLEND'||forecast.points.length!==12||
+    forecast.points.some(v=>!Number.isSafeInteger(v)||v<0)||!Number.isSafeInteger(forecast.total)||
+    forecast.points.reduce((s,v)=>s+v,0)!==forecast.total)throw new Error('Invalid provisional W result');
+ return forecast;
+}
+/** Compact output only. No full paths, historical profile rows, or fold observations. */
+function appHistoryProvisionalCompact_(q) {
+ if(!q||q.method!=='W_COMPONENT_EVENT_HALF_SHAPE_BLEND')throw new Error('Invalid provisional W summary');
+ return {policyVersion:'PROVISIONAL_W_V1',policyStatus:'provisional',provisional:true,validationStatus:'in_progress',validationNote:'prior_known_period_quality_gates_failed',
+  method:q.method,kind:'W',points:q.points.slice(),total:q.total,annualTarget:q.total,halfTargets:q.halfTargets.slice(),
+  active:q.active,inactive:!q.active,net12:q.net12,mode:q.mode,applied:q.applied,rescue:q.rescue,
+  fallbackReason:q.fallbackReason||'',historyYearsUsed:q.profileYears.slice(),trainingThroughYm:q.sourcePrefix.historyEnd,
+  weights:q.weights.slice(),selectedFoldFYs:q.selectedFoldFYs.slice(),
+  calendarMethod:'positive_net_component_calendar_beta11_incidence',
+  annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
+}
+
   // ===== Forecast_Agent.js ここまで =====
   // ===== Forecast_WebApp.js ここから（変更しない） =====
 /**
@@ -11512,6 +12776,8 @@ function webAuditLogUrl_() {
     estimateHistoryMonthlyPoint_: typeof estimateHistoryMonthlyPoint_ === 'undefined' ? undefined : estimateHistoryMonthlyPoint_,
     historySpotTimingReliability_: typeof historySpotTimingReliability_ === 'undefined' ? undefined : historySpotTimingReliability_,
     HISTORY_MONTHLY_POINT_METHOD: typeof HISTORY_MONTHLY_POINT_METHOD === 'undefined' ? undefined : HISTORY_MONTHLY_POINT_METHOD,
+    appHistoryProvisionalForecast_: typeof appHistoryProvisionalForecast_ === 'undefined' ? undefined : appHistoryProvisionalForecast_,
+    appHistoryProvisionalCompact_: typeof appHistoryProvisionalCompact_ === 'undefined' ? undefined : appHistoryProvisionalCompact_,
     TRI_METHODS: typeof TRI_METHODS === 'undefined' ? undefined : TRI_METHODS,
     TRI_PRIOR_WEIGHTS: typeof TRI_PRIOR_WEIGHTS === 'undefined' ? undefined : TRI_PRIOR_WEIGHTS,
     readTriangulationEnabled_: typeof readTriangulationEnabled_ === 'undefined' ? undefined : readTriangulationEnabled_,
@@ -11521,7 +12787,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: 'c430e2e2f75741abbb0ae733136ed4e843178b3dc05d834ccd0e07aa0c54bba0',
+    SOURCE_SHA256: '0cb6028ef7b63cfb20b72679a5d82a71d9908632dfa6240f59f5e9ffe0e2f364',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

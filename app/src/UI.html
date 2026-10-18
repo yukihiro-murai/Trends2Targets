@@ -2380,7 +2380,10 @@ function viewBudgets(){
 }
 /** 予測一覧の表: メーカー・見通しの帯・中心・前回から・外れ幅 */
 function mkForecastTable(rows){
-  var top = rows.reduce(function(m, p){ return Math.max(m, isNum(p.p90) ? p.p90 : 0, isNum(p.landing) ? p.landing : 0); }, 0) || 1;
+  // 一覧だけに使う控え。予算・公式版・学びが読む元のp50やS.pfは変更しない。
+  rows = rows.map(function(p){ return isNum(p.forecastPointAnnual) ? Object.assign({}, p, {
+    p50: p.forecastPointAnnual, prevP50: p.previousForecastPointAnnual, point: true }) : p; });
+  var top = rows.reduce(function(m, p){ return Math.max(m, isNum(p.p90) ? p.p90 : 0, isNum(p.p50) ? p.p50 : 0, isNum(p.landing) ? p.landing : 0); }, 0) || 1;
   // 目盛りの右端は切りのよい額（1・2・2.5・5 × 10 のべき）。左端は 0 円、真ん中にも目盛り
   var e = Math.pow(10, Math.floor(Math.log(top) / Math.LN10)), f = top / e;
   var hi = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
@@ -2388,7 +2391,7 @@ function mkForecastTable(rows){
   var scale = '<div class="mkb-scale" aria-hidden="true"><span style="left:0">0</span><span style="left:50%">' + yenShort(hi / 2) + '</span><span style="left:100%">' + yenShort(hi) + '</span></div>';
   var band = function(p){
     if (!isNum(p.p50)) return '<td><span class="chip off" data-tip="まだ予測がありません（予測準備で実行します）">予測なし</span></td>';
-    var t = [qName('p10') + ' ' + yenShort(p.p10) + '円', qName('p50') + ' ' + yenShort(p.p50) + '円', qName('p90') + ' ' + yenShort(p.p90) + '円'];
+    var t = [qName('p10') + ' ' + yenShort(p.p10) + '円', (p.point ? '月次予測の合計' + (p.forecastPointProvisional ? '（暫定）' : '') : qName('p50')) + ' ' + yenShort(p.p50) + '円', qName('p90') + ' ' + yenShort(p.p90) + '円'];
     if (isNum(p.landing)) t.push('着地の推定 ' + yenShort(p.landing) + '円');
     var svg = '<svg class="mkband" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">'
       + '<line x1="0" y1="10" x2="100" y2="10" class="mkb-axis"/><line x1="50" y1="3" x2="50" y2="17" class="mkb-grid"/><line x1="100" y1="3" x2="100" y2="17" class="mkb-grid"/>'
@@ -2400,14 +2403,14 @@ function mkForecastTable(rows){
   var chg = function(p){
     if (!isNum(p.p50) || !isNum(p.prevP50) || !p.prevP50) return '<td class="num">-</td>';
     var r = p.p50 / p.prevP50 - 1, a = Math.abs(r) < 0.005 ? '→' : r > 0 ? '↑' : '↓';
-    return '<td class="num" data-tip="' + esc('前回の予測の中心 ' + yenShort(p.prevP50) + '円 → 今 ' + yenShort(p.p50) + '円') + '">' + a + ' ' + pct1(r) + '</td>';
+    return '<td class="num" data-tip="' + esc('前回の予測額 ' + yenShort(p.prevP50) + '円 → 今 ' + yenShort(p.p50) + '円') + '">' + a + ' ' + pct1(r) + '</td>';
   };
   var acc = function(p){ return isNum(p.mape) ? '<td class="num" data-tip="' + esc('締まった ' + (p.mapeMonths || 0) + ' か月の、予測と実績の外れ幅（小さいほど当たっている）') + '">' + anPct1(p.mape) + '</td>' : '<td class="num" data-tip="まだ締まった月がありません">-</td>'; };
   var body = rows.map(function(p){
     return '<tr><td class="wrap">' + planLink(p, 'forecast') + (planMeasure(p) ? ' ' + measureChip(true) : '') + '</td>' + band(p) + '<td class="num">' + yen(p.p50) + '</td>' + chg(p) + acc(p) + '</tr>';
   }).join('');
   return '<table class="tbl mk mkf"><colgroup><col style="width:18%"><col><col style="width:13%"><col style="width:9%"><col style="width:9%"></colgroup>'
-    + '<thead><tr><th>メーカー</th><th class="mkb-th">年間の見通し' + scale + '</th>' + qTh('p50') + '<th class="num" data-tip="前回の予測の中心からの変化">前回から</th><th class="num" data-tip="締まった月の、予測と実績の外れ幅">外れ幅</th></tr></thead><tbody>'
+    + '<thead><tr><th>メーカー</th><th class="mkb-th">年間の見通し' + scale + '</th><th class="num" data-tip="月次予測の合計。月次予測がない場合は年度中央値">予測額</th><th class="num" data-tip="前回の同じ種類の予測額からの変化">前回から</th><th class="num" data-tip="締まった月の、予測と実績の外れ幅">外れ幅</th></tr></thead><tbody>'
     + body + '</tbody></table>';
 }
 /** 確率の短い表し方（1% 未満・99% 超はそう書く。年度が締まって着地にぶれが無いときは、決まった値なのでそのまま） */
@@ -2970,7 +2973,9 @@ function fcMonthlyPlanning(p, ms, annual, shown){
     if (!k || seen[k] || !Object.prototype.hasOwnProperty.call(byMonth, k)) { valid = false; return null; }
     seen[k] = true; return byMonth[k];
   });
-  return valid && sum === p.annualTarget ? { version: p.version, points: points, annualTarget: p.annualTarget } : null;
+  var provisional = p.method === 'W_COMPONENT_EVENT_HALF_SHAPE_BLEND';
+  if (provisional && (p.provisional !== true || p.validationStatus !== 'in_progress')) return null;
+  return valid && sum === p.annualTarget ? Object.assign({ version: p.version, points: points, annualTarget: p.annualTarget }, provisional ? { provisional: true } : {}) : null;
 }
 /** 月ごとの表とグラフ（mode = result: 見通しだけ・budget: 中心と予算の欄） */
 function fcMonthlyTab(d, v, mode){
@@ -2988,8 +2993,9 @@ function fcMonthlyTab(d, v, mode){
   var planning = mode === 'result' ? fcMonthlyPlanning(d.planning, ms, annual, ka) : null;
   var planningV2 = !!planning && planning.version === 'HISTORY_MONTHLY_POINT_V2';
   var planningTip = planningV2 ? '過去の実績に基づく月別の見込額。月中央値とは異なる' : '年間の中心額を過去の月別傾向で配分した見込額。月中央値とは異なる';
+  if (planning && planning.provisional) planningTip = '暫定：過去の実績のみから計算した月別の見込額。精度は検証中です';
   html += '<div class="kpis">' + (showBud ? '' : fcKpi(qName('p10'), ka.p10, false, (planningV2 ? '従来モデル：' : '') + qTip('p10') + '（年度合計）', false, lv ? { after: lvBand } : null))
-    + (planningV2 ? fcKpi('月次予測の合計', planning.annualTarget, true, '月次予測の合計', false)
+    + (planningV2 ? fcKpi('月次予測の合計' + (planning.provisional ? '（暫定）' : ''), planning.annualTarget, true, planning.provisional ? planningTip : '月次予測の合計', false)
       : fcKpi(qName('p50'), planning ? planning.annualTarget : ka.p50, !showBud, (lv ? fcLiveMidHead(lv) : qTip('p50')) + '（年度合計）', false, lv ? { after: fcLiveTip(lv, annual, lvBand) }
         : al ? { after: fcAlignedTip(al, sh.reach, !!(d.plan && d.plan.frozen) || !!(v.plan && v.plan.frozen)) } : null))
     + (showBud ? '' : fcKpi(qName('p90'), ka.p90, false, (planningV2 ? '従来モデル：' : '') + qTip('p90') + '（年度合計）', false, lv ? { after: lvBand } : null))

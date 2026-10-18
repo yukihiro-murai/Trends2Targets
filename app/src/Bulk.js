@@ -104,6 +104,8 @@ function appBulkRootId_(job) {
  * 止まった鎖として新しく始める
  */
 function appBulkStart_(ctx, mode, fy, then) {
+  const provisional = typeof appProvisionalState_ === 'function' && appProvisionalState_();
+  if (provisional && provisional.active) throw new Error('暫定の全メーカー処理が終わってから、まとめて実行してください。');
   const cur = appBulkState_();
   if (cur.active && cur.current && !appBulkStuck_(cur)) {
     throw new Error('全部の計画をまとめて動かしている途中です（' + (cur.mode === 'FORECAST' ? '予測' : '物差し') + '・残り ' + (cur.queue || []).length + ' 計画）。終わってから始めてください。');

@@ -65,7 +65,7 @@ const APP_OWNER_ACTIONS = {
   listPlans: { name: 'PLANS.LIST', opts: () => ({ minRole: 'VIEWER', audit: false }), run: () => appCachedRead_('PLANS', () => ({ plans: appListPlans_() })) },
   planCandidates: { name: 'PLAN.CANDIDATES', args: ['refresh'], opts: () => ({ minRole: 'ADMIN', audit: false }),
     run: (ctx, i) => appPlanCandidates_(ctx, i), brief: r => appOwnerCandidatesBrief_(r), always: true },
-  // purpose: 省くか "" = 予算を立てる計画・"MEASURE" = 測る専用（5 計画まで。PlanPurpose.js）
+  // purpose: 省くか "" = 予算を立てる計画・"MEASURE" = 測る専用（100 計画まで。PlanPurpose.js）
   createPlan: { job: 'PLAN.CREATE', args: ['clientName', 'fy', 'peopleCsv', 'purpose'], check: t => { appOwnerCheckFy_(t); appPlanPurposeCheck_(t); },
     payload: i => ({ clientName: i.clientName, fy: Number(i.fy), peopleCsv: i.peopleCsv, purpose: i.purpose }) },
   setPeople: { job: 'PLAN.EDIT', args: ['planId', 'peopleCsv', 'inputHash'], current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
@@ -130,6 +130,15 @@ const APP_OWNER_ACTIONS = {
     run: (ctx, i) => appBulkStart_(ctx, 'FORECAST', i.fy, i.backtest === true) },
   // まとめて動かしている状態（今の計画・残り・済んだ計画と結果）
   bulkStatus: { name: 'BULK.STATUS', opts: () => ({ minRole: 'ADMIN', audit: false }), run: () => appBulkStatus_() },
+  // 全メーカーの履歴のみの計画を用意し、取込→集計→予測を保存する。既存の通常計画は保持する。
+  startProvisionalAll: { name: 'PROVISIONAL.START', args: ['fy', 'refresh'], check: t => appOwnerCheckFy_(t),
+    opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'PROVISIONAL', detail: i }),
+    run: (ctx, i) => appProvisionalStart_(ctx, i) },
+  provisionalStatus: { name: 'PROVISIONAL.STATUS', opts: () => ({ ownerOnly: true, minRole: 'ADMIN', audit: false }),
+    run: ctx => appProvisionalStatus_(ctx) },
+  resumeProvisionalAll: { name: 'PROVISIONAL.RESUME', args: ['retryFailed'],
+    opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'PROVISIONAL', detail: i }),
+    run: (ctx, i) => appProvisionalResume_(ctx, i) },
   // ---- 人のつなぎ（PersonLinks.js。版 10 の 3-6）: 入力の担当者の名前とメンバーのメール。所有者だけ。外しても行は残す（ROLES と同じ） ----
   listPersonLinks: { name: 'PERSON_LINKS.LIST', opts: () => ({ minRole: 'ADMIN', audit: false }), run: ctx => appListPersonLinks_(ctx) },
   linkPerson: { name: 'PERSON.LINK', args: ['personName', 'email', 'clientId', 'validFrom', 'validTo', 'note'],

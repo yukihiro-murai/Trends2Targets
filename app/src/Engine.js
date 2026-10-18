@@ -318,7 +318,8 @@ function appRunLegacyForecast_(book, opts) {
     Object.keys(eng.WEB_UI_CONFIRMS_).forEach(k => { delete eng.WEB_UI_CONFIRMS_[k]; });
     (opts.confirms || []).forEach(k => { eng.WEB_UI_CONFIRMS_[String(k)] = true; });
     try {
-      const result = eng.runPhase1Forecast({ allowMissingUserInputs: opts.allowMissingUserInputs === true });
+      const result = eng.runPhase1Forecast({ allowMissingUserInputs: opts.allowMissingUserInputs === true,
+        provisionalHistoryPoint: opts.provisionalHistoryPoint === true });
       return { ok: true, version: eng.VERSION, sourceSha256: eng.SOURCE_SHA256, seed: seed,
         planning: result && result.monthlyPlanning || null };
     } catch (e) {
