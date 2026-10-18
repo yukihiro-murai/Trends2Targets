@@ -8,7 +8,7 @@ const SOURCE_PARTS=Array.from({length:4},(_,j)=>{const fy=2022+j,rows=[[41,46,50
 // Keep the historical W-only transport contract distinct from new native BB calculation.
 // The transformed synthetic engine has its own honest fingerprint; no live artifact is changed.
 function historicalWEngine(e){
- e.run(`(()=>{const original=appLegacyEngine_.toString(),needle='const q = appHistoryPrequentialAmountForecast_(rows,';
+ e.run(`(()=>{const original=appLegacyEngine_.toString(),needle='const q = appHistoryInactiveCalendarForecast_(rows,';
   if(!original.includes(needle))throw Error('Historical W fixture dispatch missing');
   const source=original.replace(needle,'const q = appHistoryProvisionalForecast_(rows,'),factory=eval('('+source+')'),sha=appSha256Hex_(source);
   appLegacyEngine_=function(svc){const out=factory(svc);out.SOURCE_SHA256=sha;return out;};})();`);

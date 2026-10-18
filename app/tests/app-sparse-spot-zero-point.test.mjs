@@ -101,7 +101,7 @@ const active = forecast(ACTIVE);
 assert.ok(active.annualRawP50 > 0, '年間中央値が正でも月中央値は全0となる疎な履歴');
 assert.equal(active.point.inactive, false);
 // MEASUREの主線は暫定Wへ変更。旧V5の四半期位相/900円は専用helper試験で保持する。
-assert.equal(active.point.method, 'EE_PREQUENTIAL_AMOUNT_POLICY_BB');
+assert.equal(active.point.method, 'KK_NEVER_POSITIVE_CALENDAR_ENVELOPE');
 assert.equal(active.point.provisional, true);
 assert.equal(active.point.validationStatus, 'in_progress');
 assert.equal(active.point.months.reduce((s,m)=>s+m.point,0), active.point.annualTarget);

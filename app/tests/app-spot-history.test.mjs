@@ -84,7 +84,7 @@ const n1 = numbers(first.runId);
 // 本物のA-9 → Engine → 計算/保存ジョブで計画値と任意根拠が残る。分位点は別項目のまま。
 const planning1 = JSON.parse(firstRun.planning_json);
 assert.equal(planning1.version, 'HISTORY_MONTHLY_POINT_V2');
-assert.equal(planning1.method, 'EE_PREQUENTIAL_AMOUNT_POLICY_BB');
+assert.equal(planning1.method, 'KK_NEVER_POSITIVE_CALENDAR_ENVELOPE');
 assert.equal(planning1.provisional,true);
 assert.equal(planning1.validationStatus,'in_progress');
 assert.equal(planning1.applied, true);

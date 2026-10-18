@@ -127,7 +127,8 @@ function appForecastPlanningOf_(raw, fy, annualRawP50) {
     out.annualBasis = 'sum_monthly_points';
     const ym = s => typeof s === 'string' && /^\d{4}\/(0[1-9]|1[0-2])$/.test(s);
     if (ym(value.cleanHistoryStartYm) && Number(value.cleanHistoryStartYm.slice(0, 4)) >= 1000 && value.cleanHistoryStartYm <= value.trainingThroughYm) out.cleanHistoryStartYm = value.cleanHistoryStartYm;
-    if (Array.isArray(value.historyYearsUsed) && value.historyYearsUsed.length >= 1 && value.historyYearsUsed.length <= 3 &&
+    const historyPolicy = appPointPolicy_(out.method), historyYearsLimit = historyPolicy && historyPolicy.historyYearsLimit || 3;
+    if (Array.isArray(value.historyYearsUsed) && value.historyYearsUsed.length >= 1 && value.historyYearsUsed.length <= historyYearsLimit &&
         value.historyYearsUsed.every((y, i, a) => Number.isInteger(y) && y >= 1000 && y < year && (!i || y > a[i - 1]) &&
           (!out.cleanHistoryStartYm || y + '/04' >= out.cleanHistoryStartYm) && (y + 1) + '/03' <= value.trainingThroughYm)) {
       out.historyYearsUsed = value.historyYearsUsed.slice();

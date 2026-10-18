@@ -129,7 +129,7 @@ function inputSnapshot(env, planId) {
   assert.equal(env.table('FORECAST_RUNS').filter((r) => r.plan_id === made.plan_id).length, 1);
   for (const n of ['ENG_PRODUCT', 'ENG_CLIENT', 'ENG_OPINIONS', 'ENG_DEV_SPOT']) assert.equal(env.table(n).filter((r) => r.plan_id === made.plan_id).length, 0, '新規主観行を捏造しない: ' + n);
   const latest = env.call('apiForecastLatest(__in)', { __in: { planId: made.plan_id } });
-  assert.equal(latest.planning.method, 'EE_PREQUENTIAL_AMOUNT_POLICY_BB');
+  assert.equal(latest.planning.method, 'KK_NEVER_POSITIVE_CALENDAR_ENVELOPE');
   assert.equal(latest.planning.provisional, true);
   assert.equal(latest.monthly.length, 12, '保存後APIから同じ12月を読める');
   const planCount = env.table('PLANS').length, runCount = env.table('FORECAST_RUNS').length;

@@ -14,7 +14,7 @@
  * - 通年予測モード: FORECAST_CLOSED_MONTH_MODE（actual=実績上書き / forecast=通年予測）。既定 actual で従来挙動
  ***************************************/
 
-const VERSION = '2.7.11-dev';
+const VERSION = '2.7.12-dev';
 // FY2024で固定し既知のFY2025/FY2026上期で確認。月点の合計は年度P50とは別。
 const HISTORY_MONTHLY_POINT_METHOD = 'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING';
 const BUILD_STAGE = 'bayesian-autolearn-vertex-hybrid';
@@ -5113,7 +5113,7 @@ function buildHistoryMonthlyPlanning_(mixed, months, history, opt) {
       const base = history && history.baseSeries48 || [], spot = history && history.spotSeries48 || [];
       if (headers.length !== base.length || base.length !== spot.length) throw new Error('Invalid provisional history dimensions');
       const rows = headers.map((m, i) => ({ ym: fmtYM_(m).replace('/', '-'), base: base[i], spot: spot[i] }));
-      const q = appHistoryPrequentialAmountForecast_(rows, months[0].getFullYear());
+      const q = appHistoryInactiveCalendarForecast_(rows, months[0].getFullYear());
       // q.applied は月形状の再配分だけの印。完全Sを保持する疎な経路も、有効な月次点として保存する。
       return Object.assign(meta, { applied: true, reason: '', method: q.method,
         provisional: true, validationStatus: 'in_progress', annualRawP50, annualTarget: q.total,
@@ -12231,4 +12231,66 @@ function appHistoryPrequentialAmountCompact_(q) {
   historyYearsUsed:q.profileYears.slice(),trainingThroughYm:q.sourcePrefix.historyEnd,economicHalfRescues:q.economicHalfRescues.slice(),supportComputed:q.supportComputed,
   rawCalendarSupportMask:q.rawCalendarSupportMask.slice(),effectiveSupportMask:q.effectiveSupportMask.slice(),trainingHalfWeights:q.trainingHalfCalibration.map(c=>c.lambda),
   heldoutThreshold:q.validation?q.validation.threshold:null,pointProvidersUsed:false,baselineBBMethod:q.completeBB.method,baselineBBMode:q.completeBB.mode,annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
+}
+
+
+// ===== 観測できる全完結年度で正額のない暦月の配分抑制 =====
+// Exact immutable KK source 5b6c94177398e7db9c3179eb5010b3834387b4ee7b97a57f96041244cfb071e7; import/export syntax adaptation only.
+function appHistoryInactiveCalendarFactory_(forecastEE) {
+/* BEGIN_VERBATIM_KK_BODY */
+/** KK: suppress only calendars never positive in all available complete clean FYs. */
+const METHOD='KK_NEVER_POSITIVE_CALENDAR_ENVELOPE';
+const METHODS=Object.freeze({KK:METHOD});
+const clone=v=>Array.isArray(v)?v.map(clone):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clone(x)])):v;
+const sum=a=>a.reduce((s,v)=>s+v,0),halves=a=>[sum(a.slice(0,6)),sum(a.slice(6))],fym=y=>Array.from({length:12},(_,m)=>`${y+Math.floor((m+3)/12)}-${String((m+3)%12+1).padStart(2,'0')}`);
+const safe=a=>Array.isArray(a)&&a.length===12&&a.every(v=>Number.isSafeInteger(v)&&v>=0)&&Number.isSafeInteger(sum(a));
+/** Same own-history/net contract as immutable EE; no historical prediction provider is called. */
+function context(history,fy){
+ if(!Number.isInteger(fy)||fy<2024||fy>9999||!Array.isArray(history)||history.length<24||history.length>48||history.some(r=>!r||!/^\d{4}-(0[1-9]|1[0-2])$/.test(r.ym)||r.ym>=`${fy}-04`||!Number.isFinite(r.base)||!Number.isFinite(r.spot)))throw Error('Invalid KK history');
+ const by=new Map(history.map(r=>[r.ym,r]));if(by.size!==history.length)throw Error('Duplicate KK month');for(let i=1;i<history.length;i++){const[y,m]=history[i-1].ym.split('-').map(Number);if(history[i].ym!==`${y+Math.floor(m/12)}-${String(m%12+1).padStart(2,'0')}`)throw Error('KK month gap');}
+ if(history.at(-1).ym!==`${fy}-03`)throw Error('KK must end priorMarch');const years=[];for(let y=2022;y<fy;y++)if(fym(y).every(k=>by.has(k)))years.push(y);if(years.length<2)throw Error('KK needs two clean FYs');const net12=sum(history.slice(-12).map(r=>r.base))+sum(history.slice(-12).map(r=>r.spot));if(!Number.isFinite(net12))throw Error('Unsafe KK net');return{fy,by,years,net12,active:net12>0};
+}
+function validEE(q,c,override){if(!q||q.method!=='EE_PREQUENTIAL_AMOUNT_POLICY_BB'||q.fy!==c.fy||!safe(q.points)||q.total!==sum(q.points)||q.net12!==c.net12||q.active!==c.active||!Array.isArray(q.halfTargets)||q.halfTargets.length!==2||q.halfTargets.some((v,h)=>v!==halves(q.points)[h])||!override&&q.syntheticBBOverride!==false||c.net12>=1&&q.total<1||!c.active&&q.total!==0||!q.completeBB||!safe(q.completeBB.points))throw Error('Invalid KK completed EE');return q;}
+/** max uses signed raw TOTAL, and every observed complete clean FY, never a last-three window. */
+function buildNeverPositiveFeatures(history,fy,ee,bb){
+ if(!safe(ee)||!safe(bb))throw Error('Invalid KK completed endpoints');const c=context(history,fy),calendarRaw=Array.from({length:12},(_,m)=>c.years.map(y=>{const r=c.by.get(fym(y)[m]),v=r.base+r.spot;if(!Number.isFinite(v))throw Error('Unsafe KK calendar TOTAL');return v;})),calendarMax=calendarRaw.map(a=>Math.max(...a)),neverPositiveMask=calendarMax.map(v=>v<=0),positive=[];
+ for(const y of c.years)for(const ym of fym(y)){const r=c.by.get(ym),v=r.base+r.spot;if(!Number.isFinite(v))throw Error('Unsafe KK threshold TOTAL');if(v>0)positive.push(v);}positive.sort((a,b)=>a-b);let ownP90=null;if(positive.length){const h=(positive.length-1)*.9,l=Math.floor(h),u=Math.ceil(h);ownP90=positive[l]+(h-l)*(positive[u]-positive[l]);if(!Number.isFinite(ownP90))throw Error('Unsafe KK own P90');}
+ const reasons=ee.map((v,m)=>!neverPositiveMask[m]?'historically_positive_calendar_exact_EE':ownP90===null?'missing_p90_exact_EE':v>=ownP90?'EE_point_tail_exact_EE':bb[m]>=ownP90?'BB_point_tail_exact_EE':'never_positive_calendar_zero_endpoint'),suppressionEligibleMask=reasons.map(r=>r==='never_positive_calendar_zero_endpoint'),rollbackMask=suppressionEligibleMask.map((v,m)=>v&&ee[m]>0),candidatePoints12=ee.map((v,m)=>suppressionEligibleMask[m]?0:v);
+ return{fy,historyStart:history[0].ym,historyEnd:history.at(-1).ym,observedMonths:history.length,profileYears:c.years.slice(),fullCalendarYears:c.years.slice(),fullP90Years:c.years.slice(),calendarRaw,calendarMax,neverPositiveMask,ownP90,positiveP90Count:positive.length,suppressionEligibleMask,rollbackMask,candidatePoints12,reasons,EESupportRequired:false,EEDensityRequired:false,calendarScope:'all_available_complete_cleanFY>=2022',P90Scope:'all_available_complete_cleanFY_positive_raw_TOTAL_type7',latestThreeWindowUsed:false,evaluationCohortThresholdNotUsed:true};
+}
+/** Only direct completed JPY zero/EE selection and complete-EE economic restoration. */
+function completeKKPolicy(ee,net12,mask){
+ if(!safe(ee)||!Number.isFinite(net12)||!Array.isArray(mask)||mask.length!==12||mask.some(v=>typeof v!=='boolean'))throw Error('Invalid KK policy');let weights=mask.map(v=>v?0:1),points=ee.map((v,m)=>weights[m]?v:0);const preEconomicRaw=points.slice(),preRescuePoints=points.slice(),economicHalfRescues=[];
+ for(let h=0;h<2;h++)if(sum(points.slice(h*6,h*6+6))===0&&sum(ee.slice(h*6,h*6+6))>0){points.splice(h*6,6,...ee.slice(h*6,h*6+6));weights.splice(h*6,6,...Array(6).fill(1));economicHalfRescues.push(h);}const preAnnualRescuePoints=points.slice();let rescue=economicHalfRescues.length?'economic_half_complete_EE':'none';if(sum(points)===0&&net12>=1){points=ee.slice();weights=Array(12).fill(1);rescue='economic_year_complete_EE';}if(!safe(points)||net12>=1&&sum(points)<1||net12<=0&&sum(points)!==0||points.some((v,m)=>v>ee[m]||!mask[m]&&v!==ee[m]))throw Error('KK monotone/economic boundary');return{points,total:sum(points),halfTargets:halves(points),weights,raw:points.slice(),preEconomicRaw,preRescuePoints,preAnnualRescuePoints,economicHalfRescues,rescue};
+}
+/** eePredict is synthetic-only; real calls use immutable completed EE, no peer/context fetch. */
+function forecastKK(history,fy,{eePredict}={}){
+ const c=context(history,fy),q=clone(validEE((eePredict||forecastEE)(history,fy),c,eePredict!==undefined)),common={method:METHOD,kind:'KK',fy,completeEE:clone(q),baseEEPoints:q.points.slice(),eePoints12:q.points.slice(),baseBBPoints:q.completeBB.points.slice(),net12:c.net12,active:c.active,sourcePrefix:clone(q.sourcePrefix),profileYears:c.years.slice(),outerSupportMask:Array.isArray(q.supportMask)?q.supportMask.slice():Array(12).fill(false),supportMask:Array.isArray(q.supportMask)?q.supportMask.slice():Array(12).fill(false),effectiveSupportMask:Array.isArray(q.supportMask)?q.supportMask.slice():Array(12).fill(false),rollbackMask:Array(12).fill(false),effectiveRollbackMask:Array(12).fill(false),neverPositiveMask:Array(12).fill(false),eligible:false,selectedFoldFYs:[],folds:[],choices:['EE','EE'],syntheticEEOverride:eePredict!==undefined,pointProvidersUsed:false,immutablePointDependencies:['immutable_complete_EE'],priorFailedFamiliesUsed:false,outerTargetActualRead:false,ownPastHalfAdmission:false,EECoefficientsRefitted:false,coefficientRefit:false,peerDataUsed:false,knownRepeatedDevelopment:true,newHoldout:false,tailFeatures:null};
+ const finish=(policy,extra)=>({...common,...policy,...extra,points12:policy.points.slice(),postRescuePoints:policy.points.slice(),effectiveRollbackMask:policy.weights.map(v=>v===0),exactEE:policy.points.every((v,m)=>v===q.points[m]),pointwiseNonIncreasingEE:policy.points.every((v,m)=>v<=q.points[m])});const fallback=(reason,detail=null)=>finish({points:q.points.slice(),total:q.total,halfTargets:q.halfTargets.slice(),weights:Array(12).fill(1),raw:q.points.slice(),preEconomicRaw:q.points.slice(),preRescuePoints:q.points.slice(),preAnnualRescuePoints:q.points.slice(),economicHalfRescues:[],rescue:reason},{mode:'complete_EE',applied:false,fallbackReason:reason,numericGuardDetail:detail});
+ try{if(fy<=2025)return fallback('FY25_or_earlier_exact_EE');if(!q.active)return fallback('inactive_complete_EE');const features=buildNeverPositiveFeatures(history,fy,q.points,q.completeBB.points);common.tailFeatures=features;common.neverPositiveMask=features.neverPositiveMask.slice();common.rollbackMask=features.rollbackMask.slice();common.eligible=features.rollbackMask.some(Boolean);common.choices=['KK','KK'];const policy=completeKKPolicy(q.points,c.net12,features.rollbackMask);return finish(policy,{mode:'never_positive_calendar_envelope',applied:true,fallbackReason:null,numericGuardDetail:null});}catch(error){return fallback('KK_numeric_complete_EE',String(error.message));}
+}
+
+/* END_VERBATIM_KK_BODY */
+return {forecastKK,buildNeverPositiveFeatures,completeKKPolicy};
+}
+
+function appHistoryInactiveCalendarForecast_(history,fy,nativeAdapter) {
+ const prior=(rows,year)=>appHistoryPrequentialAmountForecast_(rows,year,nativeAdapter);
+ const q=appHistoryInactiveCalendarFactory_(prior).forecastKK(history,fy);
+ if(!q||q.method!=='KK_NEVER_POSITIVE_CALENDAR_ENVELOPE'||q.fy!==fy||!Array.isArray(q.points)||q.points.length!==12||q.points.some(v=>!Number.isSafeInteger(v)||v<0)||
+  !Number.isSafeInteger(q.total)||q.points.reduce((s,v)=>s+v,0)!==q.total||!Array.isArray(q.weights)||q.weights.length!==12||q.weights.some(v=>v!==0&&v!==1)||
+  !Array.isArray(q.selectedFoldFYs)||q.selectedFoldFYs.length!==0||!Array.isArray(q.folds)||q.folds.length!==0||!['never_positive_calendar_envelope','complete_EE'].includes(q.mode)||
+  !Array.isArray(q.profileYears)||q.profileYears.length<2||q.profileYears.length>4||q.profileYears.some((y,i,a)=>!Number.isInteger(y)||y<2022||y>=fy||i>0&&y<=a[i-1])||
+  !q.completeEE||q.completeEE.method!=='EE_PREQUENTIAL_AMOUNT_POLICY_BB'||!Array.isArray(q.completeEE.points)||q.points.some((v,m)=>v>q.completeEE.points[m])||
+  q.syntheticEEOverride!==false||q.coefficientRefit!==false||q.EECoefficientsRefitted!==false||q.pointwiseNonIncreasingEE!==true||q.priorFailedFamiliesUsed!==false||q.peerDataUsed!==false||q.pointProvidersUsed!==false)throw new Error('Invalid inactive calendar envelope');
+ return q;
+}
+function appHistoryInactiveCalendarCompact_(q) {
+ if(!q||q.method!=='KK_NEVER_POSITIVE_CALENDAR_ENVELOPE')throw new Error('Invalid inactive calendar result');
+ return{policyVersion:'PROVISIONAL_KK_V1',policyStatus:'provisional',provisional:true,validationStatus:'in_progress',validationNote:'known_period_validation_required',method:q.method,kind:'KK',
+  points:q.points.slice(),total:q.total,annualTarget:q.total,halfTargets:q.halfTargets.slice(),active:q.active,inactive:!q.active,net12:q.net12,mode:q.mode,applied:q.applied,rescue:q.rescue,
+  fallbackReason:q.fallbackReason||'',weights:q.weights.slice(),choices:q.choices.slice(),selectedFoldFYs:q.selectedFoldFYs.slice(),historyYearsUsed:q.profileYears.slice(),trainingThroughYm:q.sourcePrefix.historyEnd,
+  economicHalfRescues:q.economicHalfRescues.slice(),neverPositiveMask:q.neverPositiveMask.slice(),rollbackMask:q.rollbackMask.slice(),effectiveRollbackMask:q.effectiveRollbackMask.slice(),
+  ownPrefixTailThreshold:q.tailFeatures?q.tailFeatures.ownP90:null,calendarScope:'all_available_complete_clean_FYs',pointwiseNonIncreasingEE:true,coefficientRefit:false,baselineEEMethod:q.completeEE.method,baselineEEMode:q.completeEE.mode,
+  annualBasis:'sum_monthly_points',riskBasis:'unchanged_MC_quantiles'};
 }

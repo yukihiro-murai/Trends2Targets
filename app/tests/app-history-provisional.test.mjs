@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {setUpEnv} from './gas-mock.mjs';
 
-const METHOD='W_COMPONENT_EVENT_HALF_SHAPE_BLEND',ACTIVE='EE_PREQUENTIAL_AMOUNT_POLICY_BB',env=setUpEnv();
+const METHOD='W_COMPONENT_EVENT_HALF_SHAPE_BLEND',ACTIVE='KK_NEVER_POSITIVE_CALENDAR_ENVELOPE',env=setUpEnv();
 const r=env.call(`(() => {
  const fy=2026,asOf=new Date('2026-04-06T12:00:00+09:00').getTime();
  const e=appLegacyEngine_(appLegacyServices_({}, {asOfMs:asOf}));
@@ -22,6 +22,7 @@ const r=env.call(`(() => {
   return {mixed,p,tail:Math.random(),unchanged:before===JSON.stringify(mixed)};
  });
  const off=run(false),on=run(true),before=JSON.stringify(rows),helper=e.appHistoryProvisionalForecast_(rows,fy),compact=e.appHistoryProvisionalCompact_(helper);
+ const active=e.appHistoryInactiveCalendarForecast_(rows,fy);
  const zero=Array.from({length:12},()=>[0,0,0]),oldRiskZero={diagnostics:{...on.mixed.diagnostics,totalCalibratedSimByMonth:zero,quantOpsSimByMonth:zero}};
  const riskZero=e.buildHistoryMonthlyPlanning_(oldRiskZero,months,hist,{closedMonthMode:'forecast',provisionalHistoryPoint:true});
  const oldPoint=e.estimateHistoryMonthlyPoint_(months,hist,off.mixed.diagnostics.quantOpsSimByMonth,e.HISTORY_MONTHLY_POINT_METHOD);
@@ -40,7 +41,7 @@ const r=env.call(`(() => {
   try{e.appHistoryProvisionalForecast_(h,fy);}catch(err){rejected++;}
  }
  const randomIndependent=appWithSeededRandom_('provisional-no-rng',()=>{e.appHistoryProvisionalForecast_(rows,fy);return Math.random();})===appWithSeededRandom_('provisional-no-rng',()=>Math.random());
- return {engineSource:e.SOURCE_SHA256,off:off.p,on:on.p,riskZero,helper:{method:helper.method,points:helper.points,total:helper.total,halfTargets:helper.halfTargets,applied:helper.applied,mode:helper.mode},compact,
+ return {engineSource:e.SOURCE_SHA256,off:off.p,on:on.p,riskZero,helper:{method:helper.method,points:helper.points,total:helper.total,halfTargets:helper.halfTargets,applied:helper.applied,mode:helper.mode},compact,active:{points:active.points,total:active.total,halfTargets:active.halfTargets,eePoints:active.completeEE.points,profileYears:active.profileYears,neverPositiveMask:active.neverPositiveMask},
   mcExact:JSON.stringify(off.mixed)===JSON.stringify(on.mixed),tailExact:off.tail===on.tail,inputUnchanged:before===JSON.stringify(rows),pathsUnchanged:off.unchanged&&on.unchanged,
   oldOffPoints:oldPoint.points,disabled,inactive:{points:inactive.points,total:inactive.total},negative:{points:negative.points,total:negative.total},tiny:{points:tiny.points,total:tiny.total,net:tiny.net12},
   credited:{net:credited.net12,total:credited.total},rejected,randomIndependent};
@@ -51,9 +52,12 @@ assert.ok(r.helper.total>0);
 assert.equal(r.helper.applied,false,'形状を変えない完全S分岐を検証する合成例');
 assert.equal(r.on.applied,true,'内部shapeの未適用と計画値の有効性を混同しない');
 assert.equal(r.on.provisional,true);assert.equal(r.on.validationStatus,'in_progress');assert.equal(r.on.method,ACTIVE);
-assert.deepEqual(r.on.months.map(m=>m.point),r.helper.points);
-assert.deepEqual(r.on.halfTargets,[r.helper.points.slice(0,6).reduce((s,v)=>s+v,0),r.helper.points.slice(6).reduce((s,v)=>s+v,0)]);
-assert.equal(r.on.annualTarget,r.helper.total);assert.equal(r.on.annualBasis,'sum_monthly_points');
+assert.deepEqual(r.on.months.map(m=>m.point),r.active.points);
+assert.deepEqual(r.on.halfTargets,r.active.halfTargets);
+assert.equal(r.on.annualTarget,r.active.total);assert.equal(r.on.annualBasis,'sum_monthly_points');
+assert.deepEqual(r.active.profileYears,[2022,2023,2024,2025],'利用した全4年度を保持する');
+assert.ok(r.active.points.every((v,m)=>v<=r.active.eePoints[m]));
+assert.ok(r.active.points.slice(0,6).some(v=>v>0),'過去の上期根拠を残して上期全0へ戻さない');
 assert.equal(r.off.method,'CAP_NET12_MC_BASE_SPOT_PHASE3_BETA_TIMING');assert.deepEqual(r.off.months.map(m=>m.point),r.oldOffPoints,'flag offは既存V5を保持');
 assert.ok(r.off.months.slice(0,6).every(m=>m.point===0),'対照の旧方式は合成例の上期が全0');
 assert.equal(r.mcExact,true,'flag on/offで全MC試行・分位点・診断配列が完全同一');

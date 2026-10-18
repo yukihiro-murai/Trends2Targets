@@ -1,10 +1,11 @@
 /** Append-only publication of validated history-only monthly points; raw risk runs remain immutable. */
 const APP_POINT_REVISION_ACTION = 'FORECAST.POINT_REFRESH';
-// Owner-authorized provisional EE is not a formal accuracy pass. Earlier BB remains readable; component endpoints are internal.
-// Config: { policySha256, engineSourceSha256, acceptedEngineSourceSha256s, entrypoint, normalize, validateNative, modes }.
+// KK is an owner-authorized provisional reflection exception, not a research-gate pass. BB/EE remain readable.
+// Optional nonIncreasingToPredecessor requires a parent; historyYearsLimit defaults to3 and accepts1..4.
 // normalize is a fixed local function, never user-supplied source/code.
-const APP_POINT_APPROVED_POLICIES = Object.freeze({ 'BB_EQUAL_WEIGHT_W_AA_COMBINATION': { policySha256:'c9c4046e25d904ccc1e507f34761b138974c820bedc44fc03294d38c864a4f93',engineSourceSha256:'b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f',acceptedEngineSourceSha256s:['b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f'],entrypoint:'appHistoryCombinationForecast_',normalize:appPointNormalizeCombination_,validateNative:appPointValidateCombination_,modes:['equal_weight_complete_policies','complete_W'] }, 'EE_PREQUENTIAL_AMOUNT_POLICY_BB': { policySha256:'891fe637890b07b37f22bf0a98e3c1745cdc2ab72527fd810b22e773b651cb1a',engineSourceSha256:'789825d1b2f2a0d8647417fd0300db3eea513020ff301c31ab6fec3b31baf621',acceptedEngineSourceSha256s:['789825d1b2f2a0d8647417fd0300db3eea513020ff301c31ab6fec3b31baf621'],entrypoint:'appHistoryPrequentialAmountForecast_',normalize:appPointNormalizePrequential_,validateNative:appPointValidatePrequential_,predecessorMethod:'BB_EQUAL_WEIGHT_W_AA_COMBINATION',modes:['prequential_amount_selection','complete_BB'] } });
+const APP_POINT_APPROVED_POLICIES = Object.freeze({ 'BB_EQUAL_WEIGHT_W_AA_COMBINATION': { policySha256:'c9c4046e25d904ccc1e507f34761b138974c820bedc44fc03294d38c864a4f93',engineSourceSha256:'b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f',acceptedEngineSourceSha256s:['b4b41fbbafcfe782da18949c5b935874529f986177341cacd4117994f63dae3f'],entrypoint:'appHistoryCombinationForecast_',normalize:appPointNormalizeCombination_,validateNative:appPointValidateCombination_,modes:['equal_weight_complete_policies','complete_W'] }, 'EE_PREQUENTIAL_AMOUNT_POLICY_BB': { policySha256:'891fe637890b07b37f22bf0a98e3c1745cdc2ab72527fd810b22e773b651cb1a',engineSourceSha256:'789825d1b2f2a0d8647417fd0300db3eea513020ff301c31ab6fec3b31baf621',acceptedEngineSourceSha256s:['789825d1b2f2a0d8647417fd0300db3eea513020ff301c31ab6fec3b31baf621'],entrypoint:'appHistoryPrequentialAmountForecast_',normalize:appPointNormalizePrequential_,validateNative:appPointValidatePrequential_,predecessorMethod:'BB_EQUAL_WEIGHT_W_AA_COMBINATION',modes:['prequential_amount_selection','complete_BB'] }, 'KK_NEVER_POSITIVE_CALENDAR_ENVELOPE': { policySha256:'a8949ecc19fd8c213c84be5378339808cea4ed7ebe0bc20ee4898d576d7714e8',engineSourceSha256:'14860fd41e151938e3e5e5799cc15aedf1a86530fe675ec431cb3deda53dd75b',acceptedEngineSourceSha256s:['14860fd41e151938e3e5e5799cc15aedf1a86530fe675ec431cb3deda53dd75b'],entrypoint:'appHistoryInactiveCalendarForecast_',normalize:appPointNormalizeInactiveCalendar_,validateNative:appPointValidateInactiveCalendar_,predecessorMethod:'EE_PREQUENTIAL_AMOUNT_POLICY_BB',nonIncreasingToPredecessor:true,historyYearsLimit:4,modes:['never_positive_calendar_envelope','complete_EE'] } });
 const APP_POINT_REVISION_HEAD = 'APP_POINT_REVISION_HEAD_V1';
+const APP_POINT_REVISION_MAX_CHAIN_DEPTH = 8; // Count the legacy root as one node.
 const APP_POINT_REVISION_LIMIT = 4;
 const APP_POINT_REVISION_BUDGET_MS = 240000;
 const APP_POINT_REVISION_RESERVE_MS = 45000;
@@ -17,6 +18,8 @@ function appPointPolicy_(method) {
   const p=APP_POINT_APPROVED_POLICIES[method];
   return p && /^[a-f0-9]{64}$/.test(p.policySha256) && /^[a-f0-9]{64}$/.test(p.engineSourceSha256) &&
     Array.isArray(p.acceptedEngineSourceSha256s) && p.acceptedEngineSourceSha256s.indexOf(p.engineSourceSha256)>=0 && p.acceptedEngineSourceSha256s.every(x=>/^[a-f0-9]{64}$/.test(x)) &&
+    (p.historyYearsLimit===undefined||(Number.isSafeInteger(p.historyYearsLimit)&&p.historyYearsLimit>=1&&p.historyYearsLimit<=4)) &&
+    (p.nonIncreasingToPredecessor===undefined||typeof p.nonIncreasingToPredecessor==='boolean') && (p.nonIncreasingToPredecessor!==true||typeof p.predecessorMethod==='string') &&
     (p.publishEnabled===undefined||typeof p.publishEnabled==='boolean') && (p.predecessorMethod===undefined||(typeof p.predecessorMethod==='string'&&p.predecessorMethod!==method&&/^[A-Za-z0-9_]{1,120}$/.test(p.predecessorMethod))) &&
     typeof p.validateNative==='function' && typeof p.entrypoint==='string' && /^[A-Za-z_][A-Za-z0-9_]*_$/.test(p.entrypoint) && typeof p.normalize==='function' &&
     Array.isArray(p.modes) && p.modes.length && p.modes.every(x=>typeof x==='string'&&/^[A-Za-z0-9_]{1,80}$/.test(x)) ? p : null;
@@ -92,7 +95,7 @@ function appPointPlanningExtras_(value,out,fy) {
     value.pointPolicySha256!==p.policySha256||p.acceptedEngineSourceSha256s.indexOf(value.pointPolicySourceSha256)<0||
     !Array.isArray(value.halfTargets)||value.halfTargets.length!==2||!value.halfTargets.every((n,h)=>integer(n)&&n===half[h])||
     p.modes.indexOf(value.provisionalMode)<0||typeof value.provisionalRescue!=='string'||!(/^[A-Za-z0-9_]{1,120}$/).test(value.provisionalRescue)||
-    !Array.isArray(out.historyYearsUsed)||!out.historyYearsUsed.length||!out.cleanHistoryStartYm)return null;
+    !Array.isArray(out.historyYearsUsed)||!out.historyYearsUsed.length||out.historyYearsUsed.length>(p.historyYearsLimit||3)||!out.cleanHistoryStartYm)return null;
   const metadata=p.validateNative(value,fy);if(!metadata)return null;
   return Object.assign({provisional:true,validationStatus:'in_progress',pointPolicySha256:p.policySha256,pointPolicySourceSha256:value.pointPolicySourceSha256,
     halfTargets:half,provisionalMode:value.provisionalMode,provisionalRescue:value.provisionalRescue},metadata);
@@ -125,25 +128,49 @@ function appPointEconomicValid_(planning,c) {
   }
   return true;
 }
-/** Raw context stays unchanged; a V2 predecessor is an immutable BB V1 row, not a current-active condition. */
+/** Raw context stays unchanged; predecessor action chains are immutable, not current-active requirements. */
 function appPointRowMatchesContext_(row,p,c) {
   return row.action_id===p.revisionId&&row.engine_sha256===p.policySourceSha256&&p.contextHash===c.hash&&appPointHash_(p.binding)===appPointHash_(c.binding)&&row.input_hash===c.hash&&
     appPointHash_(p.planning.months.map(m=>m.mean))===c.binding.meansHash&&p.planning.annualRawP50===c.rawPlanning.annualRawP50&&appPointEconomicValid_(p.planning,c);
 }
+/** Optional registered bound; economic validation remains a separate context guard. */
+function appPointNonIncreasing_(points,parentPoints,policy) {
+  if(!policy||policy.nonIncreasingToPredecessor!==true)return true;
+  const valid=a=>Array.isArray(a)&&a.length===12&&a.every(v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0);
+  return valid(points)&&valid(parentPoints)&&points.every((v,i)=>v<=parentPoints[i]);
+}
+/** A verified path is ordered root-to-leaf. No parent must remain the active view. */
+function appPointRevisionChain_(row,p,plan,run,c,snap,seen) {
+  seen=seen||[];
+  if(!p||seen.length>=APP_POINT_REVISION_MAX_CHAIN_DEPTH||seen.indexOf(p.revisionId)>=0||!row||row.plan_id!==plan.plan_id||row.action!==APP_POINT_REVISION_ACTION||row.status!=='DONE'||
+    snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===p.revisionId).length!==1||!appPointRowMatchesContext_(row,p,c))return null;
+  const policy=appPointPolicy_(p.method);if(!policy)return null;
+  if(!policy.predecessorMethod)return p.version==='FORECAST_POINT_REVISION_V1'?[{row:row,p:p}]:null;
+  const b=p.predecessor,parentPolicy=b&&appPointPolicy_(b.method);
+  if(!b||!parentPolicy||b.method!==policy.predecessorMethod)return null;
+  const rows=snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===b.revisionId);
+  if(rows.length!==1)return null;
+  const parentRow=rows[0],parent=appPointRevisionPayload_(parentRow.result_json,plan,run);
+  if(!parent||parent.method!==b.method||parent.publicationId!==b.publicationId||parent.policySha256!==b.policySha256||parent.policySourceSha256!==b.policySourceSha256||
+    appPointHash_(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,parentRow))!==b.actionHash||appPointHash_(parent.planning)!==b.planningHash)return null;
+  const chain=appPointRevisionChain_(parentRow,parent,plan,run,c,snap,seen.concat(p.revisionId));
+  return chain&&appPointNonIncreasing_(p.planning.months.map(m=>m.point),parent.planning.months.map(m=>m.point),policy)?chain.concat({row:row,p:p}):null;
+}
 function appPointPredecessorValid_(p,plan,run,c,snap) {
-  const policy=appPointPolicy_(p.method),b=p.predecessor,parentPolicy=b&&appPointPolicy_(b.method);
-  if(!policy||!policy.predecessorMethod||!b||!parentPolicy||parentPolicy.predecessorMethod||b.method!==policy.predecessorMethod)return false;
-  const rows=snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===b.revisionId&&r.plan_id===plan.plan_id&&r.action===APP_POINT_REVISION_ACTION&&r.status==='DONE');
-  if(rows.length!==1)return false;const row=rows[0],parent=appPointRevisionPayload_(row.result_json,plan,run);
-  return !!parent&&parent.version==='FORECAST_POINT_REVISION_V1'&&parent.method===b.method&&parent.publicationId===b.publicationId&&parent.policySha256===b.policySha256&&parent.policySourceSha256===b.policySourceSha256&&
-    appPointHash_(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,row))===b.actionHash&&appPointHash_(parent.planning)===b.planningHash&&appPointRowMatchesContext_(row,parent,c);
+  if(!p||!p.predecessor)return false;
+  const rows=snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===p.revisionId);
+  return rows.length===1&&!!appPointRevisionChain_(rows[0],p,plan,run,c,snap);
 }
 function appPointCurrentPredecessor_(plan,run,c,snap,policy) {
   if(!policy.predecessorMethod)return null;
-  const parentPolicy=appPointPolicy_(policy.predecessorMethod);appPointAssert_(parentPolicy&&!parentPolicy.predecessorMethod,'直前方式の契約が不正です。');
+  const parentPolicy=appPointPolicy_(policy.predecessorMethod);appPointAssert_(parentPolicy,'直前方式の契約が不正です。');
   const current=appPointRevisionResolve_(plan,run,c.months,snap),v=current.revision;
   appPointAssert_(v&&current.planning&&current.planning.method===policy.predecessorMethod,'期待する直前の月次予測が有効ではありません（既に別方式へ更新済みの場合も含みます）。');
   const rows=snap.tables.PLAN_ACTIONS.filter(r=>r.action_id===v.revisionId);appPointAssert_(rows.length===1,'直前改訂の行が一意ではありません。');
+  const parent=appPointRevisionPayload_(rows[0].result_json,plan,run),chain=parent&&appPointRevisionChain_(rows[0],parent,plan,run,c,snap);
+  appPointAssert_(chain&&chain.length<APP_POINT_REVISION_MAX_CHAIN_DEPTH,'改訂の参照が深さ上限に達しています。');
+  const branched=snap.tables.PLAN_ACTIONS.some(row=>{const p=appPointRevisionPayload_(row.result_json,plan,run);return p&&p.predecessor&&p.predecessor.revisionId===v.revisionId&&!!appPointRevisionChain_(row,p,plan,run,c,snap);});
+  appPointAssert_(!branched,'直前改訂の分岐が競合しています。');
   return {planning:current.planning,reference:{version:'POINT_PREDECESSOR_V1',revisionId:v.revisionId,publicationId:v.publicationId,method:v.method,policySha256:v.policySha256,policySourceSha256:v.policySourceSha256,
     actionHash:appPointHash_(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,rows[0])),planningHash:appPointHash_(current.planning)}};
 }
@@ -154,7 +181,9 @@ function appPointRequirePredecessor_(plan,run,c,snap,policy,expected,ownIntent) 
     if(own.length===1&&JSON.stringify(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,own[0]))===JSON.stringify(appObjectToRow_(APP_TABLES.PLAN_ACTIONS,ownIntent))&&active.revision&&active.revision.revisionId===ownIntent.action_id)return null;
   }
   const current=appPointCurrentPredecessor_(plan,run,c,snap,policy);
-  appPointAssert_(expected&&appPointHash_(expected)===appPointHash_(current.reference),'プレビュー後に直前の月次予測が変わりました。');return current;
+  appPointAssert_(expected&&appPointHash_(expected)===appPointHash_(current.reference),'プレビュー後に直前の月次予測が変わりました。');
+  if(ownIntent){const intent=appPointRevisionPayload_(ownIntent.result_json,plan,run);appPointAssert_(intent&&appPointNonIncreasing_(intent.planning.months.map(m=>m.point),current.planning.months.map(m=>m.point),policy),'直前方式を超える月次点は保存できません。');}
+  return current;
 }
 /** Public-view resolver: no writes/model/learning calls; caller authorizes plan read. */
 function appPointRevisionResolve_(plan, run, monthly, snap) {
@@ -168,10 +197,19 @@ function appPointRevisionResolve_(plan, run, monthly, snap) {
   if(!candidates.length)return fallback; // No indexed history read or global-context work for old plans.
   if(!snap.history)Object.assign(snap,appPointSnapshot_(snap));
   let context;try{context=appPointContext_(plan,run,snap);}catch(e){return fallback;}
-  const valid=candidates.filter(x=>appPointRowMatchesContext_(x.row,x.p,context));
-  const children=valid.filter(x=>x.p.predecessor&&appPointPredecessorValid_(x.p,plan,run,context,snap));
-  // A valid child beats its parent even in the same timestamp second. Conflicting children fail back to the valid legacy BB.
-  const selected=children.length===1?children[0]:valid.filter(x=>!x.p.predecessor)[0];if(!selected)return fallback;
+  const valid=candidates.map(x=>({node:x,chain:appPointRevisionChain_(x.row,x.p,plan,run,context,snap)})).filter(x=>x.chain);
+  const roots=valid.filter(x=>x.chain.length===1),parentIds=new Set();
+  valid.forEach(x=>x.chain.slice(0,-1).forEach(n=>parentIds.add(n.p.revisionId)));
+  const leaves=valid.filter(x=>x.chain.length>1&&!parentIds.has(x.node.p.revisionId));
+  let selected=null;
+  if(leaves.length===1)selected=leaves[0].node;
+  else if(leaves.length>1){
+    const common=leaves[0].chain.filter((n,i)=>leaves.every(x=>x.chain[i]&&x.chain[i].p.revisionId===n.p.revisionId));
+    if(common.length)selected=common[common.length-1];
+  }
+  // Verified siblings use their deepest common ancestor. Separate roots keep the legacy root ordering.
+  if(!selected&&roots.length)selected=roots[0].node;
+  if(!selected)return fallback;
   const row=selected.row,p=selected.p;
   return {planning:p.planning,rawPlanning:raw,revision:Object.assign({revisionId:p.revisionId,publicationId:p.publicationId,baseRunId:p.baseRunId,method:p.method,publishedAt:row.finished_at,
     historySha256:p.binding.historySha256,policySha256:p.policySha256,policySourceSha256:p.policySourceSha256},p.predecessor?{predecessorRevisionId:p.predecessor.revisionId,predecessorPlanningHash:p.predecessor.planningHash}:{})};
@@ -210,6 +248,17 @@ function appPointNormalizePrequential_(q) {
   return {method:q.method,points:q.points,total:q.total,active:q.active,net12:q.net12,years:q.profileYears,
     halfTargets:q.halfTargets,mode:q.mode,rescue:q.rescue||'none',wPoints:q.completeBB.baseWPoints,predecessorPoints:q.completeBB.points,weights:q.weights,folds:q.selectedFoldFYs};
 }
+function appPointValidateInactiveCalendar_(v,fy) {
+  const w=v.provisionalWeights,f=v.provisionalFolds;
+  if(!Array.isArray(w)||w.length!==12||!w.every(n=>typeof n==='number'&&(n===0||n===1))||!Array.isArray(f)||f.length||
+    (v.provisionalMode==='complete_EE'&&w.some(n=>n!==1)))return null;
+  return {provisionalWeights:w.slice(),provisionalFolds:[]};
+}
+function appPointNormalizeInactiveCalendar_(q) {
+  return {method:q.method,points:q.points,total:q.total,active:q.active,net12:q.net12,years:q.profileYears,
+    halfTargets:q.halfTargets,mode:q.mode,rescue:q.rescue||'none',wPoints:q.completeEE.completeBB.baseWPoints,
+    predecessorPoints:q.completeEE.points,weights:q.weights,folds:q.selectedFoldFYs};
+}
 /** Stamp only a CURRENT approved native engine result, then use the common strict parser. */
 function appPointNativePlanning_(raw,engine,fy,annualRawP50) {
   const p=raw&&appPointPolicy_(raw.method);if(!p)return raw;
@@ -229,9 +278,10 @@ function appPointNormalizeGuardedAA_(q) {
 function appPointPlanning_(q,raw,fy,method,policy) {
   const integer=n=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0,total=q.total;
   appPointAssert_(q.method===method&&Array.isArray(q.points)&&q.points.length===12&&q.points.every(integer)&&integer(total)&&q.points.reduce((a,b)=>a+b,0)===total&&
-    Array.isArray(q.years)&&q.years.length>=1&&q.years.length<=3&&q.years.every((y,i,a)=>Number.isInteger(y)&&y>=2022&&y<fy&&(!i||y>a[i-1]))&&
+    Array.isArray(q.years)&&q.years.length>=1&&q.years.length<=(policy.historyYearsLimit||3)&&q.years.every((y,i,a)=>Number.isInteger(y)&&y>=2022&&y<fy&&(!i||y>a[i-1]))&&
     typeof q.active==='boolean'&&typeof q.net12==='number'&&isFinite(q.net12)&&(!q.active?total===0:true)&&
     (!(q.net12>=1)||total>0)&&policy.modes.indexOf(q.mode)>=0,'計算結果の点・年額・活動条件が不正です。');
+  appPointAssert_(appPointNonIncreasing_(q.points,q.predecessorPoints,policy),'直前方式を超える月次点は公開できません。');
   const half=[0,1].map(h=>q.points.slice(h*6,h*6+6).reduce((n,v)=>n+v,0));
   appPointAssert_(Array.isArray(q.halfTargets)&&q.halfTargets.length===2&&q.halfTargets.every((v,h)=>v===half[h]),'半期額が一致しません。');
   const p={version:'HISTORY_MONTHLY_POINT_V2',applied:true,method:method,provisional:true,validationStatus:'in_progress',pointPolicySha256:policy.policySha256,pointPolicySourceSha256:policy.engineSourceSha256,

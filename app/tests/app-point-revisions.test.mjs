@@ -10,7 +10,7 @@ const POINTS = Array(12).fill(8);
 const latest = (f, id = f.ids[0]) => f.env.call('apiForecastLatest(__in)', { __in: { planId: id } });
 const state = f => f.env.call('appPointLoadState_({user:{isOwner:true},actor:__actor},__id)', { __actor: OWNER, __id: f.preview.publicationId });
 
-function fixture(measures = 5) {
+function fixture(measures = 5, { neverPositiveApril = false } = {}) {
   const env = setUpEnv();
   const sourceBook = env.makeBook('合成売上元', { Sheet1: { values: [['constructed']] } });
   const sourceUrl = 'https://docs.google.com/spreadsheets/d/' + sourceBook.getId() + '/edit';
@@ -34,10 +34,11 @@ function fixture(measures = 5) {
   const ids = [], books = [];
   for (let i = 0; i <= measures; i++) {
     const dates = Array.from({ length: 48 }, (_, m) => new Date(Date.UTC(2022, 3 + m, 1) - 9 * 3600000));
+    const historyBase=Array.from({length:48},(_,m)=>neverPositiveApril&&m%12===0?0:100);
     const book = env.makeBook('Constructed point plan ' + i, {
       CONFIG: { values: [['field', 'value'], ['client', '合成メーカー' + i], ['FY', FY], ['people', '担当A']] },
       SALES_INPUT: { values: [['service_type', 'product', 'sales_month', 'amount']] },
-      SALES_MONTHLY: { cols: 49, values: [['TYPE', ...dates], ['BASE', ...Array(48).fill(100)], ['SPOT', ...Array(48).fill(0)], ['TOTAL', ...Array(48).fill(100)]] },
+      SALES_MONTHLY: { cols: 49, values: [['TYPE', ...dates], ['BASE', ...historyBase], ['SPOT', ...Array(48).fill(0)], ['TOTAL', ...historyBase]] },
     });
     const id = env.seedPlan(book);
     books.push(book);
@@ -93,11 +94,11 @@ const allTables = f => f.env.call('Object.fromEntries(Object.keys(APP_TABLES).ma
     {table:'EFFECT_COEFS',mode:'append',rows:[{plan_id:__measure,coef_id:'CONSTRUCTED-EFFECT',run_id:'CONSTRUCTED-'+__measure,beta_human:1,beta_ai:1,basis:'PRIOR',posterior_json:{kept:true},evidence_hash:'constructed-evidence'}]}
   ]);appStoreForget_();`, { __actor: OWNER, __normal: f.normalId, __measure: f.ids[0] });
   const before = allTables(f);
-  assert.equal(f.env.run('Object.keys(APP_POINT_APPROVED_POLICIES).join()'), METHOD+',EE_PREQUENTIAL_AMOUNT_POLICY_BB');
+  assert.equal(f.env.run('Object.keys(APP_POINT_APPROVED_POLICIES).join()'), METHOD+',EE_PREQUENTIAL_AMOUNT_POLICY_BB,KK_NEVER_POSITIVE_CALENDAR_ENVELOPE');
   assert.equal(f.env.run('appPointPolicy_("Z_CALENDAR_SUPPORT_SHRINK_W")'), null);
   assert.equal(f.env.run('appPointPolicy_("__proto__")'), null);
-  assert.equal(f.env.run('appLegacyEngine_(appLegacyServices_({}, {actor:Session.getActiveUser().getEmail()})).SOURCE_SHA256'), f.env.run('appPointPolicy_("EE_PREQUENTIAL_AMOUNT_POLICY_BB").engineSourceSha256'),
-    'the approved policy binds the assembled engine source');
+  assert.equal(f.env.run('appLegacyEngine_(appLegacyServices_({}, {actor:Session.getActiveUser().getEmail()})).SOURCE_SHA256'), f.env.run('appPointPolicy_("KK_NEVER_POSITIVE_CALENDAR_ENVELOPE").engineSourceSha256'),
+    'the current approved policy binds the assembled engine source');
   assert.equal(latest(f).pointRevision, null);
   const first = f.env.task('previewPointRevision(__in)', { __in: f.previewInput });
   assert.equal(first.computedThisCall, 4);
@@ -289,8 +290,8 @@ function previewEEFixture(f) {
   f.applyInput = { publicationId: r.publicationId, method: EE_METHOD, policySha256: f.eePolicy.policySha256, previewSha256: r.previewSha256 };
   return r;
 }
-function eeFixture(measures = 1) {
-  const f = fixture(measures);
+function eeFixture(measures = 1, options = {}) {
+  const f = fixture(measures, options);
   f.env.run("appNowIso_=function(){return '2026-10-18T00:00:00+0900';};");
   f.previewAll(); f.applyAll(); enableEEFixture(f);
   return f;
@@ -423,6 +424,119 @@ for (const tamper of ['parent', 'point']) {
   assert.equal(f.env.call('appJournalPending_()'), null);
   assert.deepEqual(allTables(f), afterAppend, 'recovery acknowledges the exact existing row without appending another');
   assert.equal(latest(f).planning.method, EE_METHOD);
+}
+
+
+// KK appends a third immutable policy node. Constructed points use a never-positive April.
+const KK_METHOD = 'KK_NEVER_POSITIVE_CALENDAR_ENVELOPE';
+function enableKKFixture(f) {
+  f.kkPolicy = f.env.call('appPointPolicy_(__m)', { __m: KK_METHOD });
+  f.env.run(`var __kkCalls=0,__kkBadHigher=false,__kkBadHalf=false,__kkBadYear=false;
+    appPointEngine_=function(){const p=appPointPolicy_(__kk);return {VERSION:'constructed-kk',SOURCE_SHA256:p.engineSourceSha256,WEB_SOURCE_SHA256:'c'.repeat(64),
+      appHistoryInactiveCalendarForecast_:function(history,fy){__kkCalls++;
+        if(history.length!==48||history[0].ym!=='2022-04'||history[47].ym!=='2026-03'||history.filter((r,i)=>i%12===0).some(r=>r.base+r.spot!==0))throw Error('Wrong KK history');
+        const net=history.slice(-12).reduce((s,r)=>s+r.base,0)+history.slice(-12).reduce((s,r)=>s+r.spot,0),points=Array.from({length:12},(_,m)=>m===0?0:6);
+        if(__kkBadHigher)points[1]=7;if(__kkBadHalf)points.fill(0,0,6);if(__kkBadYear)points.fill(0);
+        return {method:__kk,points,total:points.reduce((s,v)=>s+v,0),active:true,net12:net,profileYears:[2022,2023,2024,2025],
+          halfTargets:[points.slice(0,6).reduce((s,v)=>s+v,0),points.slice(6).reduce((s,v)=>s+v,0)],mode:'never_positive_calendar_envelope',rescue:'none',
+          weights:points.map(v=>v===0?0:1),selectedFoldFYs:[],completeEE:{method:__ee,points:Array(12).fill(6),total:72,
+            completeBB:{method:__bb,points:Array(12).fill(8),baseWPoints:Array(12).fill(10),total:96}}};}};};`,
+  { __kk: KK_METHOD, __ee: EE_METHOD, __bb: METHOD });
+}
+function previewKKFixture(f) {
+  const input = { fy: FY, method: KK_METHOD, policySha256: f.kkPolicy.policySha256 };
+  let r = f.env.task('previewPointRevision(__in)', { __in: input });
+  while (r.status === 'PREVIEW') r = f.env.task('previewPointRevision(__in)', { __in: { ...input, publicationId: r.publicationId } });
+  assert.equal(r.status, 'READY'); f.preview = r;
+  f.applyInput = { publicationId: r.publicationId, method: KK_METHOD, policySha256: f.kkPolicy.policySha256, previewSha256: r.previewSha256 };
+  return r;
+}
+function kkFixture(measures = 1) {
+  const f = eeFixture(measures, { neverPositiveApril: true });
+  previewEEFixture(f); f.applyAll(); enableKKFixture(f); return f;
+}
+const pointAction = (f, method) => f.env.call(`appReadTable_('PLAN_ACTIONS').find(r=>r.plan_id===__id&&JSON.parse(r.result_json).method===__method)`, { __id: f.ids[0], __method: method });
+{
+  const f = kkFixture(44), before = allTables(f), preceding = latest(f);
+  assert.equal(preceding.planning.method, EE_METHOD);
+  previewKKFixture(f); assert.deepEqual(allTables(f), before, 'preview preserves all app rows');
+  assert.equal(f.env.task('applyPointRevision(__in)', { __in: f.applyInput }).appliedThisCall, 4);
+  const partial = f.ids.slice(0, 44).map(id => latest(f, id).planning.method);
+  assert.equal(partial.filter(m => m === KK_METHOD).length, 4);
+  assert.equal(partial.filter(m => m === EE_METHOD).length, 40);
+  f.applyAll(); const after = allTables(f), d = latest(f);
+  assert.equal(after.PLAN_ACTIONS.length - before.PLAN_ACTIONS.length, 44);
+  assert.deepEqual(after.PLAN_ACTIONS.slice(0, before.PLAN_ACTIONS.length), before.PLAN_ACTIONS, 'BB and EE canonical rows remain immutable');
+  for (const name of Object.keys(before)) if (name !== 'PLAN_ACTIONS') assert.deepEqual(after[name], before[name], name + ' exact after KK');
+  assert.equal(d.planning.method, KK_METHOD); assert.equal(d.planning.annualTarget, 66);
+  assert.deepEqual(d.planning.months.map(m => m.point), [0, ...Array(11).fill(6)]);
+  assert.deepEqual(d.planning.historyYearsUsed, [2022, 2023, 2024, 2025], 'all four feature FYs survive parser/save/API');
+  assert.deepEqual(d.planning.provisionalWeights, [0, ...Array(11).fill(1)]); assert.deepEqual(d.planning.provisionalFolds, []);
+  assert.deepEqual(d.latest, preceding.latest); assert.deepEqual(d.monthly, preceding.monthly);
+  assert.deepEqual(d.rawPlanning, preceding.rawPlanning); assert.deepEqual(d.planning.months.map(m => m.mean), preceding.planning.months.map(m => m.mean));
+  assert.equal(d.pointRevision.predecessorRevisionId, preceding.pointRevision.revisionId);
+  assert.equal(latest(f, f.normalId).pointRevision, null);
+  assert.equal(f.env.call('appPortfolioData_().plans.find(p=>p.planId===__id).forecastPointAnnual', { __id: f.ids[0] }), 66);
+  assert.equal(f.env.call('appProvisionalReadiness_(appPlanOf_(__id),appProvisionalSnapshot_()).method', { __id: f.ids[0] }), KK_METHOD);
+  const chain = f.env.call(`(()=>{const s=appPointSnapshot_(),p=appPlanOf_(__id),r=appPointLatest_(__id,s),c=appPointContext_(p,r,s),row=s.tables.PLAN_ACTIONS.find(x=>x.action_id===__revision),v=appPointRevisionPayload_(row.result_json,p,r);return appPointRevisionChain_(row,v,p,r,c,s).map(n=>n.p.method);})()`, { __id: f.ids[0], __revision: d.pointRevision.revisionId });
+  assert.deepEqual(chain, [METHOD, EE_METHOD, KK_METHOD]);
+  assert.equal(f.env.run('APP_POINT_REVISION_MAX_CHAIN_DEPTH'), 8);
+  assert.equal(f.env.call(`(()=>{const s=appPointSnapshot_(),p=appPlanOf_(__id),r=appPointLatest_(__id,s),c=appPointContext_(p,r,s),row=s.tables.PLAN_ACTIONS.find(x=>x.action_id===__revision);return appPointRevisionChain_(row,appPointRevisionPayload_(row.result_json,p,r),p,r,c,s,Array(8).fill('visited'));})()`, { __id: f.ids[0], __revision: d.pointRevision.revisionId }), null, 'recursive validator fails closed at node limit');
+  assert.equal(f.env.task('applyPointRevision(__in)', { __in: f.applyInput }).appliedThisCall, 0);
+  assert.deepEqual(allTables(f), after); assert.equal(f.env.run('__kkCalls'), 44, 'readers/replay never recompute the pure policy');
+
+  const parse = p => f.env.call('appForecastPlanningOf_(__raw,2026,100)', { __raw: p });
+  const native = J(d.planning); delete native.pointPolicySha256; delete native.pointPolicySourceSha256;
+  assert.deepEqual(f.env.call('appPointNativePlanning_(__raw,{sourceSha256:__sha},2026,100)', { __raw: native, __sha: f.kkPolicy.engineSourceSha256 }), d.planning);
+  assert.equal(f.env.call('appPointNativePlanning_(__raw,{sourceSha256:__sha},2026,100)', { __raw: native, __sha: f.eePolicy.engineSourceSha256 }), null);
+  for (const mutate of [p=>p.provisionalWeights=[0],p=>p.provisionalWeights[0]=.5,p=>p.provisionalWeights[0]='0',p=>p.provisionalWeights[0]=NaN,p=>p.provisionalFolds=[2024],p=>p.provisionalMode='unknown',p=>p.provisionalMode='complete_EE',p=>p.historyYearsUsed=[2021,2022,2023,2024,2025]]) { const p=J(d.planning); mutate(p); assert.equal(parse(p), null); }
+  const oldEE = J(preceding.planning); oldEE.cleanHistoryStartYm='2022/04'; oldEE.historyYearsUsed=[2022,2023,2024,2025];
+  assert.equal(parse(oldEE), null, 'old EE remains limited to three years despite generic four-year support');
+  assert.equal(f.env.call('appPointPolicy_(__m).historyYearsLimit', { __m: KK_METHOD }), 4);
+  for (const bad of [0,5,1.5,'4',null]) { f.env.run('APP_POINT_APPROVED_POLICIES[__m].historyYearsLimit=__v;', { __m: KK_METHOD, __v: bad }); assert.equal(f.env.call('appPointPolicy_(__m)', { __m: KK_METHOD }), null); }
+  f.env.run('APP_POINT_APPROVED_POLICIES[__m].historyYearsLimit=4;', { __m: KK_METHOD });
+  for (const bad of ['true',1,null]) { f.env.run('APP_POINT_APPROVED_POLICIES[__m].nonIncreasingToPredecessor=__v;', { __m: KK_METHOD, __v: bad }); assert.equal(f.env.call('appPointPolicy_(__m)', { __m: KK_METHOD }), null); }
+  f.env.run('APP_POINT_APPROVED_POLICIES[__m].nonIncreasingToPredecessor=true;', { __m: KK_METHOD });
+}
+// Valid siblings resolve to their verified common EE ancestor, not a timestamp winner.
+{
+  const f = kkFixture(); previewKKFixture(f); f.applyAll(); const ee = pointAction(f, EE_METHOD), kk = pointAction(f, KK_METHOD);
+  f.env.run(`(()=>{const r=appReadTable_('PLAN_ACTIONS').find(x=>x.action_id===__id),v=JSON.parse(r.result_json);v.revisionId='CONSTRUCTED-KK-SIBLING';v.publicationId='CONSTRUCTED-SIBLING-PUB';appEnsureRows_('PLAN_ACTIONS',[Object.assign({},appStripRow_(r),{action_id:v.revisionId,result_json:JSON.stringify(v)})]);appStoreForget_();})()`, { __id: kk.action_id });
+  assert.equal(latest(f).pointRevision.revisionId, ee.action_id);
+  f.env.run('appReplaceWhole_("PLAN_ACTIONS",appReadTable_("PLAN_ACTIONS").map(appStripRow_).reverse());appStoreForget_();');
+  assert.equal(latest(f).pointRevision.revisionId, ee.action_id);
+  assert.throws(() => previewKKFixture(f), /分岐/);
+}
+// Missing/tampered ancestors and parser-valid economic or per-month excess cannot hide valid EE/BB.
+for (const corruption of ['missingEE','higherMonth','zeroHalf','zeroYear']) {
+  const f=kkFixture(); previewKKFixture(f); f.applyAll(); const ee=pointAction(f,EE_METHOD),kk=pointAction(f,KK_METHOD);
+  f.env.run(`(()=>{if(__kind==='missingEE'){appReplaceWhole_('PLAN_ACTIONS',appReadTable_('PLAN_ACTIONS').filter(r=>r.action_id!==__ee).map(appStripRow_));}else{const r=appReadTable_('PLAN_ACTIONS').find(x=>x.action_id===__kk),v=JSON.parse(r.result_json),p=v.planning;if(__kind==='higherMonth')p.months[1].point=7;else p.months.forEach((m,i)=>{if(__kind==='zeroYear'||i<6)m.point=0;});p.annualTarget=p.months.reduce((s,m)=>s+m.point,0);p.halfTargets=[p.months.slice(0,6).reduce((s,m)=>s+m.point,0),p.months.slice(6).reduce((s,m)=>s+m.point,0)];p.months.forEach(m=>m.share=p.annualTarget?m.point/p.annualTarget:0);appPatchRow_('PLAN_ACTIONS',{action_id:r.action_id},{result_json:JSON.stringify(v)},'constructed');}appStoreForget_();})()`, { __kind:corruption,__ee:ee.action_id,__kk:kk.action_id });
+  assert.equal(latest(f).planning.method, corruption==='missingEE'?METHOD:EE_METHOD);
+}
+for (const bad of ['__kkBadHigher','__kkBadHalf','__kkBadYear']) {
+  const f=kkFixture(),before=allTables(f);f.env.run(bad+'=true;');assert.throws(()=>previewKKFixture(f),/直前方式|活動条件|計算結果/);assert.deepEqual(allTables(f),before);assert.equal(f.env.call('appJournalPending_()'),null);
+}
+// Even a consistently altered READY image cannot bypass the pre-journal predecessor ceiling.
+{
+  const f=kkFixture();previewKKFixture(f);
+  f.applyInput.previewSha256=f.env.call(`(()=>{const s=appPointLoadState_({user:{isOwner:true},actor:__actor},__pub),p=s.entries[0].planning;p.months[1].point=7;p.annualTarget=67;p.halfTargets=[31,36];p.months.forEach(m=>m.share=m.point/67);s.previewSha256=appPointPreviewDigest_(s);appPointSaveState_(s);return s.previewSha256;})()`,{__actor:OWNER,__pub:f.preview.publicationId});
+  const before=allTables(f);assert.throws(()=>f.env.task('applyPointRevision(__in)',{__in:f.applyInput}),/直前方式を超える/);assert.deepEqual(allTables(f),before);assert.equal(f.env.call('appJournalPending_()'),null);
+}
+{
+  const f=kkFixture();previewKKFixture(f);f.env.run(`var __kkJournalApply=appJournalApply_;appJournalApply_=function(ops){__kkJournalApply(ops);appStoreForget_();throw Error('constructed KK after-append');};`);
+  assert.throws(()=>f.env.task('applyPointRevision(__in)',{__in:f.applyInput}),/KK after-append/);assert.ok(f.env.call('appJournalPending_()'));assert.equal(latest(f).planning.method,KK_METHOD);const after=allTables(f);
+  f.env.run('appJournalApply_=__kkJournalApply;');f.applyAll();assert.equal(f.env.call('appJournalPending_()'),null);assert.deepEqual(allTables(f),after);
+}
+// Actual native CALC -> SAVE accepts four-year KK metadata while keeping all raw risk values.
+{
+  const env=setUpEnv(),output=Array.from({length:79},()=>[]);output[25]=['年度合計（予測）',50,100,200];output[64]=['年度合計（客観）',50,100,200];MONTHS.forEach((ym,i)=>{output[28+i]=[ym,1,10,30,'','','',10,''];output[67+i]=[ym,1,10,30];});
+  const book=env.makeBook('Constructed native KK',{CONFIG:{values:[['field','value'],['client','Constructed native KK'],['FY',FY],['people','Constructed owner']]},OUTPUT:{values:output}}),id=env.seedPlan(book);
+  env.run('appPatchRow_("PLANS",{plan_id:__id},{purpose:"MEASURE",row_version:2},"constructed");appStoreForget_();',{__id:id});
+  const raw={version:'HISTORY_MONTHLY_POINT_V2',applied:true,method:KK_METHOD,provisional:true,validationStatus:'in_progress',annualRawP50:100,annualTarget:66,annualBasis:'sum_monthly_points',trainingThroughYm:'2026/03',cleanHistoryStartYm:'2022/04',historyYearsUsed:[2022,2023,2024,2025],halfTargets:[30,36],provisionalWeights:[0,...Array(11).fill(1)],provisionalFolds:[],provisionalMode:'never_positive_calendar_envelope',provisionalRescue:'none',months:MONTHS.map((ym,i)=>({ym,point:i?6:0,share:i?6/66:0,mean:11+i}))};
+  env.run(`appLegacyEngine_=function(){return{WEB_UI_CONFIRMS_:{},VERSION:'constructed-native-KK',SOURCE_SHA256:appPointPolicy_(__m).engineSourceSha256,runPhase1Forecast:function(opt){if(!opt.provisionalHistoryPoint||!opt.allowMissingUserInputs)throw Error('MEASURE flags absent');return{monthlyPlanning:__raw};}};};`,{__m:KK_METHOD,__raw:raw});
+  const done=env.runJob('FORECAST.RUN',{planId:id});assert.equal(done.status,'DONE',done.error);const row=env.table('FORECAST_RUNS').find(r=>r.run_id===done.result.runId),saved=JSON.parse(row.planning_json);
+  assert.equal(saved.method,KK_METHOD);assert.deepEqual(saved.historyYearsUsed,[2022,2023,2024,2025]);assert.equal(saved.annualTarget,66);assert.equal(Number(row.annual_p50),100);assert.deepEqual(env.table('FORECAST_MONTHLY').filter(r=>r.run_id===row.run_id).map(r=>Number(r.p50)),W_POINTS);
+  assert.equal(env.call('apiForecastLatest(__in)',{__in:{planId:id}}).planning.method,KK_METHOD);
 }
 
 console.log('app-point-revisions: all tests passed');
