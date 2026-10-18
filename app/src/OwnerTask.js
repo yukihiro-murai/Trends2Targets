@@ -155,6 +155,11 @@ const APP_OWNER_ACTIONS = {
   importProvisionalOffline: { name: 'PROVISIONAL.OFFLINE.IMPORT', args: ['fileId', 'sha256', 'canaryProofFileId', 'canaryProofSha256'],
     opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'PROVISIONAL', detail: i }),
     run: (ctx, i) => appOfflineImport_(ctx, i) },
+  importProvisionalOfflineBatch: { name: 'PROVISIONAL.OFFLINE.IMPORT_BATCH',
+    args: ['manifestId', 'sourceManifestSha256', 'files', 'canaryProofFileId', 'canaryProofSha256'],
+    opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'PROVISIONAL',
+      detail: { manifestId: i.manifestId, sourceManifestSha256: i.sourceManifestSha256, fileCount: (i.files || []).length, canaryProofSha256: i.canaryProofSha256 } }),
+    run: (ctx, i) => appOfflineImportBatch_(ctx, i) },
   // ---- 人のつなぎ（PersonLinks.js。版 10 の 3-6）: 入力の担当者の名前とメンバーのメール。所有者だけ。外しても行は残す（ROLES と同じ） ----
   listPersonLinks: { name: 'PERSON_LINKS.LIST', opts: () => ({ minRole: 'ADMIN', audit: false }), run: ctx => appListPersonLinks_(ctx) },
   linkPerson: { name: 'PERSON.LINK', args: ['personName', 'email', 'clientId', 'validFrom', 'validTo', 'note'],
