@@ -186,7 +186,11 @@ function appProvisionalContext_(st) {
 function appProvisionalAdvance_(st, ctx) {
   const max = st.count * 2 + 2;
   for (let i = 0; i < max; i++) {
-    const snap = appProvisionalSnapshot_(), pending = appProvisionalItems_(st).filter(x => x.status === 'PENDING')[0];
+    const snap = appProvisionalSnapshot_();
+    // Refresh existing plans before spending time setting up additional makers.
+    const existing = item => appProvisionalFindPlans_(item.key, st.fy, snap).length ? 1 : 0;
+    const pending = appProvisionalItems_(st).filter(x => x.status === 'PENDING')
+      .sort((a, b) => existing(b) - existing(a) || a.index - b.index)[0];
     if (!pending) { st.active = false; st.current = null; st.waiting = ''; st.finishedAt = new Date().toISOString(); appProvisionalSaveState_(st); return; }
     appProvisionalClassify_(st, pending, snap); appProvisionalSaveItem_(st, pending);
     if (pending.status !== 'PENDING') continue;

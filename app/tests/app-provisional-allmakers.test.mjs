@@ -350,3 +350,15 @@ for (const saveKind of ['PLAN.RUN_SAVE', 'FORECAST.RUN_SAVE']) {
 }
 
 console.log('app-provisional-allmakers: all tests passed');
+
+// Existing forecasts are refreshed before a new maker's costly setup; roster IDs remain fixed.
+{
+  const env = fixture(['あ新規製薬', 'ん既存製薬']);
+  const reused = makeMeasure(env, 'ん既存製薬');
+  const s = start(env);
+  assert.equal(s.items[0].clientName, 'あ新規製薬');
+  assert.equal(s.items[s.current.index].clientName, 'ん既存製薬');
+  assert.equal(s.current.stage, 'IMPORT');
+  assert.equal(env.call('appJobGet_(__id).payload.planId', { __id: s.current.rootJobId }), reused);
+  assert.equal(plansFor(env, 'あ新規製薬').length, 0);
+}
