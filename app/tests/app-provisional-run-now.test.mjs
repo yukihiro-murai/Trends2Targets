@@ -39,8 +39,12 @@ const triggerIds = env => env.triggers.map(t=>t.uid).sort();
 {
   const env=environment(), j={kind:'PLAN.CREATE'};
   const admit=(elapsed,times)=>env.call('appProvisionalRunNowAdmission_(__j,__elapsed,__times)',{__j:j,__elapsed:elapsed,__times:{'PLAN.CREATE':times}});
-  eq(admit(0,[140000]).ok,true,'exact 240s admission boundary');
-  eq(admit(1,[140000]).ok,false);
+  eq(admit(0,[180000]).ok,true,'exact 300s admission boundary');
+  eq(admit(1,[180000]).ok,false);
+  eq(admit(0,[167000]).needMs,280500,'observed long build conservative estimate');
+  eq(admit(0,[167000]).ok,true);eq(admit(19500,[167000]).ok,true);
+  eq(admit(19501,[167000]).ok,false);eq(admit(20000,[167000]).ok,false);
+  eq(admit(0,[180001]).ok,false,'oversized known stage stays scheduled');
   eq(admit(0,[1,10000,1]).needMs,45000,'max of latest three, not mean/latest');
   eq(admit(0,[]).reason,'UNKNOWN_STAGE_TIME');
   eq(admit(0,[1,2,3,4]).reason,'UNKNOWN_STAGE_TIME');
@@ -55,7 +59,7 @@ const triggerIds = env => env.triggers.map(t=>t.uid).sort();
   const before=triggerIds(env), initial=root(env);
   env.run('appProps_().setProperty(APP_JOB_STAGE_PROP,"{}")');
   eq(run(env).stoppedBecause,'UNKNOWN_STAGE_TIME');eq(root(env).status,'QUEUED');eq(triggerIds(env),before);
-  env.run('appProps_().setProperty(APP_JOB_STAGE_PROP,JSON.stringify({"PLAN.CREATE":[160000]}))');
+  env.run('appProps_().setProperty(APP_JOB_STAGE_PROP,JSON.stringify({"PLAN.CREATE":[180001]}))');
   eq(run(env).stoppedBecause,'BUDGET');eq(root(env).id,initial.id);eq(root(env).attempts,0);
   cases.push('unknown_or_long_stage_preserves_scheduled_trigger');
 }
@@ -69,14 +73,14 @@ const triggerIds = env => env.triggers.map(t=>t.uid).sort();
   ok(jobs.every(j=>j.status==='DONE'&&j.attempts===1));
   ok(jobs.every(j=>!triggerIds(env).includes(j.triggerUid)),'only ran native UIDs removed');
   ok(r.ran.every(j=>j.status==='DONE'&&j.intentId));
-  eq(r.batchId,initial.id);ok(r.admissionBudgetMs===240000&&beforeIds.length>0);
+  eq(r.batchId,initial.id);ok(r.admissionBudgetMs===300000&&beforeIds.length>0);
   cases.push('real_native_chain_durable_save_api_and_post_cleanup');
 }
 {
   const env=environment();start(env);
-  env.run(`__realNow=Date.now; __tick=__realNow(); Date.now=()=>__tick; __nativeRun=appRunJob_; appRunJob_=function(id){const r=__nativeRun(id);__tick+=80000;return r;};`);
+  env.run(`__realNow=Date.now; __tick=__realNow(); Date.now=()=>__tick; __nativeRun=appRunJob_; appRunJob_=function(id){const r=__nativeRun(id);__tick+=90000;return r;};`);
   const r=run(env), s=status(env), pending=env.call('appProvisionalChain_(__id).job',{__id:s.current.rootJobId});
-  eq(r.stoppedBecause,'BUDGET');eq(r.elapsedMs,240000);eq(r.ran.length,3);
+  eq(r.stoppedBecause,'BUDGET');eq(r.elapsedMs,270000);eq(r.ran.length,3);
   eq(pending.status,'QUEUED');ok(triggerIds(env).includes(pending.triggerUid));
   env.run('Date.now=__realNow');cases.push('budget_stops_between_stages_without_orphaning');
 }

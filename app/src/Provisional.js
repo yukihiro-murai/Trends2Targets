@@ -383,8 +383,8 @@ function appProvisionalRunNowAdmission_(job, elapsedMs, times) {
   if (!Array.isArray(past) || !past.length || past.length > 3 ||
       past.some(v => typeof v !== 'number' || !Number.isFinite(v) || v < 0)) return { ok: false, reason: 'UNKNOWN_STAGE_TIME' };
   const needMs = Math.max.apply(null, past) * 1.5 + 30000;
-  return { ok: Number.isFinite(needMs) && elapsedMs + needMs <= 240000,
-    reason: Number.isFinite(needMs) && elapsedMs + needMs <= 240000 ? '' : 'BUDGET', needMs: needMs };
+  return { ok: Number.isFinite(needMs) && elapsedMs + needMs <= 300000,
+    reason: Number.isFinite(needMs) && elapsedMs + needMs <= 300000 ? '' : 'BUDGET', needMs: needMs };
 }
 
 /** Select only the current frontier of the original batch, never a global queue. */
@@ -416,7 +416,7 @@ function appProvisionalRunNowFrontier_(ctx, batchId) {
 function appProvisionalRunNow_(ctx) {
   ctx = appProvisionalRequireOwner_(ctx);
   const startedMs = Date.now(), initial = appProvisionalState_();
-  const out = { batchId: initial ? initial.id : '', admissionBudgetMs: 240000, ran: [], cleanupErrors: [], stoppedBecause: '', elapsedMs: 0 };
+  const out = { batchId: initial ? initial.id : '', admissionBudgetMs: 300000, ran: [], cleanupErrors: [], stoppedBecause: '', elapsedMs: 0 };
   if (!initial || !initial.active) { out.stoppedBecause = 'BATCH_INACTIVE'; return out; }
   if (initial.requestedBy !== ctx.actor) throw new Error('始めた所有者として実行してください。');
   for (let count = 0; count < 64; count++) {
