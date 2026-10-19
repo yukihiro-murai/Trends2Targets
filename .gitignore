@@ -3,3 +3,11 @@
 # Claude Code の作業コピー（.claude/worktrees/）と手元のプレビュー設定
 .claude/
 node_modules/
+# 認証・秘密情報（誤コミット防止）
+.env
+.env.*
+!.env.example
+.clasprc.json
+**/credentials.json
+*.pem
+*.p12
