@@ -21,7 +21,7 @@ Forecast_Agent 売上予測Webアプリの案内役「よみ」と天気キャ�
 | 図鑑登録 | 済み。`shared/character-library/gen.py` にシリーズ「天気予報 (Forecast_Agent)」9 体＋目の部品 2 種（`half` 半目・`swirl` ぐるぐる目）。図鑑 485 体／ERROR は登録前と同じ 29 件（既存キャラ分。追加 9 体の ERROR/WARN は 0） |
 | Forecast_Agent への同期 | 済み。`characters.config.json` → `assets/characters/Characters.html`（GAS には上げない。下の「注意」） |
 | タブのアイコン（ファビコン） | **本番反映済み（2026-10-01、公開 @29）**。`doGet` → `webSetFavicon_` → `HtmlOutput.setFaviconUrl(FORECAST_FAVICON_URL)`。HEAD と公開版 29 の 21 ファイルがローカルと一致。タブでの見え方は利用者のブラウザで確認（アプリ内ブラウザは社内 SSO で未ログイン） |
-| 表示条件・画面への配置 | **本番反映済み（公開 @30、2026-10-01）**（ユーザー「案のとおりで実装して」）。同じ版で段階0（旧 Web アプリを所有者のみ・操作の記録）も反映。`Forecast_WebAppUI.html` の画面側だけで判定（下の「表示条件」「画面への配置」）。`tests/forecast-weather.test.mjs` |
+| 表示条件・画面への配置 | **本番反映済み（公開 @30、2026-10-01）**（ユーザー「案のとおりで実装して」）。同じ版で段階0（旧 Web アプリを所有者のみ・操作の記録）も反映。当時の画面は `Forecast_WebAppUI.html`。契約テストは `archive/vnext-2026-10-05/tests/forecast-weather.test.mjs`（現行アプリの空模様は `app/src/`・`app/tests/`） |
 
 ## v8 デザインの要点
 
@@ -43,8 +43,10 @@ Forecast_Agent 売上予測Webアプリの案内役「よみ」と天気キャ�
 ## 書き出し・検証
 
 ```bash
-cd assets/characters/src && python3 build.py   # svg/ png/ yomi/ favicon/ review/ と Forecast_WebApp.js のアイコン区間を作り直す
-node tests/forecast-favicon.test.mjs            # アイコンの URL 形式・64x64 PNG・doGet の呼び出し・別ファイルを作らないこと
+cd assets/characters/src && python3 build.py   # svg/ png/ yomi/ favicon/ review/ と（当時）Forecast_WebApp.js のアイコン区間を作り直す
+# 旧 Web アプリ用のファビコン契約テスト（現行ルートには無い）:
+#   node archive/legacy-2026-10-04/forecast-favicon.test.mjs
+# 現行アプリの模擬テスト全体: npm test
 ```
 
 PNG 化は Playwright 同梱の chrome-headless-shell（`~/Library/Caches/ms-playwright/`）を直接呼ぶ。ユーザーは HTML/PDF を開けないので、確認には PNG を送る。
