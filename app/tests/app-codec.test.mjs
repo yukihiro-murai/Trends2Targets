@@ -324,6 +324,18 @@ function legacySpec() {
   assert.deepEqual(jobTriggers().map((t) => t.uid), [job(s4.jobId).triggerUid], '待っている処理のトリガーだけが残る');
   env.fireTriggers('triggerRunJob');
   assert.equal(env.state.lockHeld, false);
+  // 24h 超の QUEUED は先に期限切れにしてトリガーを消し、その後に記録を片付ける（逆順だとトリガーが残る）
+  const orphanUid = 'UID-ORPHAN-QUEUED';
+  env.run(`ScriptApp.newTrigger('triggerRunJob').timeBased().after(1000).create()`);
+  const orphanTrig = env.triggers.filter((t) => t.handler === 'triggerRunJob').pop();
+  orphanTrig.uid = orphanUid;
+  put({ id: 'JOB-STALE-Q', kind: 'SYSTEM.RECOVER', status: 'QUEUED', payload: {}, requestedBy: OWNER,
+    createdAt: new Date(Date.now() - 25 * 3600e3).toISOString(), triggerUid: orphanUid });
+  const s5 = env.call('apiStartJob(__in)', { __in: RECOVER });
+  assert.ok(!('APP_JOB_JOB-STALE-Q' in env.props), '期限切れの後に 24h 超の記録を消す');
+  assert.ok(!env.triggers.some((t) => t.uid === orphanUid), '期限切れでトリガーも消す');
+  assert.deepEqual(jobTriggers().map((t) => t.uid), [job(s5.jobId).triggerUid]);
+  env.fireTriggers('triggerRunJob');
 }
 
 console.log('app-codec: all tests passed');

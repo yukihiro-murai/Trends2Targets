@@ -263,8 +263,9 @@ function appStartJob_(ctx, input, opts) {
   const spec = appJobSpec_(kind);
   if (!appIsSetUp_()) throw new Error('初期設定がまだです。');
   return appWithLock_(() => {
-    appCleanupJobs_();
+    // 先に期限切れの QUEUED を FAILED にしトリガーを消してから片付ける（逆順だと 24h 超の QUEUED を消してもトリガーが残る）
     appExpireQueuedJobs_();
+    appCleanupJobs_();
     const busy = appJobList_().filter(j => j.status === 'QUEUED' || (j.status === 'RUNNING' && !appJobIsStale_(j)));
     if (busy.length) throw new Error('ほかの処理（' + appJobSpec_(busy[0].kind).label + '）が終わるまでお待ちください。');
     const payload = input && input.payload;

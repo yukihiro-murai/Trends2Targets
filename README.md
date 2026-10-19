@@ -7,9 +7,12 @@
 ## よく使うコマンド
 
 ```bash
-npm test                 # 全部の模擬テスト（app/tests + tests）
-npm run test:serial      # 1 本ずつ順に（デバッグ用）
-npm run build-engine     # Forecast_Agent.js / Forecast_WebApp.js を変えたあと LegacyEngine.js を作り直す
+npm test                   # 全部の模擬テスト（app/tests + tests）
+npm run test:serial        # 1 本ずつ順に（デバッグ用）
+npm run build-engine       # Forecast_Agent.js / Forecast_WebApp.js を変えたあと LegacyEngine.js を作り直す
+npm run build-engine:check # LegacyEngine.js が元ファイルと一致するか（ずれていれば終了コード 1）
+npm run engine-usage       # LegacyEngine の参照状況
+npm run run-log-summary    # RUN ログ CSV の集計（引数に CSV パス）
 ```
 
 新アプリの GAS 反映は **`app/` で**（ルートの `.clasp.json` は旧アプリ向け。ルートから `clasp push` しない）:

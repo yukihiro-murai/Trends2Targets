@@ -60,12 +60,19 @@ function appSettingsCurrent_() {
       .sort((a, b) => (a.effective_from < b.effective_from ? -1 : a.effective_from > b.effective_from ? 1 : a._row - b._row));
     const live = hist.filter(r => r.effective_from <= today).pop();
     let value = d.def;
-    // スプレッドシートの指定は、保存のときに確かめた ID をそのまま使う（読むたびに Drive を開かない）
-    try { if (live) value = d.type === 'sheet' ? String(live.value) : appParseSettingValue_(key, live.value); } catch (e) { value = d.def; }
+    let fromLive = false;
+    // スプレッドシートの指定は、保存のときに確かめた ID をそのまま使う（読むたびに Drive を開かない）。
+    // 壊れた行は既定値に戻し、isDefault も true にする（承認済みと誤認しない。appLandingApproved_）
+    try {
+      if (live) {
+        value = d.type === 'sheet' ? String(live.value) : appParseSettingValue_(key, live.value);
+        fromLive = true;
+      }
+    } catch (e) { value = d.def; fromLive = false; }
     return {
       key: key, label: d.label, type: d.type, unit: d.unit, min: d.min === undefined ? null : d.min, max: d.max === undefined ? null : d.max,
-      def: d.def, value: value, isDefault: !live, effectiveFrom: live ? live.effective_from : '',
-      updatedAt: live ? live.created_at : '', updatedBy: live ? live.created_by : '',
+      def: d.def, value: value, isDefault: !fromLive, effectiveFrom: fromLive ? live.effective_from : '',
+      updatedAt: fromLive ? live.created_at : '', updatedBy: fromLive ? live.created_by : '',
       scheduled: hist.filter(r => r.effective_from > today).map(r => ({ value: r.value, effectiveFrom: r.effective_from }))
     };
   });

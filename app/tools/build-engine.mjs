@@ -14,7 +14,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const legacyPath = path.join(appDir, '..', 'Forecast_Agent.js');
@@ -100,7 +100,7 @@ export function buildEngine(src, webSrc) {
   return { text: header + src + middle + webSrc + footer, sha, webSha, version: m[1], headerLength: header.length, middleLength: middle.length, footerLength: footer.length };
 }
 
-if (import.meta.url === 'file://' + process.argv[1]) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const src = await readFile(legacyPath, 'utf8');
   const webSrc = await readFile(webPath, 'utf8');
   const built = buildEngine(src, webSrc);

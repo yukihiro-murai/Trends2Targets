@@ -34,7 +34,8 @@ function appRolesOf_(user) {
   try { rows = appIsSetUp_() ? appCachedRead_('ROLES\u0001' + Math.floor(new Date().getTime() / 600000), () => appReadTable_('ROLES')) : []; } catch (e) { rows = []; }
   // 読めなければ付与なし（最小の権限）。表は控えから（画面から変えれば控えはすぐ古くなる。表を手で直したときも 10 分で読み直す）
   const today = appToday_();
-  rows.filter(r => r.is_active && r.email === user.email && APP_ROLES.indexOf(r.role) >= 0 &&
+  // is_active は Notifications と同じく === true（真偽以外の真値では付与しない）
+  rows.filter(r => r.is_active === true && r.email === user.email && APP_ROLES.indexOf(r.role) >= 0 &&
       (!r.valid_from || r.valid_from <= today) && (!r.valid_to || today <= r.valid_to))
     .forEach(r => out.push({ role: r.role, scope_type: r.scope_type === 'CLIENT' ? 'CLIENT' : 'ALL', client_id: r.client_id || '', source: r.role_id }));
   return out;
