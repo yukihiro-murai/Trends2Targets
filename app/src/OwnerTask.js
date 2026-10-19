@@ -109,6 +109,10 @@ const APP_OWNER_ACTIONS = {
   // ---- 計画の補正の値（Calibration.js。2026-10-07 村井さん決定 D1〜D3・D7・D8）: 今の値を見て、承認した値を書く・承認待ちの見直し案を取り下げる ----
   calibrationPreview: { name: 'CALIBRATION.PREVIEW', args: ['planId'], check: t => appOwnerCheckPlanId_(t), opts: () => ({ minRole: 'ADMIN', audit: false }),
     run: (ctx, i) => appCalibrationPreview_(i.planId) },
+  // 影の階層偏り補正の本番適用プレビュー（Learning.js。読むだけ。候補の setCalibration 案を返す。幅の較正は扱わない）
+  shadowBiasPreview: { name: 'LEARN.SHADOW_BIAS', opts: () => ({ minRole: 'ADMIN', audit: false }),
+    run: () => appShadowBiasPreview_(), brief: r => ({ version: r.version, writes: r.writes, candidateCount: r.candidateCount,
+      planCount: r.planCount, pooled: r.pooled, conformalDeferred: r.conformalDeferred }), always: true },
   // 計画への保存（PLAN.EDIT の CALIBRATION.SET。所有者だけ）。項目と値は始める前に確かめる（裏の処理の中でも確かめ直す）
   setCalibration: { job: 'PLAN.EDIT', args: ['planId', 'set', 'withdrawPendingReview', 'reason', 'inputHash'],
     check: t => { appOwnerCheckPlanId_(t); appCalibrationCheck_(t); appOwnerCheckHash_(t); }, current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
