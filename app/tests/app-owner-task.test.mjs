@@ -14,7 +14,7 @@ import { OWNER, MEMBER, OUTSIDER, sources, extractFunction, setUpEnv } from './g
 const D = (y, m, d = 1) => new Date(y, m - 1, d);
 const RESULT_MAX = 8000;
 /** 読むだけの操作（頼みを残す）と、裏の処理を始める操作（頼みを jobStatus に置き換える）。ほかは書く操作（頼みを消す） */
-const READS = ['listDirectory', 'listSettings', 'listPlans', 'planCandidates', 'health', 'listAudit', 'yearPreview', 'poolPreview', 'calibrationPreview', 'jobStatus',
+const READS = ['listDirectory', 'listSettings', 'listPlans', 'planCandidates', 'health', 'listAudit', 'yearPreview', 'poolPreview', 'calibrationPreview', 'shadowBiasPreview', 'jobStatus',
   'listPersonLinks', 'vertexConfigPreview', 'bulkStatus', 'provisionalStatus', 'preflightProvisionalOffline', 'exportProvisionalReadback', 'previewPointRevision', 'applyPointRevision', 'readPointRevisions'];   // 人のつなぎ（listPersonLinks・linkPerson・unlinkPerson）は app-v10-hits.test.mjs、AI 調査の問い合わせ先は app-vertex-config.test.mjs で確かめる
 const JOBS = ['createPlan', 'setPeople', 'importSales', 'aggregateSales', 'runForecast', 'yearClose', 'poolApply', 'setCalibration', 'runBacktest'];   // 補正の値（setCalibration）は app-calibration.test.mjs、物差し（runBacktest）は app-v10-backtest.test.mjs で確かめる
 const seen = { direct: 0, queued: 0 };   // 裏の処理が、始めたその場で終わった回数・まだ終わっていなかった回数
