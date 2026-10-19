@@ -1,0 +1,4 @@
+{
+  "install": "npm install -g @google/clasp",
+  "start": "if [ -n \"${CLASPRC_JSON:-}\" ]; then\n  umask 077\n  printf '%s' \"$CLASPRC_JSON\" > \"$HOME/.clasprc.json\"\n  chmod 600 \"$HOME/.clasprc.json\"\nfi"
+}
