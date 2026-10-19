@@ -228,6 +228,21 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   env.run(`appInsertRows_('ROLES', [{ role_id: 'RL-X', email: '${OUTSIDER}', role: 'ADMIN', scope_type: 'ALL', client_id: '', valid_from: '', valid_to: '', is_active: true, row_version: 1 }])`);
   env.as(OUTSIDER);
   assert.deepEqual(env.call('appRolesOf_(appCurrentUser_())'), []);
+  // is_active が true 以外の真値では付与しない（Notifications と同じ fail-closed）
+  env.as(MEMBER);
+  const fakeSources = env.call(`(() => {
+    const origRead = appReadTable_;
+    const origCached = appCachedRead_;
+    appCachedRead_ = (key, fn) => fn();
+    appReadTable_ = (name) => name === 'ROLES'
+      ? [{ role_id: 'RL-FAKE', email: '${MEMBER}', role: 'ADMIN', scope_type: 'ALL', client_id: '',
+           valid_from: '', valid_to: '', is_active: 1 }]
+      : origRead(name);
+    try { return appRolesOf_(appCurrentUser_()).map(r => r.source); }
+    finally { appReadTable_ = origRead; appCachedRead_ = origCached; }
+  })()`);
+  assert.ok(!fakeSources.includes('RL-FAKE'), '真偽でない is_active では ADMIN を付けない');
+  assert.ok(fakeSources.includes('DOMAIN'), '社内の既定 VIEWER/CONTRIBUTOR は残る');
   // 役割の強さとクライアント単位
   const has = (roles, min, client) => env.run(`appHasRole_(__r, '${min}'${client ? `, '${client}'` : ''})`, { __r: roles });
   const planner = [{ role: 'PLANNER', scope_type: 'CLIENT', client_id: 'CL-1' }];
@@ -446,9 +461,14 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   env.task(`saveSetting({ key: 'test.flag', value: 'true' })`);
   assert.equal(cur()['test.flag'].value, true);
   assert.equal(env.run(`appSettingValue_('test.rate')`), 0.11);
-  // 表に紛れ込んだ不正な値は使わず既定値に戻す
-  env.run(`appInsertRows_('SETTINGS', [{ setting_id: 'ST-X', key: 'test.rate2', value: '9', scope: 'GLOBAL', scope_id: '', effective_from: '${TODAY}', note: '', created_at: '', created_by: '' }])`);
-  assert.equal(cur()['test.rate2'].value, 0.05);
+  // 表に紛れ込んだ不正な値は使わず既定値に戻す（行があっても isDefault=true。承認済みと誤認しない）
+  env.run(`appInsertRows_('SETTINGS', [{ setting_id: 'ST-X', key: 'test.rate2', value: '9', scope: 'GLOBAL', scope_id: '', effective_from: '${TODAY}', note: '', created_at: 't', created_by: 'x' }])`);
+  assert.deepEqual([cur()['test.rate2'].value, cur()['test.rate2'].isDefault, cur()['test.rate2'].effectiveFrom], [0.05, true, '']);
+  // landing.tau が壊れても承認済みにしない
+  env.run(`appInsertRows_('SETTINGS', [{ setting_id: 'ST-TAU-BAD', key: 'landing.tau', value: 'not-a-number', scope: 'GLOBAL', scope_id: '', effective_from: '${TODAY}', note: '', created_at: 't', created_by: 'x' }])`);
+  const land = env.run('appLandingApproved_()');
+  assert.equal(land.tauSet, false);
+  assert.equal(land.tau, env.run('APP_LANDING.TAU0'));
 }
 
 // ==== 10. 操作の記録（鎖・改ざんの検出・一覧） ====
