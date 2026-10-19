@@ -88,8 +88,8 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
 {
   assert.equal(manifest.runtimeVersion, 'V8');
   assert.equal(manifest.timeZone, 'Asia/Tokyo');
-  assert.deepEqual(manifest.webapp, { executeAs: 'USER_DEPLOYING', access: 'MYSELF' },
-    '社内に開くのは段階2で所有者が決めてから（ここを DOMAIN に変えるときは設計文書 12 章を更新する）');
+  assert.deepEqual(manifest.webapp, { executeAs: 'USER_DEPLOYING', access: 'DOMAIN' },
+    '社内公開（DOMAIN）。戻すときは MYSELF にして同じ deploy ID で再公開（RUNBOOK_domain_yearclose_JA.md）');
   // 外への問い合わせと Google Cloud は A-4 AI 調査（Vertex AI）のため（2026-10-03 村井さん承認）。
   // メールの送信は毎日の処理の異常を管理者へ知らせるため（2026-10-05 村井さん承認）
   assert.deepEqual([...manifest.oauthScopes].sort(), [
