@@ -433,7 +433,7 @@ v0.50.1 の予測結果は、最新の実行と計画・年度・12か月が一�
 4. 左の「エディタ」で `Api.gs` を開き、上の関数の一覧から `apiOwnerTask` を選んで「実行」を押します。
 5. 下の「実行ログ」に結果が出ます。同じ結果（大きいときは要約）がスクリプト プロパティ `OWNER_TASK_RESULT` に入ります（「プロジェクトの設定」を開き直すと見えます）。`"ok": true` ならうまくいっています。`hint` に、すぐに終わったのか、裏の処理を始めたのか（まだ終わっていないのか）が書いてあります。
 6. うまくいった後の `OWNER_TASK` は、操作の種類で変わります。
-   - 読むだけの操作（`listDirectory`・`listSettings`・`listPlans`・`planCandidates`・`health`・`listAudit`・`yearPreview`・`poolPreview`・`calibrationPreview`・`vertexConfigPreview`・`jobStatus`）: そのまま残ります。もう一度実行すると読み直します。
+   - 読むだけの操作（`listDirectory`・`listSettings`・`listPlans`・`planCandidates`・`health`・`listAudit`・`yearPreview`・`poolPreview`・`calibrationPreview`・`shadowBiasPreview`・`vertexConfigPreview`・`jobStatus`）: そのまま残ります。もう一度実行すると読み直します。
    - 書く操作（`saveMember`・`grantRole`・`revokeRole`・`saveClientName`・`saveClient`・`saveSetting`・`enableBackup`・`runBackup`・`runHousekeeping`・`verifyAudit`・`setVertexConfig`）: すぐに終わり、`OWNER_TASK` は消えます（同じ操作を 2 度動かさないため）。
    - 裏の処理を始める操作（`createPlan`・`setPeople`・`yearClose`・`poolApply`・`setCalibration`）: `OWNER_TASK` が `{"action":"jobStatus","jobId":"JOB-…"}` に置き換わります。1〜2 分おいて、プロパティは触らずに `apiOwnerTask` をもう一度実行すると、処理の結果（`status` が `DONE` か `FAILED`。`FAILED` なら `error` に理由）が分かります。短い処理は、始めたその場で終わることもあります（`hint` に「すぐに終わりました」と出ます）。
    - 実行している間に `OWNER_TASK` が書き換えられていたときは、消しも置き換えもしません。
@@ -479,6 +479,7 @@ v0.50.1 の予測結果は、最新の実行と計画・年度・12か月が一�
 | `poolPreview` | 全計画の情報源の信頼度の事前分布を見比べる（書かない） | `{"action":"poolPreview"}` |
 | `poolApply` | 事前分布を各計画に書く（裏の処理）。四半期の最後の月が締まった後に、その計画で今の検証の版の B-2 が初めて動いた後に数えた当たりだけを使う（`poolPreview` の `skippedEvidence` = 使わなかった行の数） | `{"action":"poolApply"}` |
 | `calibrationPreview` | 計画の今の補正の値（係数・暦月の補正・自動の学びの旗・AI の効き）と、取り下げられる見直し案（まだ反映していない一番新しい案）を見る（書かない）。`warnings` は今の値の注意 | `{"action":"calibrationPreview","planId":"PL-…"}` |
+| `shadowBiasPreview` | 影の階層偏り補正の本番適用候補を見る（書かない）。過去月の外れ幅が減る計画だけ `setCalibration` 案を返す。幅の較正は扱わない | `{"action":"shadowBiasPreview"}` |
 | `setCalibration` | 承認した補正の値を計画に書く・まだ反映していない見直し案を取り下げる（裏の処理。下の「計画の補正の値」） | `{"action":"setCalibration","planId":"PL-…","set":{"bias_correction_factor":1},"reason":"（理由）"}` |
 | `vertexConfigPreview` | 計画ごとの AI 調査の問い合わせ先（`VERTEX_PROJECT_ID`・`VERTEX_LOCATION`・`VERTEX_GEMINI_MODEL`）の今の値と、締めていない年度の計画での値ごとの数（`summary`）を見る（書かない。下の「AI 調査の問い合わせ先」） | `{"action":"vertexConfigPreview"}` |
 | `setVertexConfig` | 問い合わせ先（モデル名。頼めばリージョン・プロジェクトも）を全計画まとめて替える（`planIds` を省くと締めていない年度の全計画） | `{"action":"setVertexConfig","model":"gemini-3.8-flash"}` |

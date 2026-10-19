@@ -334,6 +334,80 @@ function appBiasShadow_(accs) {
 }
 
 /**
+ * 影の階層偏り補正の本番適用プレビュー（所有者の apiOwnerTask `shadowBiasPreview`。読むだけ・何も書かない）。
+ * 予測・CALIBRATION_STATE・LegacyEngine は変えない。適用は所有者が既存の setCalibration で 1 計画ずつ行う。
+ * 候補: 締まった月が 3 以上・factorShadow が今の係数と違い・過去月の mapeShadow が mapeNow より小さい計画だけ。
+ * P10〜P90 の幅の較正（コンフォーマル）はこの入口では扱わない（LegacyEngine への手と別承認が要る）。
+ */
+function appShadowBiasPreview_() {
+  const plans = appReadTable_('PLANS').filter(p => p.state !== 'ARCHIVED');
+  const ids = plans.map(p => p.plan_id);
+  const accs = appAccuracyAll_(ids);
+  const shadow = appBiasShadow_(accs);
+  const clients = appPlanClients_(ids);
+  const rows = [];
+  const candidates = [];
+  ids.forEach(id => {
+    const plan = plans.filter(p => p.plan_id === id)[0];
+    const a = accs[id] || {};
+    const s = shadow.plans[id];
+    let factorNow = null;
+    try {
+      const cal = appPlanCalRow_(id, appEngTableObjects_(id, ['CALIBRATION_STATE']).CALIBRATION_STATE);
+      factorNow = cal ? appNum_(cal.bias_correction_factor) : null;
+    } catch (e) { factorNow = null; }
+    const scored = typeof a.scoredMonths === 'number' ? a.scoredMonths : (a.n || 0);
+    const base = {
+      planId: id, fy: Number(plan && plan.fy), client: clients[id] || '', scoredMonths: scored,
+      factorNow: factorNow, eligible: false, reason: ''
+    };
+    if (!s) {
+      base.reason = '締まった月が足りないか、偏りを測れません（影の対象外）';
+      rows.push(base);
+      return;
+    }
+    const factorShadow = Math.round(s.factorShadow * 1e6) / 1e6;
+    const same = factorNow !== null && Math.abs(factorNow - factorShadow) < 1e-9;
+    const improves = typeof s.mapeShadow === 'number' && typeof s.mapeNow === 'number' && s.mapeShadow < s.mapeNow;
+    const row = Object.assign(base, {
+      bias: s.bias, biasNow: s.biasNow, shrunk: s.shrunk, se: s.se,
+      factorShadow: factorShadow, mapeNow: s.mapeNow, mapeShadow: s.mapeShadow,
+      eligible: false, reason: ''
+    });
+    if (same) row.reason = '今の係数が影の倍率と同じです';
+    else if (!improves) row.reason = '過去月への当てはめで外れ幅が減りません（自動候補にしません）';
+    else {
+      row.eligible = true;
+      row.reason = '候補: setCalibration で bias_correction_factor を影の倍率にできます（予測は書き込み＋再予測の後に変わります）';
+      row.proposedSetCalibration = {
+        action: 'setCalibration', planId: id,
+        set: { bias_correction_factor: factorShadow, auto_update_enabled: 0 },
+        reason: '影の階層偏り補正（shadowBiasPreview）を承認して適用'
+      };
+      candidates.push({ planId: id, client: row.client, fy: row.fy, factorNow: factorNow,
+        factorShadow: factorShadow, mapeNow: s.mapeNow, mapeShadow: s.mapeShadow,
+        proposedSetCalibration: row.proposedSetCalibration });
+    }
+    rows.push(row);
+  });
+  return {
+    version: 'SHADOW_BIAS_PREVIEW_V1',
+    writes: false,
+    conformalDeferred: true,
+    conformalNote: 'P10〜P90 の幅の較正は LegacyEngine への変更と別承認が要るため、このプレビューでは扱いません。',
+    pooled: !!shadow.pooled, mu: shadow.mu, tau2: shadow.tau2,
+    planCount: rows.length, candidateCount: candidates.length,
+    candidates: candidates, plans: rows,
+    nextSteps: [
+      'candidates を確認する（mapeShadow が mapeNow より小さい計画だけ）',
+      '1 計画ずつ calibrationPreview → setCalibration（proposedSetCalibration を流用可）',
+      'setCalibration の後に runForecast で予測し直す（年度の見込み本番条件にも必要）',
+      '幅の較正は別途設計・承認してから'
+    ]
+  };
+}
+
+/**
  * 計画のメーカーの名前（CONFIG!B2）: { 計画の ID: 名前（無ければ ''） }。旧来の A-9・B-5 は、この名前の CALIBRATION_STATE の行の補正を
  * 予測に掛ける（名前が合う行が無ければ既定の行を足す）。「今の補正」はこの名前で選ぶ（appLandingCalRow_。Landing.js・Calibration.js と同じ。2026-10-13）。
  * データ本体の ENG_ROWS の CONFIG の 2 行目を読む（計画が 2 つ以上なら表を 1 回で。Portfolio.js の appPortfolioData_ と同じ読み方）

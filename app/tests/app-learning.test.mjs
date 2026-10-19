@@ -303,4 +303,25 @@ env.run('appPlanReadMinRows_ = () => 3000');
   assert.deepEqual([again.scoredMonths, again.accuracy.n], [3, 0], '前の形の控えは数え直す');
   assert.equal(J(e6.run(`appJobGetResult_(appAccuracyKey_(__id)).value.scoredMonths`, { __id: zero })), 3, '数え直した精度を控え直す');
 }
+
+// ==== 影の階層偏り補正プレビュー（読むだけ。候補は mape が減る計画だけ。何も書かない） ====
+{
+  env.props.OWNER_TASK = JSON.stringify({ action: 'shadowBiasPreview' });
+  const out = env.call('apiOwnerTask()');
+  const r = out.result;
+  assert.equal(r.writes, false, 'プレビューは書かない');
+  assert.equal(r.conformalDeferred, true, '幅の較正は別承認');
+  assert.equal(r.version, 'SHADOW_BIAS_PREVIEW_V1');
+  assert.ok(r.pooled === true && r.planCount >= 3, '全計画を要約する');
+  assert.ok(r.candidateCount >= 1, '過去月で改善する計画が候補になる');
+  assert.ok(r.candidates.every(c => c.mapeShadow < c.mapeNow), '候補は外れ幅が減るものだけ');
+  assert.ok(r.candidates.every(c => c.proposedSetCalibration && c.proposedSetCalibration.set.bias_correction_factor),
+    '候補に setCalibration 案がある');
+  assert.equal(env.props.OWNER_TASK, JSON.stringify({ action: 'shadowBiasPreview' }), '読むだけなので頼みは残る');
+  const calBefore = env.run(`JSON.stringify(appEngTableObjects_('${ids['甲製薬']}', ['CALIBRATION_STATE']).CALIBRATION_STATE)`);
+  env.props.OWNER_TASK = JSON.stringify({ action: 'shadowBiasPreview' });
+  env.call('apiOwnerTask()');
+  const calAfter = env.run(`JSON.stringify(appEngTableObjects_('${ids['甲製薬']}', ['CALIBRATION_STATE']).CALIBRATION_STATE)`);
+  assert.equal(calAfter, calBefore, 'プレビューを繰り返しても補正表は変わらない');
+}
 console.log('app-learning: all tests passed');
