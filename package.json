@@ -2,9 +2,15 @@
   "name": "trends2targets",
   "private": true,
   "description": "Trends2Targets 売上予測と予算策定（Apps Script。依存パッケージなし。テストはローカルの GAS の模擬）",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node app/tools/run-tests.mjs",
     "test:serial": "node app/tools/run-tests.mjs --serial",
-    "build-engine": "node app/tools/build-engine.mjs"
+    "build-engine": "node app/tools/build-engine.mjs",
+    "build-engine:check": "node app/tools/build-engine.mjs --check",
+    "engine-usage": "node app/tools/engine-usage.mjs",
+    "run-log-summary": "node app/tools/run-log-summary.mjs"
   }
 }
