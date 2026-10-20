@@ -271,7 +271,9 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   // 計画の画面は 3 つ（予測準備・予測結果・予算策定。2026-10-16）: つなげて全部の区切りを確かめる
   const page = vm.runInContext(`viewForecastAll()`, ui);
   assert.ok(!/ここを表示できませんでした/.test(page), '区切りをすべて描ける: ' + (page.match(/<p class="note">([^<]*)/) || [])[1]);
-  for (const tab of ['forecast', 'basis', 'input', 'review', 'version', 'tri']) assert.ok(fcSection(page, tab), tab + ' の区切りがある');
+  for (const tab of ['forecast', 'basis', 'input', 'version', 'tri']) assert.ok(fcSection(page, tab), tab + ' の区切りがある');
+  assert.equal(fcSection(page, 'review'), '', '予測準備から振り返りを外した');
+  assert.ok(fcSection(vm.runInContext(`fcReviewSec()`, ui), 'review'), '振り返り自体は描ける');
   assert.equal(fcSection(page, 'steps'), '', '進みの区切りは無い（2026-10-16 村井さん: 予測準備は入力だけ）');
   // 旧来の計算が確認を求めたら、確認の窓（ブラウザが黙って「やめる」にすることがある）ではなく、画面の中のカードで聞く
   vm.runInContext(`S.fc.jump = 'review'; toast = function(){}; JOB_DONE['FORECAST.RUN_CALC']({ needConfirm: { key: 'extreme', title: '極端な入力', message: '増減率 +80%' } }, { planId: S.fc.planId, confirms: [] })`, ui);
@@ -296,13 +298,13 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.doesNotMatch(vm.runInContext(`S.view = 'budget'; viewForecast()`, ui), /value="[0-9]+\.[0-9]+"/, '採用予測の欄は小数を見せない（予算策定）');
   // 検証のタブの、精度の推移と学習の影
   ui.__learn = env.call('apiLearningView(__in)', { __in: { planId } });
-  const evalHtml = vm.runInContext(`S.view = 'forecast'; S.fc.learn = __learn; fcSection(viewForecastAll(), 'review')`, Object.assign(ui, { fcSection }));
+  const evalHtml = vm.runInContext(`S.view = 'forecast'; S.fc.learn = __learn; fcReviewSec()`, ui);
   // 振り返り（検証と四半期をまとめた）: 記録が無い計画は案内 1 枚、記録があれば精度の天気と精度の推移（学習の影は『学び』へ。2026-10-06）
   assert.match(evalHtml, ui.__learn.accuracy.months.length ? /AI 補正[\s\S]*精度の推移/ : /まだ振り返りの記録がありません|人の記入|AI の見直し案|AI 補正/);
   assert.doesNotMatch(evalHtml, /振り返りの更新/, '振り返りの更新は置かない（2026-10-16）');
   const withMonths = JSON.parse(JSON.stringify(ui.__learn)); withMonths.accuracy.months = [{ month: '2026/04', p10: 1, p50: 2, p90: 3, actual: 2, ape: 0, inside: true }];
   ui.__learn2 = withMonths;
-  assert.match(vm.runInContext(`S.fc.learn = __learn2; viewForecastAll()`, ui), /AI 補正[\s\S]*精度の推移/);
+  assert.match(vm.runInContext(`S.fc.learn = __learn2; fcReviewSec()`, ui), /AI 補正[\s\S]*精度の推移/);
   vm.runInContext(`S.fc.learn = __learn`, ui);
   assert.ok(!/undefined|NaN/.test(evalHtml), '精度の推移に undefined や NaN を出さない');
   // 管理の画面は外した（設定・記録と状態・年度の締め・計画を作る・全計画の学習・担当者の編集。所有者はエディタの apiOwnerTask。2026-10-06 村井さん）
@@ -316,26 +318,25 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   // ホーム: 数字・計画の状態・最近の動きと、よみのセリフ（状況から選ぶ）
   ui.__home = env.call('apiHome()');
   const homeHtml = vm.runInContext(`S.view = 'home'; B.home = __home; viewHome()`, ui);
-  assert.match(homeHtml, /年間予算[\s\S]*着地の推定[\s\S]*暫定実績[\s\S]*外れ幅[\s\S]*見通しの空模様[\s\S]*学びの進み[\s\S]*データからわかること/);
-  // 空模様はいつも 8 つ（猛暑 → 快晴 → 晴れのち曇り → 曇り → 雨 → 雪 → 霧 → 天変地異。2026-10-13 霧と天変地異を入れ替え）。名前の文字は出さず、カーソルで説明
+  assert.match(homeHtml, /年間予算[\s\S]*着地の推定[\s\S]*暫定実績[\s\S]*外れ幅[\s\S]*予実の空模様[\s\S]*学びの状況[\s\S]*分析からわかること/);
+  // 空模様はいつも 8 つ（猛暑 → 快晴 → 晴れのち曇り → 曇り → 雨 → 雪 → 霧 → 天変地異）。社名は出さず、空模様の名前は出す
   assert.match(homeHtml, /aria-label="猛暑[\s\S]*aria-label="快晴[\s\S]*aria-label="晴れのち曇り[\s\S]*aria-label="曇り[\s\S]*aria-label="雨[\s\S]*aria-label="雪[\s\S]*aria-label="霧[\s\S]*aria-label="天変地異/);
-  assert.doesNotMatch(homeHtml, /<span class="nm">/, '空模様の名前の文字は出さない');
+  assert.match(homeHtml, /<span class="nm">猛暑<\/span>/);
   assert.equal((homeHtml.match(/class="sky( none)?"/g) || []).length, 8);
   // ホームは全体だけ: 空模様は数だけで、押しても画面を移らない・メーカーの名前を出さない（行き来は左のメニューから。2026-10-13）
-  assert.match(homeHtml, /<div class="sky[^"]*" tabindex="0" role="group"/);
+  assert.match(homeHtml, /<div class="sky[^"]*"[^>]*tabindex="0" role="group"/);
   assert.doesNotMatch(homeHtml, /onclick="go\('analysis'\)"/);
   // 2026-10-06 村井さん: ホームは全体の概要だけ（個社の表・名前は出さない。最近の動き・あなたの役割も出さない）
   assert.doesNotMatch(homeHtml, /最近の動き|あなたの役割|クライアント|計画の状態/);
-  // 2026-10-13 村井さん: 空模様にだけ、当てはまるメーカーの名前を出す（ほかの所には出さない）
-  const visible = homeHtml.replace(/data-tip="[^"]*"/g, '').replace(/<span class="mk">[\s\S]*?<\/span><\/div>/g, '');
-  assert.doesNotMatch(visible, /テスト製薬|別の製薬/, 'ホームで個社の名前を出すのは空模様の中だけ');
+  const visible = homeHtml.replace(/data-tip="[^"]*"/g, '');
+  assert.doesNotMatch(visible, /テスト製薬|別の製薬/, 'ホームに個社の名前を出さない');
   // 2026-10-06 村井さん: 「よみが観測しました（時刻）」は出さない・1 カラム（左右に分けない）・「状態を見る」のボタンは出さない
   assert.doesNotMatch(homeHtml, /よみが観測しました|class="dash"|状態を見る/);
   // 2026-10-06 村井さん: 読み込みの待ちは、右下ではなく画面の中で、よみが「観測中…」と話す
   const waitHtml = vm.runInContext(`S.homeLoading = true; B.home = null; var __w = viewHome(); B.home = __home; S.homeLoading = false; __w`, ui);
   assert.match(waitHtml, /class="card loading[^"]*"[\s\S]*観測中…[\s\S]*読み込んでいます/);
   // 2026-10-13 村井さん: 読み込み中もカードを出しておく（読めたら同じ場所に入る。画面が動かない）
-  assert.deepEqual([...waitHtml.matchAll(/<div class="card skel-card"><div class="card-head">(?:<h2>([^<]*)<\/h2>)?/g)].map((m) => m[1] || ''), ['', '見通しの空模様', '学びの進み', 'データからわかること'], '数字・空模様・学びの進み・わかることのカード');
+  assert.deepEqual([...waitHtml.matchAll(/<div class="card skel-card"><div class="card-head">(?:<h2>([^<]*)<\/h2>)?/g)].map((m) => m[1] || ''), ['', '予実の空模様', '学びの状況', '分析からわかること'], '数字・空模様・学びの状況・わかることのカード');
   assert.doesNotMatch(waitHtml, /読み込み中…/);
   // 読み込みに失敗したら、理由と「もう一度読み込む」を出し、描くたびに読み直さない（前は失敗のたびに apiHome を呼び直していた）
   const failHtml = JSON.parse(vm.runInContext(`var __n = 0, __c0 = call; call = function(){ __n++; }; B.home = null; S.ld.home = { error: 'つながりません', at: Date.now() }; var __f = viewHome() + viewHome(); call = __c0; B.home = __home; S.ld.home = { at: Date.now() }; JSON.stringify([__f, __n])`, ui));
@@ -377,9 +378,10 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   vm.runInContext(`S.view = 'forecast'`, ui);
   // 根拠のタブ
   ui.__basis = env.call('apiForecastBasis(__in)', { __in: { planId } });
+  ui.fcSection = fcSection;
   const basisHtml = vm.runInContext(`S.fc.basis = __basis; fcSection(viewForecastAll(), 'basis')`, ui);
   // 中身のある部分だけを出す（補正・市場の調査・前回からの変化は、記録があるときだけ。「まだありません」を重ねない。2026-10-06）
-  assert.match(basisHtml, /過去の売上だけ[\s\S]*予測を押したもの/);
+  assert.match(basisHtml, /過去実績ベース[\s\S]*今回の予測/);
   assert.doesNotMatch(basisHtml, /月ごとの内訳|予測の土台/, '月ごとの内訳・予測の土台は予測結果に出さない（土台は三角測量の画面）');
   assert.ok((basisHtml.match(/まだ/g) || []).length <= 1, '根拠のタブに「まだ」を重ねない');
   assert.ok(!/undefined|NaN/.test(basisHtml), '根拠のタブに undefined や NaN を出さない');
@@ -403,7 +405,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.match(vm.runInContext(`var __kp = S.pf; S.pf = null; B.home = __home; var __m = viewBudgets(); S.pf = __kp; __m`, ui), /<h1>予算一覧<\/h1>[\s\S]*テスト製薬[\s\S]*開く/);
   // 予測一覧: メーカーごとの見通しの帯（同じ目盛り）・中心・前回から・外れ幅。名前を押すと予測結果
   const fcl = vm.runInContext(`S.pf = __pf; S.mkFy = String(__pf[0].fy); viewMakers()`, ui);
-  assert.match(fcl, /<h1>予測一覧<\/h1>[\s\S]*見通し[\s\S]*テスト製薬/);
+  assert.match(fcl, /<h1>予測一覧<\/h1>[\s\S]*予測[\s\S]*テスト製薬/);
   assert.match(fcl, /openPlan\('[^']+','forecast'\)/, '名前を押すと予測結果');
   assert.doesNotMatch(fcl, /undefined|NaN|年間予算/, '予算は出さない');
   // 2026-10-16: 画面の題の行は出さない（題は読み上げだけ）。年度の選ぶ欄は上の帯の右へ
@@ -414,7 +416,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.doesNotMatch(pick, /メーカーを選ぶ/);
   assert.match(pick, /<h1>予測準備<\/h1><span class="fc-sels" data-near="1"><select[^>]*id="fc_fy"[\s\S]*FY2026[\s\S]*<select[^>]*id="fc_mk"[^>]*>[\s\S]*>テスト製薬<\/option>/);
   // メニュー: ホーム・メーカー・予測・分析・学び（使える人は全員同じ。2026-10-06 村井さん）
-  assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(NAV.map(function(n){ return n[1]; }))`, ui)), ['ホーム', '予測一覧', '予算一覧', '予測準備', '予測結果', '三角測量', '予算策定', '分析', '学び']);
+  assert.deepEqual(JSON.parse(vm.runInContext(`JSON.stringify(NAV.map(function(n){ return n[1]; }))`, ui)), ['ホーム', '予測一覧', '予測準備', '予測結果', '三角測量', '予算一覧', '予算策定', '分析', '学び']);
   assert.equal(vm.runInContext(`go('settings'); S.view`, ui), 'home', '無い画面へは移らない');
   // 分析（apiCrossMaker）: 年度は題の横。画面の中のタブは無く、1 カラムで縦に（要点のよみ → … → 話題ごとの向き。2026-10-13）
   ui.__an = env.call('apiCrossMaker(__in)', { __in: {} });

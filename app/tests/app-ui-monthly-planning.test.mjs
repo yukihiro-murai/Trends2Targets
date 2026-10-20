@@ -225,7 +225,7 @@ const listRow = { planId: 'P1', clientName: '合成製薬', fy: 2026, p10: 0, p5
   forecastPointAnnual: 390000, forecastPointProvisional: true, previousForecastPointAnnual: 300000, prevP50: 0 };
 const listBefore = JSON.stringify(listRow);
 run('S.pf={plans:__list};', { __list: [listRow] });
-const listHtml = run('mkForecastTable(__list)', { __list: [listRow] });
+const listHtml = run('mkForecastTable(__list).html', { __list: [listRow] });
 assert.match(listHtml, /<th[^>]*>予測額<\/th>/);
 assert.match(listHtml, /月次予測の合計（暫定）/);
 assert.match(listHtml, /390,000/);

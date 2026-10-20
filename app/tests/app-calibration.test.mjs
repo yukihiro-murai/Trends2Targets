@@ -567,7 +567,7 @@ let readmeTask;
   const ui = loadUi();
   ui.__v = view;
   vm.runInContext(`S.view='forecast'; S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ui);
-  const html = fcSection(vm.runInContext(`viewForecastAll()`, ui), 'review');
+  const html = vm.runInContext(`fcReviewSec()`, ui);
   assert.doesNotMatch(html, /fcRun\('REVIEW\.GENERATE'\)/);
   // 2026-10-16: 振り返りの更新（当たり具合を計算・外れの原因を整理・補正を学び直す・見直し案を作る）は予測準備に置かない
   assert.doesNotMatch(html, /振り返りの更新|fcRun\('EVAL\.|fcRun\('LEARN\./);
