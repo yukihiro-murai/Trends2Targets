@@ -442,7 +442,7 @@ const APP_BUDGET_DUMMY_STEPS = ['-10', '-5', '-2', '0', '5', '8', '10', '-8'];
 const APP_BUDGET_DUMMY_CONF = ['高い', 'ふつう', '低い'];
 /** 仮予算の一括書き込みで、次の計画に進むのをやめる残り時間（ミリ秒。1 計画の保存が途中で切れないように） */
 const APP_BUDGET_DUMMY_TIME_MS = 4 * 60 * 1000;
-const APP_BUDGET_DUMMY_CONTINUE_MS = 8 * 1000;
+const APP_BUDGET_DUMMY_CONTINUE_MS = 20 * 1000;
 
 function appDummyPick_(arr, i) {
   return arr[Math.abs(Number(i) || 0) % arr.length];
@@ -545,10 +545,19 @@ function appSeedDummyOne_(ctx, plan, fy, index) {
   });
   const months = appBudgetStoredMonths_(p.plan_id);
   if (!months.length) return { skipped: Object.assign({ reason: 'no_forecast' }, item) };
-  if (appBudgetEdited_(months)) return { filled: Object.assign({ skippedBudget: 'edited' }, item) };
+  if (appBudgetEdited_(months)) {
+    if (!item.did.length) return { skipped: Object.assign({ reason: 'done' }, item) };
+    return { filled: Object.assign({ skippedBudget: 'edited' }, item) };
+  }
   const dummy = appDummyBudgetRows_(p.plan_id, appDummyPick_(APP_BUDGET_DUMMY_SCALES, index), appDummyPick_(APP_BUDGET_DUMMY_UPLIFT, index));
   if (!dummy) return { skipped: Object.assign({ reason: 'no_forecast' }, item) };
-  appDummySeedEdit_(ctx, p.plan_id, 'BUDGET.SAVE', { rows: dummy.rows, basis: 'MANUAL', alloc: 'MANUAL' });
+  try {
+    appDummySeedEdit_(ctx, p.plan_id, 'BUDGET.SAVE', { rows: dummy.rows, basis: 'MANUAL', alloc: 'MANUAL' });
+  } catch (e) {
+    const msg = String(e && e.message ? e.message : e);
+    if (/有効な月次行/.test(msg)) return { skipped: Object.assign({ reason: 'no_output' }, item) };
+    throw e;
+  }
   item.did.push('budget');
   return { filled: Object.assign({ usedAi: dummy.usedAi }, item) };
 }
@@ -582,11 +591,13 @@ function appDummySeedClearSchedule_() {
 function appSeedDummyBudgets_(ctx, fy) {
   const y = fy === undefined || fy === null || fy === '' ? appFy_(new Date()) : Number(fy);
   appRequireOpenYear_(y);
+  appDummySeedClearSchedule_();
   let plans = appReadTable_('PLANS').filter(p => String(p.fy) === String(y) && p.state !== 'ARCHIVED')
     .sort((a, b) => String(a.client_label || '').localeCompare(String(b.client_label || ''), 'ja') || String(a.plan_id).localeCompare(String(b.plan_id)));
   const out = { fy: y, filled: [], skipped: [], failed: [], remaining: [] };
   const t0 = new Date().getTime();
   let stop = false;
+  let overlap = false;
   plans.forEach((p, i) => {
     const item = { planId: p.plan_id, name: p.client_label || '' };
     if (stop) { out.remaining.push(item); return; }
@@ -596,10 +607,17 @@ function appSeedDummyBudgets_(ctx, fy) {
       if (r.filled) out.filled.push(r.filled);
       else if (r.skipped) out.skipped.push(r.skipped);
     } catch (e) {
-      out.failed.push(Object.assign({ error: String(e && e.message ? e.message : e).slice(0, 160) }, item));
+      const msg = String(e && e.message ? e.message : e);
+      if (/ロックのタイムアウト|サービス エラー/.test(msg)) {
+        overlap = true;
+        stop = true;
+        out.remaining.push(Object.assign({ error: msg.slice(0, 160) }, item));
+        return;
+      }
+      out.failed.push(Object.assign({ error: msg.slice(0, 160) }, item));
     }
   });
-  if (out.remaining.length) appDummySeedSchedule_();
+  if (out.remaining.length && !overlap) appDummySeedSchedule_();
   else appDummySeedClearSchedule_();
   return out;
 }
