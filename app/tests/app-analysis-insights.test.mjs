@@ -139,9 +139,10 @@ const D0 = { fy: '2026', fys: ['2026'], totals: {}, market: [], plans: PLANS, in
   assert.doesNotMatch(html, /subTabs|俯瞰|class="ansky"|見通しの空模様/, 'タブと空模様の板は無い');
   assert.doesNotMatch(html, /role="tablist"(?! aria-label="見せ方")/, '画面の中のタブは無い（グラフ / 表で見る だけ）');
   // 並び
-  const order = ['<div class="hero">', '<h2>全体の着地の分布', '<h2>予算との差の内訳', '<h2>不確かさの寄与', '<h2>着地の推定と予算', '<h2>着地 ÷ 予算と不確かさ', '<h2>予算を超える確率',
+  const order = ['<div class="hero">', '<h2>メーカー横断の指標', '<h2>全体の着地の分布', '<h2>予算との差の内訳', '<h2>不確かさの寄与', '<h2>着地の推定と予算', '<h2>着地 ÷ 予算と不確かさ', '<h2>予算を超える確率',
     '<h2>外れ幅', '<h2>読みのクセ', '<h2>予測の見直しの流れ', '<h2>話題ごとの向き'].map((k) => html.indexOf(k));
   assert.ok(order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1])), '1 カラムの並び: ' + order.join(','));
+  assert.match(html, /<h2>メーカー横断の指標/, 'メーカー横断の熱マップ');
   // 要点: 気になる順（要確認が先）。届く確率は 独立〜同じ向き。上位 2 社・ぶれの 8 割・読みのクセ
   const s = says(html);
   assert.ok(s.length >= 3 && s.length <= 5, s.map((x) => x.text).join('\n'));
@@ -216,6 +217,8 @@ const D0 = { fy: '2026', fys: ['2026'], totals: {}, market: [], plans: PLANS, in
 {
   assert.match(run('chartWaterfall([])'), /chempty/);
   assert.match(run('chartNormal([{ mean: 100, sd: 0 }])'), /chempty/, '幅 0 は描かない');
+  assert.match(run('chartHeat([])'), /chempty/);
+  assert.match(run('chartHeat([{ label: "甲", cells: [{ v: 0.8, text: "110%", tone: "warm", tip: "甲 予算比" }] }], { cols: ["予算比"], w: 720 })'), /<svg class="chart"|予算比/);
   // 合計が差より十分大きいときは目盛りを途中から（切れ目の印）
   const big = run('chartWaterfall([{ label: "予算", value: 1e9, total: true }, { label: "a", value: -2e7 }, { label: "b", value: 1e7 }, { label: "着地", value: 9.9e8, total: true }], { w: 720 })');
   assert.match(big, /class="brk"/);

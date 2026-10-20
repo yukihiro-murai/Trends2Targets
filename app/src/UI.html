@@ -10,7 +10,7 @@
 <style>
 /* Trends2Targets の画面（2026-10-05 Dots2Lines の作りに合わせた）。部品と作りは BIGM2Y_organizational_sensing の Dots2Lines（prototypes/pc-intake/web/index.html・docs/adaptive-learning/UI_RULES.md）と同じ:
    - 濃紺 #0F3557 と水色 #00A0E9。水色は塗り・線・印だけに使い、文字にはしない（水色の系統の文字は #0F5788）。太字は使わない
-   - 文字は 14・15・16・18・21・26、間隔は 4 の倍数、高さは 44・40・36、角は 18・12・まる。上部バー 64px（下に水色の線）、左のメニュー 220px（印つき）
+   - 文字は 14・15・16・18・21・26、間隔は 4 の倍数、高さは 44・40・36、角は 8・6・4。上部バー 64px（下に水色の線）、左のメニュー 220px（印つき）
    - 並べ方の格子: 1 マス 160px・間 12px（1 マス 172px 刻み）。入力欄とボタンは 1 マス 160・2 マス 332・3 マス 504 のどれか。
      左からつめて並べるので、どの画面でも欄とボタンの頭が 172px 刻みの線にそろう。表の中のボタンだけは 128px（列は 152px）
    2026-10-06 作り直し: 画面ごとに区切り（CSS: CORE / CHARTS / HOME / MAKERS / FORECAST / ANALYSIS / LEARNING）を付け、何人かで同時に直せるようにした。
@@ -32,7 +32,7 @@
   /* 文字の大きさ */
   --fs-s:14px; --fs-m:15px; --fs-b:16px; --fs-h3:18px; --fs-h2:21px; --fs-h1:26px;
   /* 角・高さ・幅 */
-  --radius:18px; --radius-s:12px; --pill:999px;
+  --radius:8px; --radius-s:6px; --pill:4px;
   --h-btn:44px; --h-btn-sm:40px; --h-input:44px; --h-cell:40px; --h-pill:36px; --h-chip:28px;
   --col:160px; --col2:332px; --col3:504px; --pitch:172px;   /* 格子（1 マス・2 マス・3 マス・刻み） */
   --w-btn:var(--col); --w-btn-sm:128px; --w-action:var(--col2); --w-tab:128px; --nav-w:220px; --top-h:64px; --bnav-h:64px;
@@ -41,8 +41,8 @@
   --chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%230F3557' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.5 8 10 12.5 14.5 8'/%3E%3C/svg%3E");
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:28px; --s8:32px;
   /* 影・動き */
-  --shadow:0 1px 2px rgba(15,53,87,.04), 0 4px 14px rgba(15,53,87,.04);
-  --shadow-pop:0 8px 24px rgba(11,42,71,.18);
+  --shadow:0 1px 2px rgba(15,53,87,.06);
+  --shadow-pop:0 4px 12px rgba(11,42,71,.10);
   --ease:.15s ease;
   /* Inter + Noto Sans JP（主流な AI 企業に近い汎用体）。無い環境は system-ui */
   --font:Inter,"Noto Sans JP",ui-sans-serif,system-ui,-apple-system,"Segoe UI","Hiragino Sans","Yu Gothic UI","Yu Gothic",Meiryo,sans-serif;
@@ -60,7 +60,7 @@ svg.i{width:20px;height:20px;flex:0 0 20px}
 
 /* ---- 上部バー ---- */
 .topbar{position:fixed;top:0;left:0;right:0;height:var(--top-h);background:var(--navy);color:#fff;display:flex;align-items:center;gap:12px;padding:0 var(--gutter) 0 var(--s6);z-index:60;box-shadow:inset 0 -3px 0 var(--primary)}
-.topbar .logo{width:36px;height:36px;flex:0 0 36px;border-radius:11px;background:var(--primary);display:flex;align-items:center;justify-content:center}
+.topbar .logo{width:36px;height:36px;flex:0 0 36px;border-radius:6px;background:var(--primary);display:flex;align-items:center;justify-content:center}
 .topbar .ttl{font-size:var(--fs-h2);letter-spacing:.02em;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .topbar .tsub{font-size:var(--fs-m);color:#CFE6F5;white-space:nowrap;margin-left:2px}
 .topbar .spacer{flex:1}
@@ -70,7 +70,7 @@ svg.i{width:20px;height:20px;flex:0 0 20px}
 /* 上の帯の右: 年度・メーカーの選ぶ欄と札（2026-10-16 村井さん: 画面の題の行はやめ、選ぶ欄は右上へ） */
 .hdrtools{display:flex;align-items:center;gap:var(--s2);flex:0 0 auto;min-width:0}
 .hdrtools .hdr-sels{display:grid;grid-template-columns:var(--col) var(--col2);gap:var(--s3)}
-.hdrtools select.inp{height:36px;width:100%;min-width:0;max-width:none;padding:1px 12px 0;line-height:34px;background-color:#fff;color:var(--navy);font-weight:400;border:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18),0 1px 2px rgba(11,42,71,.18);border-radius:10px}
+.hdrtools select.inp{height:36px;width:100%;min-width:0;max-width:none;padding:1px 12px 0;line-height:34px;background-color:#fff;color:var(--navy);font-weight:400;border:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18),0 1px 2px rgba(11,42,71,.18);border-radius:6px}
 .hdrtools .chip{margin:0}
 @media (min-width:761px) and (max-width:1100px){.topbar .tsub{display:none}}
 
@@ -101,13 +101,13 @@ svg.i{width:20px;height:20px;flex:0 0 20px}
 .viewtitle .vnear .inp.md{width:var(--col2)}
 .viewtitle .vnear .chip{margin:0}
 .fc-runbtn{margin-left:auto}.fc-runbtn .btn{width:var(--col)}   /* 予測を実行は「予測と予算」の見出しの右（1 マス） */
-.ttlic{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex:0 0 44px;border-radius:14px;background:var(--primary-soft);color:var(--primary-dark)}
+.ttlic{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex:0 0 44px;border-radius:6px;background:var(--primary-soft);color:var(--primary-dark)}
 .ttlic svg{width:24px;height:24px}
 .page-head{display:flex;align-items:center;gap:var(--s4);margin-bottom:var(--s6);min-height:44px}
 .page-head h1{flex:1;margin:0}
 h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(--s6)}
 .card h2{display:flex;align-items:center;gap:10px;font-size:var(--fs-h3);line-height:1.5;color:var(--navy);margin-bottom:var(--s3)}
-.card h2::before{content:"";flex:0 0 6px;width:6px;height:18px;border-radius:3px;background:var(--primary)}
+.card h2::before{content:"";flex:0 0 4px;width:4px;height:16px;border-radius:1px;background:var(--primary)}
 .card h3{font-size:var(--fs-m);line-height:1.5;color:var(--navy);margin:0 0 var(--s2)}
 .card-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-bottom:var(--s3)}
 .card-head h2{flex:1 0 auto;max-width:100%;margin:0}   /* 見出しは縮めない（右の説明が長いときは説明が次の行へ） */
@@ -151,9 +151,8 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 .skyn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---- ボタン（高さと最小幅をそろえる） ---- */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);height:var(--h-btn);min-width:var(--w-btn);padding:0 14px;border-radius:var(--radius-s);font-size:var(--fs-b);background:var(--btn);color:#fff;white-space:nowrap;text-decoration:none;transition:background var(--ease),border-color var(--ease),box-shadow var(--ease),transform .08s}
-.btn:hover:not(:disabled){background:var(--primary-dark);box-shadow:0 4px 12px rgba(0,160,233,.22)}   /* 塗りのボタンは会社の青（紺・黒に近い色のボタンは使わない。2026-10-16 村井さん） */
-.btn:active:not(:disabled){transform:scale(.98)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);height:var(--h-btn);min-width:var(--w-btn);padding:0 14px;border-radius:var(--radius-s);font-size:var(--fs-b);background:var(--btn);color:#fff;white-space:nowrap;text-decoration:none;transition:background var(--ease),border-color var(--ease),box-shadow var(--ease)}
+.btn:hover:not(:disabled){background:var(--primary-dark)}   /* 塗りのボタンは会社の青（紺・黒に近い色のボタンは使わない。2026-10-16 村井さん） */
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .btn-ghost{background:#fff;color:var(--navy);border:1.5px solid var(--line-ctl)}
 .btn-ghost:hover:not(:disabled){background:var(--primary-soft-2);border-color:var(--primary);box-shadow:none}
@@ -183,7 +182,7 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 .field label{font-size:var(--fs-s);color:var(--muted)}
 .inp{height:var(--h-input);padding:0 14px;border:1.5px solid var(--line-ctl);border-radius:var(--radius-s);width:var(--w-inp);max-width:100%;background:#fff;font-size:var(--fs-b);transition:border-color var(--ease),box-shadow var(--ease)}   /* 狭い画面では、欄が枠からはみ出さない */
 .inp:hover{border-color:var(--line-ctl-hover)}
-.inp:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 4px rgba(0,160,233,.16)}
+.inp:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(0,160,233,.18)}
 .inp:focus-visible{outline:2px solid var(--focus);outline-offset:2px}   /* キーボードで選んだときは、ボタンと同じ濃い線 */
 .inp::placeholder{color:#6E7F91}
 .inp.sm{width:var(--w-inp-sm)}.inp.md{width:var(--w-inp-md)}.inp.lg{width:var(--w-inp-lg)}
@@ -204,12 +203,12 @@ select.inp option{color:var(--text);background:#fff}
   select.inp::picker-icon{content:"";width:18px;height:18px;flex:0 0 18px;margin-left:auto;background:var(--chev) no-repeat center/18px 18px;transition:rotate var(--ease)}
   select.inp.cell::picker-icon{width:16px;height:16px;flex-basis:16px;background-size:16px 16px}
   select.inp:open::picker-icon{rotate:180deg}
-  select.inp:open{border-color:var(--primary);box-shadow:0 0 0 4px rgba(0,160,233,.16)}
+  select.inp:open{border-color:var(--primary);box-shadow:0 0 0 2px rgba(0,160,233,.18)}
   select.inp{padding-right:12px}
   select.inp.cell{padding-right:6px}
   .hdrtools select.inp{display:inline-flex;align-items:center;padding:0 10px;line-height:1}
-  select.inp::picker(select){margin-top:8px;padding:8px;min-width:anchor-size(width);max-height:min(420px, 64vh);overflow-y:auto;background:#fff;border:1px solid var(--line-strong);border-radius:14px;box-shadow:var(--shadow-pop),0 0 0 1px rgba(15,53,87,.04);color-scheme:light}
-  select.inp option{display:flex;align-items:center;gap:10px;min-height:44px;padding:10px 14px;border-radius:10px;font-size:var(--fs-b);line-height:1.4;color:var(--text);white-space:nowrap;cursor:pointer}
+  select.inp::picker(select){margin-top:8px;padding:4px;min-width:anchor-size(width);max-height:min(420px, 64vh);overflow-y:auto;background:#fff;border:1px solid var(--line-strong);border-radius:6px;box-shadow:var(--shadow-pop),0 0 0 1px rgba(15,53,87,.04);color-scheme:light}
+  select.inp option{display:flex;align-items:center;gap:10px;min-height:44px;padding:10px 14px;border-radius:4px;font-size:var(--fs-b);line-height:1.4;color:var(--text);white-space:nowrap;cursor:pointer}
   select.inp option:hover,select.inp option:focus-visible{background:var(--primary-soft-2);outline:none}
   select.inp option:checked{background:var(--primary-soft);color:var(--navy)}
   select.inp option::checkmark{content:"";order:1;margin-left:auto;width:8px;height:8px;border-radius:50%;background:var(--primary);box-shadow:0 0 0 3px rgba(0,160,233,.18)}
@@ -246,13 +245,12 @@ h1 .tip,h2 .tip{margin-left:2px}
 /* ---- 数字のまとめ ---- */
 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s4);margin-bottom:var(--s6)}
 @media (min-width:1000px){.kpis:has(> :nth-child(3):last-child){grid-template-columns:repeat(3,minmax(0,1fr))}.kpis:has(> :nth-child(2):last-child){grid-template-columns:repeat(2,minmax(0,1fr))}}   /* 箱が 3 つ・2 つなら横幅いっぱいに分ける（右に空きを残さない。2026-10-16 村井さん） */
-.kpi{position:relative;overflow:hidden;background:linear-gradient(165deg,#fff 0%,#F6FBFE 55%,#EEF6FB 100%);border:1px solid var(--line);border-radius:16px;padding:20px 22px 18px;box-shadow:var(--shadow)}
-.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line-strong);border-radius:3px 0 0 3px}
-.kpi::after{content:"";position:absolute;right:-24px;top:-28px;width:88px;height:88px;border-radius:50%;background:radial-gradient(circle,rgba(0,160,233,.10) 0%,rgba(0,160,233,0) 70%);pointer-events:none}
+.kpi{position:relative;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:var(--radius-s);padding:20px 22px 18px;box-shadow:var(--shadow)}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line-strong)}
 .kpi .k{font-size:12px;letter-spacing:.08em;color:var(--muted)}
 .kpi .v{font-size:var(--fs-h1);color:var(--navy);font-variant-numeric:tabular-nums;line-height:1.15;margin-top:10px;white-space:nowrap}   /* 金額は桁の途中で折り返さない */
 .kpi .u{font-size:var(--fs-s);color:var(--muted);margin-left:4px}
-.kpi.main{border-color:#B7DFF3;background:linear-gradient(165deg,#F4FBFF 0%,#fff 58%,#EAF6FC 100%)}
+.kpi.main{border-color:#B7DFF3;background:var(--primary-soft-2)}
 .kpi.main::before{background:var(--primary)}
 .kpis.k5{grid-template-columns:repeat(5,minmax(0,1fr))}
 @media (max-width:1180px){.kpis.k5{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -278,7 +276,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .tbl td.empty{text-align:center;color:var(--muted);height:64px}
 .tbl .rowlink{color:var(--navy);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--primary-line);cursor:pointer;word-break:keep-all;overflow-wrap:normal}   /* 表のメーカーの名前（押すとその計画を開く。スマホでは「開く」の列の代わり）。名前の途中では折り返さない（空白の所だけ） */
 .tbl .rowlink:hover{text-decoration-color:var(--primary)}
-.tbl.edit td{padding:4px var(--s2)}
+.tbl.edit td{padding:6px 8px;height:52px;vertical-align:middle}
+.tbl.edit .inp.cell{height:40px;margin:0;display:flex;align-items:center;line-height:38px;padding-top:0;padding-bottom:0;box-sizing:border-box;vertical-align:middle}
+.tbl.edit .incell{display:flex;align-items:center;min-width:0;min-height:40px}
+.tbl.edit .incell > .inp.cell{flex:1 1 auto;width:100%;min-width:0}
+.tbl.edit td > .btn{vertical-align:middle}
 
 /* ---- 小さな印（丸い札） ---- */
 .chip{display:inline-flex;align-items:center;gap:6px;height:var(--h-chip);padding:0 12px;border-radius:var(--pill);font-size:var(--fs-s);margin:0 4px 2px 0;background:var(--soft);color:var(--navy);white-space:nowrap}
@@ -289,7 +291,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .chip.st{min-width:112px;justify-content:center;margin-right:0}   /* 状態の列の札は同じ幅（表の中で頭がそろう） */
 
 /* ---- 通知・処理中 ---- */
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;min-width:320px;max-width:min(560px, calc(100% - 32px));padding:8px 22px 8px 10px;border-radius:14px;font-size:var(--fs-s);color:#fff;background:var(--navy);box-shadow:inset 0 -3px 0 var(--primary),0 8px 30px rgba(0,0,0,.18);opacity:0;transition:opacity .3s;z-index:95;pointer-events:none}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;min-width:320px;max-width:min(560px, calc(100% - 32px));padding:8px 22px 8px 10px;border-radius:6px;font-size:var(--fs-s);color:#fff;background:var(--navy);box-shadow:inset 0 -3px 0 var(--primary),0 4px 16px rgba(0,0,0,.16);opacity:0;transition:opacity .3s;z-index:95;pointer-events:none}
 .toast.on{opacity:1}
 .toast.err{background:var(--error);padding:12px 22px}
 .toast .tc{width:34px;height:34px;flex:0 0 34px;background:#fff;border-radius:50%;padding:3px}
@@ -352,7 +354,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .tabs.sub.mini .tab{height:var(--h-chip);padding:0 var(--s3);font-size:var(--fs-s)}
 
 /* ==== CSS: HOME ==== */
-/* ホーム（全体の合計だけ）。よみが状況を読み解いて話す。並び: よみ → 数字 → 予実の空模様 → 学びの状況 → 分析からわかること */
+/* ホーム（全体の合計だけ）。よみが状況を読み解いて話す。並び: よみ → 数字 → 予実の空模様 → 学び → 分析 */
 .todo{list-style:none;display:grid;gap:var(--s2);margin-top:var(--s5)}
 .todo li{display:flex;align-items:center;gap:var(--s3);min-height:52px;padding:6px 8px 6px var(--s4);border:1px solid var(--line-soft);border-radius:var(--radius-s);background:#fff}
 .todo li .t{flex:1;min-width:0;font-size:var(--fs-m)}
@@ -365,8 +367,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 /* 予実の空模様: 8 つを決まった順に 1 行で（狭い画面では 4 つずつ 2 行。半端な行を作らない）。0 のものは絵だけ淡く（名前と数は読める濃さ） */
 .skys{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:var(--s3)}
 @media (max-width:1180px){.skys{grid-template-columns:repeat(4,minmax(0,1fr))}}
-.sky{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;padding:16px 8px 14px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#F7FCFF 0%,#fff 68%);box-shadow:var(--shadow);cursor:pointer;font:inherit;color:var(--navy);text-align:center}
-.sky:hover{border-color:var(--primary);box-shadow:0 6px 18px rgba(15,53,87,.08)}
+.sky{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;padding:16px 8px 14px;border:1px solid var(--line);border-radius:var(--radius-s);background:#fff;cursor:pointer;font:inherit;color:var(--navy);text-align:center}
+.sky:hover{border-color:var(--primary)}
 .sky.none{background:#fff;box-shadow:none}
 .sky.none .ch{opacity:.42}.sky.none .ct,.sky.none .nm{color:var(--muted)}
 .sky .ch{position:relative;width:88px;height:88px}
@@ -381,7 +383,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .sky .mk{display:none}
 .sky .nm{font-size:var(--fs-s);line-height:1.35;word-break:keep-all;overflow-wrap:normal}
 .sky .ct{font-size:var(--fs-h2);line-height:1.2;font-variant-numeric:tabular-nums}
-/* 学びの状況: 精度の天気と、承認待ちの見直し案（「学びを見る」で AI の学び） */
+/* 学び: 精度の天気と、承認待ちの見直し案（「学びを見る」で AI の学び） */
 .hm-lr{display:grid;grid-template-columns:1fr;gap:var(--s3)}   /* 学びの進みは 1 カラム（2026-10-13 村井さん） */
 .hm-lrbox{display:flex;align-items:center;gap:var(--s4);min-width:0;min-height:96px;padding:var(--s3) var(--s4);border:1px solid var(--line-soft);border-radius:var(--radius-s);background:#fff;font:inherit;color:var(--text);text-align:left}
 .hm-lrt{display:flex;flex-direction:column;flex:1;min-width:0}
@@ -479,14 +481,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 /* 予算策定: 予測の元・補正の受入・営業の追加額 */
 .bud-flow{display:grid;gap:var(--s4);margin-bottom:var(--s6)}
 .bud-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s3);margin:0 0 var(--s4);padding:0;list-style:none}
-.bud-steps li{display:flex;align-items:flex-start;gap:10px;min-height:72px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
-.bud-steps .n{flex:0 0 24px;width:24px;height:24px;border-radius:50%;background:var(--primary-soft);color:var(--primary-dark);font-size:13px;line-height:24px;text-align:center}
+.bud-steps li{display:flex;align-items:flex-start;gap:10px;min-height:72px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--surface)}
+.bud-steps .n{flex:0 0 24px;width:24px;height:24px;border-radius:4px;background:var(--primary-soft);color:var(--primary-dark);font-size:13px;line-height:24px;text-align:center}
 .bud-steps .t{font-size:var(--fs-s);line-height:1.5;color:var(--navy)}
-.bud-eq{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:0 0 var(--s4);padding:14px 16px;border-radius:14px;background:var(--primary-soft-2);border:1px solid var(--primary-line);font-size:var(--fs-m);color:var(--navy)}
+.bud-eq{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:0 0 var(--s4);padding:14px 16px;border-radius:var(--radius-s);background:var(--primary-soft-2);border:1px solid var(--primary-line);font-size:var(--fs-m);color:var(--navy)}
 .bud-eq b{font-weight:400}
 .bud-eq .op{color:var(--muted)}
 .bud-src{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s2)}
-.bud-src button{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:72px;height:auto;padding:12px 14px;border:1.5px solid var(--line);border-radius:14px;background:#fff;text-align:left;color:var(--navy)}
+.bud-src button{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:72px;height:auto;padding:12px 14px;border:1.5px solid var(--line);border-radius:var(--radius-s);background:#fff;text-align:left;color:var(--navy)}
 .bud-src button:hover{border-color:var(--primary);background:var(--primary-soft-2)}
 .bud-src button.on{border-color:var(--primary);background:var(--primary-soft);box-shadow:inset 0 0 0 1px var(--primary)}
 .bud-src .k{font-size:var(--fs-m);color:var(--navy)}
@@ -609,8 +611,8 @@ h1 + .lr-sec{margin-top:0}
 .lr-tile.ok .lr-ring-fg{stroke:var(--primary)}
 .lr-ring-t{font-size:13px;fill:var(--navy)}
 .lr-meter{display:flex;align-items:center;gap:var(--s2)}
-.lr-meter-bar{position:relative;flex:1;height:10px;border-radius:5px;background:var(--gray)}
-.lr-meter-bar span{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:#E0A100}
+.lr-meter-bar{position:relative;flex:1;height:8px;border-radius:2px;background:var(--gray)}
+.lr-meter-bar span{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:#E0A100}
 .lr-meter.ok .lr-meter-bar span{background:var(--primary)}
 .lr-meter-bar i{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--navy)}
 .lr-meter b{font-weight:400;color:var(--navy);min-width:44px;text-align:right}
@@ -620,7 +622,7 @@ h1 + .lr-sec{margin-top:0}
 /* 次の予測で見直すこと（問いかけの並び） */
 .lr-qs{list-style:none;margin:0;padding:0;display:grid;gap:var(--s3)}
 .lr-q{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s3) var(--s4);border:1px solid var(--line);border-radius:var(--radius-s);background:#fff}
-.lr-qn{flex:0 0 28px;width:28px;height:28px;border-radius:50%;background:var(--primary-soft);color:var(--navy);display:flex;align-items:center;justify-content:center;font-size:var(--fs-s);font-variant-numeric:tabular-nums}
+.lr-qn{flex:0 0 28px;width:28px;height:28px;border-radius:4px;background:var(--primary-soft);color:var(--navy);display:flex;align-items:center;justify-content:center;font-size:var(--fs-s);font-variant-numeric:tabular-nums}
 .lr-qb{flex:1;min-width:0;display:grid;grid-template-columns:var(--col) minmax(0,1fr);gap:2px var(--s3);align-items:baseline}
 .lr-qt{grid-row:span 2;font-size:var(--fs-b);color:var(--navy);line-height:1.6}
 .lr-qsay{font-size:var(--fs-b);color:var(--text);line-height:1.6}
@@ -1758,6 +1760,21 @@ function chartScatter(points, opts){
     var x = chLin(nx.lo, nx.hi, L, w - R), y = chLin(ny.lo, ny.hi, h - Bm, T), out = '';
     out += chYAxis(y, ny, L, w - R, yf) + chXAxis(x, nx, T, h - Bm, xf, [L - 4, w]);   // 左の端の名前は縦の目盛りの名前に重ねない
     out += chLine(L, h - Bm, w - R, h - Bm, 'axis') + chLine(L, T, L, h - Bm, 'axis');
+    if (opts.quad && isNum(opts.refX) && isNum(opts.refY)) {
+      var qx = x(opts.refX), qy = y(opts.refY), xl = L, xr = w - R, yt = T, yb = h - Bm;
+      var qFill = function(x0, y0, ww, hh, cls){ if (ww > 1 && hh > 1) out += chRect(x0, y0, ww, hh, cls, '', ' rx="0" fill-opacity="0.08"'); };
+      qFill(qx, yt, xr - qx, qy - yt, 'f-warm');
+      qFill(qx, qy, xr - qx, yb - qy, 'f-main');
+      qFill(xl, yt, qx - xl, qy - yt, 'f-cool');
+      qFill(xl, qy, qx - xl, yb - qy, 'f-neutral');
+      if (opts.quadLabels) {
+        var ql = opts.quadLabels;
+        if (ql[0]) out += chText(xr - 4, yt + 12, ql[0], { a: 'end' });
+        if (ql[1]) out += chText(xr - 4, yb - 6, ql[1], { a: 'end' });
+        if (ql[2]) out += chText(xl + 6, yt + 12, ql[2]);
+        if (ql[3]) out += chText(xl + 6, yb - 6, ql[3]);
+      }
+    }
     var boxes = [];   // 置いた名前の場所（基準線の名前も入れる）
     if (isNum(opts.refX)) { var rl = opts.refXLabel || '予算', rx = x(opts.refX) + 4; out += chLine(x(opts.refX), T, x(opts.refX), h - Bm, 'ref') + chText(rx, T + 10, rl); boxes.push([rx, T, rx + chTextW(rl), T + 13]); }
     if (isNum(opts.refY)) out += chLine(L, y(opts.refY), w - R, y(opts.refY), 'ref');
@@ -2130,6 +2147,39 @@ function chartNormal(curves, opts){
     return chSvg(w, h, opts.label || '見通しの分布', out);
   });
 }
+/**
+ * 熱マップ（行 × 列）。rows: [{ label, cells: [{ v, text, tip, tone }] }]
+ * v は 0〜1 の濃さ。tone で色（warm/cool/main/neutral）。空のセルは薄い灰。
+ * opts: { cols（列の見出し）, w, label, empty }
+ */
+function chartHeat(rows, opts){
+  return chSafe(function(){
+    opts = opts || {};
+    var list = (rows || []).filter(function(r){ return r && r.cells; });
+    if (!list.length) return chEmpty(opts.empty);
+    var cols = opts.cols || [];
+    var w = opts.w || chW(), lw = chLabelW(list, w), nCol = Math.max(1, cols.length || list[0].cells.length);
+    var cw = Math.max(56, Math.min(96, Math.floor((w - lw - 12) / nCol)));
+    var rh = 30, T = 28, Bm = 8, h = T + list.length * rh + Bm;
+    var out = '';
+    cols.forEach(function(c, j){
+      out += chText(lw + j * cw + cw / 2, 16, chClip(String(c || ''), cw - 6), { a: 'middle' });
+    });
+    list.forEach(function(r, i){
+      var y = T + i * rh;
+      out += chText(0, y + rh / 2 + 4, chClip(r.label, lw - 8), { c: 'lb' });
+      r.cells.forEach(function(cell, j){
+        cell = cell || {};
+        var x = lw + j * cw + 2, tw = cw - 4, th = rh - 6;
+        var has = isNum(cell.v), op = has ? (0.12 + 0.56 * Math.max(0, Math.min(1, cell.v))).toFixed(2) : '0.06';
+        var cls = has ? 'f-' + chTone(cell.tone) : 'f-neutral';
+        out += chRect(x, y + 3, tw, th, cls, cell.tip, ' rx="2" fill-opacity="' + op + '"');
+        if (cell.text) out += chText(x + tw / 2, y + rh / 2 + 4, String(cell.text), { a: 'middle', c: 'vl' });
+      });
+    });
+    return chSvg(Math.max(w, lw + nCol * cw + 8), h, opts.label || '指標の熱マップ', out);
+  });
+}
 // ==== END REGION: CHARTS ====
 // ==== REGION: HOME ====
 // ホーム: 全体の合計だけ（個社の数字・名前は出さない。名前は空模様のツールチップだけ。2026-10-06 村井さん）。
@@ -2181,7 +2231,7 @@ function viewHome(){
     var fy0 = S.homeFy || '';
     var sel0 = fy0 ? '<select class="inp sm hm-fysel" id="hm_fy" data-near="1" aria-label="見る年度" disabled><option>FY' + esc(fy0) + '</option></select>' : '';
     return '<div class="page-head"><h1>ホーム</h1>' + sel0 + '</div>' + skelPage('home', fy0 ? 'FY' + fy0 + ' を読み込んでいます' : 'ホームを読み込んでいます', 'homeLoad()',
-      [['', HM_SKEL.kpi], ['予実の空模様', HM_SKEL.sky], ['学びの状況', HM_SKEL.learn], ['分析からわかること', HM_SKEL.insight]], 'wait-home');
+      [['', HM_SKEL.kpi], ['予実の空模様', HM_SKEL.sky], ['学び', HM_SKEL.learn], ['分析', HM_SKEL.insight]], 'wait-home');
   }
   var plans = homePlans(h);
   var head = '<div class="page-head"><h1>ホーム</h1>' + homeFySelect(h) + '</div>';
@@ -2318,7 +2368,7 @@ function homeToLearn(){ go('learning'); setTimeout(function(){ var el = $('lr-tu
 var HM_PEND_ICON = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><rect x="15" y="10" width="30" height="40" rx="5" fill="#E5F6FD"/><path d="M22 21h16M22 29h16M22 37h9"/><circle cx="45" cy="45" r="10" fill="#fff"/><path d="M45 40v5.5l3.5 2"/></svg>';
 var HM_ACC_ICON = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="20" fill="#E5F6FD"/><circle cx="32" cy="32" r="12"/><circle cx="32" cy="32" r="4" fill="currentColor" stroke="none"/></svg>';
 function homeLearnCard(h, plans){
-  var head = '<div class="card-head"><h2>学びの状況</h2></div>';
+  var head = '<div class="card-head"><h2>学び</h2></div>';
   var d = S.lr.ai, x = S.ld.lrAi;
   if (!d) {
     if (x && x.error) return '<div class="card">' + head + '<div class="hm-wait" role="alert"><span class="hm-yomi">' + YOMI_POSE.discover + '</span><span class="err-text">読み込めませんでした</span><span class="note">' + esc(x.error) + '</span>'
@@ -2385,7 +2435,7 @@ function homeInsightCard(plans){
   }
   out.push([official === plans.length ? 'ok' : 'info', '予算の承認', '承認済みは ' + official + ' / ' + plans.length + ' メーカーです' + (offPend ? '（うち ' + offPend + ' は新しい版が承認待ち）' : ''),
     '公式版が承認済みのメーカー数' + (pending ? '（承認待ちの版あり ' + pending + '）' : '')]);
-  return '<div class="card"><div class="card-head"><h2>分析からわかること</h2></div><ul class="todo mt0">'
+  return '<div class="card"><div class="card-head"><h2>分析</h2></div><ul class="todo mt0">'
     + out.map(function(x){ return '<li>' + homeLvl(x[0]) + '<span class="k">' + esc(x[1]) + '</span><span class="t" data-tip="' + esc(x[3]) + '">' + esc(x[2]) + '</span></li>'; }).join('') + '</ul></div>';
 }
 
@@ -2448,7 +2498,7 @@ function yomiSays(h){
       + (snow.length ? n(snow) + 'は、予算があるのに売上が 0 の月があります（雪）。' : ''),
     ['kumori', 'ame', 'sekka'].filter(function(k){ return below.concat(snow).some(function(p){ return skyKey(p) === k; }); })
       .map(function(k){ return skyName(k) + ' ' + below.concat(snow).filter(function(p){ return skyKey(p) === k; }).length + '（' + skyRule(k) + '）'; }).join('\n')
-      + (short > below.length ? '\n着地が予算に届かないメーカーは、ほかも含めて全部で ' + short + '（分析からわかること）' : ''), mk);
+      + (short > below.length ? '\n着地が予算に届かないメーカーは、ほかも含めて全部で ' + short + '（分析）' : ''), mk);
   var items = homeSysItems(sys);
   if (items.length === 1) add(5, 'warn', 'explain', items[0][1] + '。', items[0][2], null, true);
   else if (items.length > 1) add(5, 'warn', 'explain', '仕組みの確認が ' + items.length + ' 件あります（' + items.map(function(x){ return x[0]; }).join('・') + '）。',
@@ -2517,7 +2567,7 @@ function viewMakers(){
   if (h.wait) return h.wait;
   if (!h.rows.length) return h.head + guide('guide', 'まだ計画がありません。');
   var tbl = mkForecastTable(h.rows);
-  return h.head + '<div class="card"><div class="card-head"><h2>予測</h2>'
+  return h.head + '<div class="card"><div class="card-head"><h2>予測一覧</h2>'
     + '<span class="mkb-keys" aria-hidden="true"><span><i class="k-band"></i>80% の幅</span><span><i class="k-mid"></i>予測額</span><span><i class="k-dot"></i>着地の推定</span>'
     + (tbl.hi ? '<span class="mkb-hi">0　' + yenTick(tbl.hi / 2) + '　' + yenTick(tbl.hi) + '</span>' : '') + '</span></div>'
     + '<div class="tblwrap">' + tbl.html + '</div></div>';
@@ -2534,7 +2584,7 @@ function viewBudgets(){
     draft: '予測はあるが、公式版をまだ出していないメーカー', none: 'まだ予測がないメーカー' };
   // 札は進む順（未着手 → 承認済み。2026-10-16 村井さん）
   var summary = ['none', 'draft', 'pending', 'official'].map(function(st){ return '<span class="chip ' + MK_STATES[st][1] + '" data-tip="' + esc(stTip[st]) + '">' + MK_STATES[st][0] + ' ' + count(st) + '</span>'; }).join('');
-  return h.head + '<div class="card"><div class="card-head"><h2>予算と実績</h2>'
+  return h.head + '<div class="card"><div class="card-head"><h2>予算一覧</h2>'
     + '<span class="mk-sum">' + summary + '</span></div><div class="tblwrap">' + mkTable(rows) + '</div></div>';
 }
 /** 予測一覧の表: メーカー・予測の帯・中心・前回から・外れ幅 */
@@ -4411,7 +4461,7 @@ function verDecide(decision){
 // ==== REGION: ANALYSIS ====
 // 分析（年度のメーカーを横に並べる。apiCrossMaker）。年度は題の横。グラフ / 表で見る を切り替えられる
 // 2026-10-13 作り直し（村井さん「画面の中のタブは使いにくい・空模様はホームと被る・専門家レベルの推定と示唆をグラフで」）: タブをやめて 1 カラムで縦に。
-// 分析の要点（よみ。サーバーの insights から言える示唆を気になる順に）→ 全体の着地の分布 → 予算との差の内訳 → 不確かさの寄与 → 着地の推定と予算 →
+// 分析の要点（よみ。サーバーの insights から言える示唆を気になる順に）→ メーカー横断の指標 → 全体の着地の分布 → 予算との差の内訳 → 不確かさの寄与 → 着地の推定と予算 →
 // 着地 ÷ 予算と不確かさ → 予算を超える確率 → 外れ幅 → 読みのクセ → 予測の見直しの流れ → 物差し → 話題ごとの向き（市場）。
 // 数字はサーバーの値をそのまま使う（空模様も計算し直さない。合計の分布の曲線だけ、サーバーの中心と幅から描く）
 S.an = { fy: '', data: null, view: 'chart' };
@@ -4549,7 +4599,7 @@ function anOverview(d){
     : none ? (z.zero ? 'まだ数字がそろっていないため、グラフは出していません。' : 'まだ着地の推定や、予測と実績の比べがないため、グラフは出していません。') + more + esc(accHow)
     : (onlyAcc && z.zero && !z.rest ? '' : 'まだ数字がそろっていないため、') + esc(miss.join('・')) + 'は出していません。' + (onlyAcc ? '' : more) + esc(accHow);
   // 全体の読み解き（サーバーの insights。予算を立てるメーカーだけ）は、メーカーごとのグラフより先に
-  var whole = bud.length ? anDistCard(d) + anWaterfallCard(d) + anSpreadCard(d) + anFocusCard(bud) : '';
+  var whole = bud.length ? anMatrixCard(bud) + anDistCard(d) + anWaterfallCard(d) + anSpreadCard(d) + anFocusCard(bud) : '';
   return anHero(d, bud, g) + anMeasure(ms) + whole + body + anMethodsCard(d) + anBacktestCard(d) + anMarket(d);   // 素の回帰との比べ・物差しは見通しと当たり具合の後、市場は最後
 }
 
@@ -4742,6 +4792,30 @@ function anTotals(d, plans){
       + (fog.filter(skyHow).length ? '\n当たり具合の計算待ちは、' + skyHow(fog.filter(skyHow)[0]) : ''))
     + '</div>';
 }
+/**
+ * メーカー横断の指標（熱マップ）: 予算比・外れ幅・読みのクセ・予算を超える確率を同じ目で見比べる。
+ * 色が濃いほど気になる値。橙は上振れ・強気、紺は下振れ・弱気。
+ */
+function anMatrixCard(plans){
+  var cols = ['予算比', '外れ幅', '読みのクセ', '超える確率'];
+  var use = (plans || []).filter(function(p){ var a = p.accuracy || {}; return isNum(p.ratio) || isNum(a.mape) || isNum(a.bias) || isNum(p.pAbove); });
+  if (use.length < 2) return '';
+  use = use.slice().sort(anByName);
+  var cell = function(v, text, t, tipText){ return isNum(v) ? { v: Math.max(0, Math.min(1, v)), text: text, tone: t, tip: tipText } : { text: '-', tone: 'neutral', tip: tipText || 'まだ数字がありません' }; };
+  var rows = use.map(function(p){
+    var a = p.accuracy || {}, name = p.clientName;
+    return { label: name, cells: [
+      cell(isNum(p.ratio) ? Math.abs(p.ratio - 1) / 0.3 : null, anPct(p.ratio), tone(p.ratio), name + ' 予算比 ' + anPct(p.ratio) + '（着地の推定 ÷ 予算）'),
+      cell(isNum(a.mape) ? a.mape / 0.3 : null, anPct1(a.mape), !isNum(a.mape) ? 'neutral' : a.mape >= 0.3 ? 'warm' : a.mape >= 0.1 ? 'neutral' : 'cool', name + ' 外れ幅 ' + anPct1(a.mape)),
+      cell(isNum(a.bias) ? Math.abs(a.bias) / 0.15 : null, pct1(a.bias), !isNum(a.bias) || accFew(a.n) || Math.abs(a.bias) < 0.03 ? 'neutral' : a.bias > 0 ? 'warm' : 'cool', name + ' 読みのクセ ' + pct1(a.bias)),
+      cell(isNum(p.pAbove) ? p.pAbove : null, anProbP(p), tone(p.ratio), name + ' 予算を超える確率 ' + anProbP(p))
+    ] };
+  });
+  var tbl = anTable(['', 112, 112, 112, 152], '<th>メーカー</th><th class="num">予算比</th><th class="num">外れ幅</th><th class="num">読みのクセ</th><th class="num">超える確率</th>',
+    use.map(function(p){ var a = p.accuracy || {}; return '<tr>' + anNameTd(p) + '<td class="num">' + anPct(p.ratio) + '</td><td class="num">' + anPct1(a.mape) + '</td><td class="num">' + pct1(a.bias) + '</td><td class="num">' + anProbP(p) + '</td></tr>'; }).join(''));
+  return anCard('メーカー横断の指標', 'メーカーごとの予算比・外れ幅・読みのクセ・予算を超える確率を、同じ画面で見比べます。色が濃いほど気になる値です。橙は上振れ・強気、紺は下振れ・弱気',
+    anCot('an.matrix', chartHeat(rows, { cols: cols, label: 'メーカー横断の指標' }), tbl));
+}
 function anKpi(label, v, unit, tipText, main, sub){ var subs = (Array.isArray(sub) ? sub : [sub]).filter(Boolean); return '<div class="kpi' + (main ? ' main' : '') + '" data-tip="' + esc(tipText) + '"><div class="k">' + esc(label) + '</div><div class="v">' + esc(v) + (v === '-' ? '' : '<span class="u">' + esc(unit) + '</span>') + '</div>' + subs.map(kpiSub).join('') + '</div>'; }
 /** 着地 ÷ 予算（横）と不確かさ = 80% の幅 ÷ 着地の推定（縦）。点線が予算 */
 function anScatterCard(plans){
@@ -4783,7 +4857,8 @@ function anFocusCard(plans){
     use.map(function(p, i){ return { p: p, z: zone(xs[i], ys[i]), x: xs[i], y: ys[i] }; }).sort(function(a, b){ return b.x * b.y - a.x * a.y; })
       .map(function(o){ return '<tr>' + anNameTd(o.p) + '<td>' + esc(o.z) + '</td><td class="num">' + anPct1(o.x) + '</td><td class="num">' + anPct1(o.y) + '</td></tr>'; }).join(''));
   var o = { xLabel: '予算に占める割合', yLabel: '外れ幅', refX: mx, refXLabel: '中央値', refY: my, xMin: 0, yMin: 0,
-    xFmt: anPctFor(Math.max.apply(null, xs) * 1.1), yFmt: anPctFor(Math.max.apply(null, ys) * 1.1), label: '重点管理の地図' };
+    xFmt: anPctFor(Math.max.apply(null, xs) * 1.1), yFmt: anPctFor(Math.max.apply(null, ys) * 1.1), label: '重点管理の地図',
+    quad: true, quadLabels: ['重点管理', '柱（守る）', '見張る', '安定'] };
   return anCard('重点管理の地図', '右上 = 予算が大きく読みにくい（重点管理）・右下 = 柱（守る）・左上 = 見張る・左下 = 安定。点線は中央値',
     anCot('an.focus', chartScatter(pts, o), tbl), n ? '<span class="chip warn" data-tip="予算が大きく、外れ幅も大きいメーカー">重点管理 ' + n + '</span>' : '');
 }
@@ -5426,7 +5501,18 @@ function lrPeopleView(d, review, ai){
   // 何も無いときは、よみの案内 1 つだけ（空の注記を並べない）。中身の無いカードは出さない
   if (!((d.lessons || []).length || (d.openActions || []).length || (d.causes || []).length || (d.scoreboard || []).length || (d.decisions || []).length || (d.uplift || []).length || lrHitAny(d.hits)))
     return guide('guide', '実績が締まって、' + runWhen(['EVAL.REPORT', 'EVAL.INSIGHTS']) + '、大きく外れた月の振り返りと、読みの当たりがここに並びます。') + review + pend;
-  return lrPeopleHero(d) + review + pend + lrValueMap(d, full) + lrLessonCard(d, full) + lrScoreCard(d, full);
+  return lrPeopleHero(d) + lrStrip(d, ai) + review + pend + lrValueMap(d, full) + lrLessonCard(d, full) + lrScoreCard(d, full);
+}
+/** 学びの先頭の数字（実績と比べた月・大きく外れた月・残っている対応・承認待ち） */
+function lrStrip(d, ai){
+  var s = d.summary || {}, scored = isNum(s.scoredMonths) ? s.scoredMonths : (s.months || 0);
+  var misses = s.misses || 0, open = (d.openActions || []).length, pend = ai && ai.pending ? ai.pending.length : 0;
+  return '<div class="kpis">'
+    + anKpi('実績と比べた月', String(scored), 'か月', '当たり具合を計算した計画×月の数', true)
+    + anKpi('大きく外れた月', String(misses), '件', '予測が実績から 10% 以上外れたか、見通しの幅の外に出た月')
+    + anKpi('残っている対応', String(open), '件', '外れた月のうち、対応がまだの件数')
+    + anKpi('承認待ち', String(pend), '件', '見直し案のうち、承認待ちの件数')
+    + '</div>';
 }
 /**
  * よみのまとめ（数だけ。メーカーの名前は出さない）。外れた月の振り返りが無いときは「外れた月はありません」とは言わず、何がまだかと動かし方を言う:
@@ -5506,7 +5592,17 @@ function lrCauseCard(d){
   var intFmt = function(v){ return Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : ''; };
   // スマホのグラフは向きを短く（強気・前提を更新）。対応の名前を切らない。正確な名前はカーソルと 表で見る に
   var narrow = chW() < 480, chLab = function(o){ return narrow ? (o.dir.short || o.dir.name) + '・' + o.act : lab(o); };
-  var chart = chartBars(rows.map(function(o){ return { label: chLab(o), value: o.n, tone: o.dir.tone, tip: tipOf(o) }; }), { fmt: intFmt, min: 0, label: '外れの向きと対応（月の数）', labelW: narrow ? 132 : 220 });
+  var acts = [], dirs = ['over', 'under', 'exact'].filter(function(k){ return rows.some(function(o){ return o.dir === LR_DIR[k]; }); });
+  rows.forEach(function(o){ if (acts.indexOf(o.act) < 0) acts.push(o.act); });
+  var maxN = Math.max.apply(null, rows.map(function(o){ return o.n; })) || 1;
+  var heat = dirs.length && acts.length ? chartHeat(dirs.map(function(k){
+    var dir = LR_DIR[k];
+    return { label: narrow ? dir.short : dir.name, cells: acts.map(function(act){
+      var o = rows.filter(function(x){ return x.dir === dir && x.act === act; })[0];
+      return o ? { v: o.n / maxN, text: String(o.n), tone: dir.tone, tip: tipOf(o) } : { text: '', v: 0 };
+    }) };
+  }), { cols: acts, label: '外れの向きと対応' }) : '';
+  var chart = heat || chartBars(rows.map(function(o){ return { label: chLab(o), value: o.n, tone: o.dir.tone, tip: tipOf(o) }; }), { fmt: intFmt, min: 0, label: '外れの向きと対応（月の数）', labelW: narrow ? 132 : 220 });
   var table = lrTable([['向き', '', LR_C1], ['対応', 'lr-wr', LR_C1], ['月の数', 'num', LR_C1], ['幅の外', 'num', LR_C1, '実績が見通しの幅（下振れ〜上振れ）の外に出た月の数']],
     rows.map(function(o){ return [{ h: esc(o.dir.name), tip: o.dir.say }, esc(o.act), o.n, o.range]; }));
   return lrCard('外れの向きと対応', '大きく外れた月を、外れの向き（強気の外れ = 予測が高すぎた・弱気の外れ = 予測が低すぎた）と、決めた対応ごとに数えました。人が決めていない月の対応は、計算が自動で付けたものです。原因の仮説は「大きく外れた月」のカードに出ます', chartOrTable('lrCause', chart, table));
@@ -5526,7 +5622,11 @@ function lrValueMap(d, full){
   var cnt = function(v){ return sc.filter(function(r){ return lrVsBase(r) === v; }).length; };
   var chips = [['above', 'ok'], ['below', 'ng'], ['', 'off']].map(function(x){ var n = cnt(x[0]); return n ? '<span class="chip ' + x[1] + '">' + kind[x[0]][0] + ' ' + n + '</span>' : ''; }).join('');
   var ys = pts.map(function(p){ return Math.abs(p.y); }), ym = Math.max(0.05, Math.max.apply(null, ys)) * 1.15;
-  var o = { xLabel: '数えた回数', yLabel: '基準との差', refY: 0, xMin: 0, yMin: -ym, yMax: ym, xFmt: function(v){ return Math.round(v) + ' 回'; }, yFmt: lrSPct, label: '情報源の価値の地図' };
+  var xs = pts.map(function(p){ return p.x; }).slice().sort(function(a, b){ return a - b; });
+  var mx = xs.length % 2 ? xs[xs.length >> 1] : (xs[(xs.length >> 1) - 1] + xs[xs.length >> 1]) / 2;
+  var o = { xLabel: '数えた回数', yLabel: '基準との差', refX: mx, refXLabel: '中央', refY: 0, xMin: 0, yMin: -ym, yMax: ym,
+    xFmt: function(v){ return Math.round(v) + ' 回'; }, yFmt: lrSPct, label: '情報源の価値の地図',
+    quad: true, quadLabels: ['頼れる・多い', '逆・多い', '頼れる・少ない', '逆・少ない'] };
   return '<div class="card"><div class="card-head"><h2>情報源の価値' + tip('上 = いつも同じ向きと言うより当たる情報源・右 = 証拠が多い。右上ほど次の予測で重く見てよい') + '</h2><span class="mk-sum">' + chips + '</span></div>'
     + '<div class="chartwrap">' + chartScatter(pts, o) + '</div></div>';
 }
