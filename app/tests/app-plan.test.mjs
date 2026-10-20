@@ -318,10 +318,11 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   // ホーム: 数字・計画の状態・最近の動きと、よみのセリフ（状況から選ぶ）
   ui.__home = env.call('apiHome()');
   const homeHtml = vm.runInContext(`S.view = 'home'; B.home = __home; viewHome()`, ui);
-  assert.match(homeHtml, /年間予算[\s\S]*着地の推定[\s\S]*暫定実績[\s\S]*外れ幅[\s\S]*予実の空模様[\s\S]*<h2>学び<\/h2>[\s\S]*<h2>分析<\/h2>/);
-  // 空模様はいつも 8 つ（猛暑 → 快晴 → 晴れのち曇り → 曇り → 雨 → 雪 → 霧 → 天変地異）。社名は出さず、空模様の名前は出す
-  assert.match(homeHtml, /aria-label="猛暑[\s\S]*aria-label="快晴[\s\S]*aria-label="晴れのち曇り[\s\S]*aria-label="曇り[\s\S]*aria-label="雨[\s\S]*aria-label="雪[\s\S]*aria-label="霧[\s\S]*aria-label="天変地異/);
-  assert.match(homeHtml, /<span class="nm">猛暑<\/span>/);
+  assert.match(homeHtml, /年間予算[\s\S]*着地の推定[\s\S]*暫定実績[\s\S]*外れ幅[\s\S]*予実の分布[\s\S]*<h2>学び<\/h2>[\s\S]*<h2>分析<\/h2>/);
+  // 分布はいつも 8 つ（大幅超え → 超え → 予算内 → 未達 → 大幅未達 → 売上なし → 未算定 → 急変）。社名は出さない
+  assert.match(homeHtml, /aria-label="大幅超え[\s\S]*aria-label="超え[\s\S]*aria-label="予算内[\s\S]*aria-label="未達[\s\S]*aria-label="大幅未達[\s\S]*aria-label="売上なし[\s\S]*aria-label="未算定[\s\S]*aria-label="急変/);
+  assert.match(homeHtml, /<span class="nm">大幅超え<\/span>/);
+  assert.doesNotMatch(homeHtml, /猛暑|快晴|天変地異/);
   assert.equal((homeHtml.match(/class="sky( none)?"/g) || []).length, 8);
   // ホームは全体だけ: 空模様は数だけで、押しても画面を移らない・メーカーの名前を出さない（行き来は左のメニューから。2026-10-13）
   assert.match(homeHtml, /<div class="sky[^"]*"[^>]*tabindex="0" role="group"/);
@@ -336,7 +337,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   const waitHtml = vm.runInContext(`S.homeLoading = true; B.home = null; var __w = viewHome(); B.home = __home; S.homeLoading = false; __w`, ui);
   assert.match(waitHtml, /class="card loading[^"]*"[\s\S]*観測中…[\s\S]*読み込んでいます/);
   // 2026-10-13 村井さん: 読み込み中もカードを出しておく（読めたら同じ場所に入る。画面が動かない）
-  assert.deepEqual([...waitHtml.matchAll(/<div class="card skel-card"><div class="card-head">(?:<h2>([^<]*)<\/h2>)?/g)].map((m) => m[1] || ''), ['', '予実の空模様', '学び', '分析'], '数字・空模様・学び・分析のカード');
+  assert.deepEqual([...waitHtml.matchAll(/<div class="card skel-card"><div class="card-head">(?:<h2>([^<]*)<\/h2>)?/g)].map((m) => m[1] || ''), ['', '予実の分布', '学び', '分析'], '数字・分布・学び・分析のカード');
   assert.doesNotMatch(waitHtml, /読み込み中…/);
   // 読み込みに失敗したら、理由と「もう一度読み込む」を出し、描くたびに読み直さない（前は失敗のたびに apiHome を呼び直していた）
   const failHtml = JSON.parse(vm.runInContext(`var __n = 0, __c0 = call; call = function(){ __n++; }; B.home = null; S.ld.home = { error: 'つながりません', at: Date.now() }; var __f = viewHome() + viewHome(); call = __c0; B.home = __home; S.ld.home = { at: Date.now() }; JSON.stringify([__f, __n])`, ui));
@@ -358,7 +359,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   const h2 = JSON.parse(JSON.stringify(ui.__home));
   h2.approvals = [{ planId: h2.plans[0].planId, clientName: 'テスト製薬', fy: h2.fy, versionNo: 2, submittedBy: 'planner' }];
   ui.__h2 = h2;
-  assert.match(JSON.parse(vm.runInContext(`JSON.stringify(yomiSays(__h2)[0])`, ui)).text, /承認待ちの公式版が 1 件[\s\S]*確認をお願いします/);
+  assert.match(JSON.parse(vm.runInContext(`JSON.stringify(yomiSays(__h2)[0])`, ui)).text, /承認待ちの確定版が 1 件[\s\S]*確認をお願いします/);
   // 保守の運用説明は出さず、実際の予測失敗・確認待ちは残す。
   const h3 = JSON.parse(JSON.stringify(ui.__home));
   h3.system = { backup: { enabled: false }, housekeeping: { ok: false, problems: ['x'] }, journal: null };
@@ -374,7 +375,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   vm.runInContext(`B.home = __home`, ui);
   // 予算・着地見込みが無いメーカーがあるのに「おおむね晴れ」とは言わない（2026-10-06 点検）
   const fogSays = JSON.parse(vm.runInContext(`JSON.stringify(yomiSays({ fy: '2026', plans: [{ fy: '2026', planId: 'P', clientName: 'X', stepErrors: [], runs: 1, p50: 10, budget: null, officialFinal: null, landing: null, lastRunAt: new Date().toISOString(), officialNo: 1 }], approvals: [], mine: [] }))`, ui));
-  assert.ok(fogSays.some((x) => /霧/.test(x.text)) && !fogSays.some((x) => /おおむね晴れ/.test(x.text)), JSON.stringify(fogSays));
+  assert.ok(fogSays.some((x) => /着地を推定できません/.test(x.text)) && !fogSays.some((x) => /おおむね晴れ|猛暑|快晴/.test(x.text)), JSON.stringify(fogSays));
   vm.runInContext(`S.view = 'forecast'`, ui);
   // 根拠のタブ
   ui.__basis = env.call('apiForecastBasis(__in)', { __in: { planId } });
@@ -388,7 +389,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   // 公式版のタブ（版がまだ無いとき・出したとき）
   ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } });
   const verHtml = vm.runInContext(`S.fc.ver = __ver; fcSection(viewForecastAll(), 'version')`, ui);
-  assert.match(verHtml, /公式版の最終予算[\s\S]*今の内容を公式版として出す[\s\S]*まだ版がありません/);
+  assert.match(verHtml, /確定版の最終予算[\s\S]*今の内容を確定版として出す[\s\S]*まだ版がありません/);
   env.call('appTestVersionSubmit_(__in)', { __in: { planId, note: 'テスト' } });
   ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } });
   const verHtml2 = vm.runInContext(`S.fc.ver = __ver; S.fc.verCmp = __ver.versions[0].versionId; viewForecastAll()`, ui);

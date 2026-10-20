@@ -279,12 +279,12 @@ part('D5 計算のしかたが違う比べ', () => {
   const diffTip = (h) => { const m = /<tr><td( data-tip="([^"]*)")?>中心（年度）<\/td><td class="num">[^<]*<\/td><td class="num">[^<]*<\/td><td class="num"( data-tip="([^"]*)")?>[^<]*<\/td><\/tr>/.exec(h); return { label: m[2] ? unesc(m[2]) : null, diff: m[4] ? unesc(m[4]) : null }; };
   const totalTip = (h) => { const m = /<tr class="total"><td>年度<\/td>(?:<td class="num"[^>]*>[^<]*<\/td>){5}<td class="num"( data-tip="([^"]*)")?>[^<]*<\/td><\/tr>/.exec(h); return m[2] ? unesc(m[2]) : null; };
   const LAND = { p50: 9852, basis: 'landing', live: true };
-  const OLD = '公式版の中心は本番の計算に切り替える前の旧来の計算の値で、今の中心とは計算のしかたが違います';
+  const OLD = '確定版の中心は本番の計算に切り替える前の旧来の計算の値で、今の中心とは計算のしかたが違います';
   // 本番の前に出した公式版（試し SHADOW・版 11 より前）
   for (const off of [ver(1, 'APPROVED', 11400, { reach: { final: 0.5, adopted: 0.7, center: 11400, sd: 500, tau: 0.15, w: 1, closedMonths: 0, mode: 'SHADOW' }, shownCenter: 11400 }), ver(1, 'APPROVED', 11400)]) {
     const h = tab(LAND, off);
     const t = diffTip(h);
-    assert.equal(t.diff, '今 − 公式版\n' + OLD);
+    assert.equal(t.diff, '今 − 確定版\n' + OLD);
     assert.ok(t.label.split('\n').includes(OLD), '中心（年度）の説明にも');
     assert.equal(totalTip(h), '今 − v1\nv1 の中心は本番の計算に切り替える前の旧来の計算の値で、今の中心とは計算のしかたが違います', '月ごとの比べの年度の差も');
   }
@@ -296,7 +296,7 @@ part('D5 計算のしかたが違う比べ', () => {
   assert.doesNotMatch(tipsOf(h).join('\n'), /計算のしかたが違います/);
   // 今が本番でない（旧来の計算）と本番で出した版
   h = tab(null, liveOff);
-  assert.equal(diffTip(h).diff, '今 − 公式版\n公式版の中心は本番の計算の値で、今の中心（旧来の計算）とは計算のしかたが違います');
+  assert.equal(diffTip(h).diff, '今 − 確定版\n確定版の中心は本番の計算の値で、今の中心（旧来の計算）とは計算のしかたが違います');
   // どちらも本番でない: 今までどおり
   h = tab(null, ver(1, 'APPROVED', 11400));
   assert.deepEqual(diffTip(h), { label: null, diff: null });

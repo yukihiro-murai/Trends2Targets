@@ -20,7 +20,12 @@ assert.equal(vars.radius, '8px', 'カードの角');
 assert.equal(vars['radius-s'], '6px', 'ボタンの角');
 assert.equal(vars.pill, '4px', '札は角丸の短冊（丸くしない）');
 assert.match(css, /\.tbl\.edit td\{[^}]*vertical-align:middle/, '入力セルはマスの上下中央');
-assert.match(css, /\.tbl\.edit \.inp\.cell\{[^}]*display:flex;align-items:center/, '入力欄の文字も上下中央');
+assert.match(css, /\.tbl\.edit \.inp\.cell\{[^}]*line-height:38px/, '入力欄の文字はマスの高さに合わせる');
+assert.match(css, /select\.inp\{[^}]*line-height:calc\(var\(--h-input\) - 3px\)/, 'プルダウンの文字は欄の上下中央');
+assert.match(css, /\.cvt\{[^}]*height:360px/, 'グラフと表は同じ高さの枠');
+assert.match(css, /\.hm-pair\{[^}]*grid-template-columns:1fr 1fr/, 'ホームの学びと分析は同じ高さ');
+assert.match(css, /\.bud-src\{[^}]*grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/, '予算案の予測カードは 4 列');
+assert.match(css, /\.lr-board\{[^}]*grid-template-columns:1fr/, '学びの持ち帰ること は 1 カラム');
 assert.doesNotMatch(css, /--radius:18px|--radius-s:12px|--pill:999px/);
 assert.doesNotMatch(css, /\.btn:active[^{]*\{[^}]*scale\(/, 'ボタンの縮小はしない');
 
@@ -71,10 +76,13 @@ assert.match(lr, /実績と比べた月[\s\S]*大きく外れた月[\s\S]*残っ
 assert.match(lr, /<h2>持ち帰ること/);
 assert.ok(!/undefined|NaN/.test(lr), '学びに undefined・NaN を出さない');
 
-const inHtml = run(`S.view = 'prep'; S.fc.planId = 'P1'; S.fc.view = __v; S.fc.inputDirty = {}; fcInputCard(__v, 'product')`, {
+const inHtml = run(`S.view = 'prep'; S.fc.planId = 'P1'; S.fc.view = __v; S.fc.inputDirty = {}; fcInputTab({}, __v)`, {
   __v: { can: { plan: true }, boot: { setup: { people: ['村井'] }, products: ['薬A'], months: ['2026-04'], stepOptions: ['+10%'], input: { product: [{}] } }, plan: {}, inputLog: { rows: {} } }
 });
+assert.match(inHtml, /class="in-steps"/);
 assert.match(inHtml, /class="tbl scroll fc-in edit"/);
 assert.match(inHtml, /class="inp cell"/);
+assert.deepEqual(JSON.parse(run(`JSON.stringify(FC_SECS.map(function(s){ return s[1]; }))`)), ['予測結果', '根拠', '入力', '振り返り', '予算案', '確定版', '手法ごとの予測']);
+assert.doesNotMatch(run(`SKY8.map(function(s){ return s.name; }).join()`), /猛暑|快晴|曇り|霧|天変地異/);
 
 console.log('app-ui-titles: ok');

@@ -99,8 +99,8 @@ assert.deepEqual([...mk[1].matchAll(/>([^<]*)<\/option>/g)].map((m) => m[1]), by
 assert.equal(run(`viewTitle(${JSON.stringify(head(h))}).tools`).startsWith('<span class="fc-sels"'), true, '題の横の道具の位置（ホーム・メーカー一覧と同じ .vnear）');
 assert.deepEqual([...h.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'forecast', 'basis', 'tri', 'budget', 'version']);
 // 中身がすぐ小見出しで始まる区切り（入力など）は、区切りの見出しを重ねない（2026-10-16 村井さん）
-assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]), ['予測', '根拠', '手法ごとの予測', '予算', '公式版'], '見出しのある区切りは同じ形の見出し');
-assert.match(h, /<section class="card fcsec nohead" id="fcs-input" aria-label="入力"><div class="card fc-inkind" id="fc-in-product"><div class="card-head"><h2>製品の動向/, '「入力」→「製品の動向」と重ねない');
+assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]), ['入力', '予測結果', '根拠', '手法ごとの予測', '予算案', '確定版'], '見出しのある区切りは同じ形の見出し');
+assert.match(h, /<section class="card fcsec" id="fcs-input"[\s\S]*<ol class="in-steps"[\s\S]*<div class="card fc-inkind" id="fc-in-product"><div class="card-head"><h2>製品の動向/, '入力は順の案内のあと、製品の動向');
 assert.doesNotMatch(h, /class="tabs"|onclick="fcTab\(|class="tabs sub"><button/, 'タブ・目次は無い（グラフ / 表で見る の切り替えだけ）');
 assert.deepEqual([...fcSection(h, 'input').matchAll(/<div class="card fc-inkind" id="fc-in-(\w+)"><div class="card-head"><h2>([^<]*)</g)].map((m) => [m[1], m[2]]),
   [['product', '製品の動向'], ['client', 'メーカーの動向'], ['opinions', '担当者の洞察'], ['devspot', '新製品やスポット開発の予定']], '入力の 4 種類はカードを縦に');
