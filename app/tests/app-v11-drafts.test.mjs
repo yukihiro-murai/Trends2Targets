@@ -47,6 +47,10 @@ function planBook(client, fy, { p50, adopted, uplift, sales = {}, cmp = {} }) {
   for (let i = 0; i < 12; i++) formulas['J' + (29 + i)] = `=H${29 + i}+I${29 + i}`;
   return env.makeBook(client, {
     CONFIG: { values: [['項目', '値'], ['[必須] メーカー名（外部集計キー）', client], ['[必須] 予測年度FY（YYYY）', fy], ['[必須] 担当者（カンマ区切り）', '鷹野']] },
+    PRODUCT: { values: [['Person', 'ProductName', 'Month(yyyy/mm/dd)', 'Step(増減率%)', 'Reason']] },
+    CLIENT: { values: [['Person', 'Month(yyyy/mm/dd)', 'Step(増減率%)', 'Reason']] },
+    OPINIONS: { values: [['Person', 'Month(yyyy/mm/dd)', 'Step(増減率%)', 'Confidence(0..1)', 'Note']] },
+    DEV_SPOT: { values: [['Person', 'Month(yyyy/mm/dd)', 'Project', 'Amount(JPY)', 'Confidence(0..1)']] },
     OUTPUT: { values: output, formulas, formats: { A: '@' } },
     SALES_INPUT: { values: [HS, ...Object.entries(sales).map(([ym, v]) => [client, 'BASE', '製品A', ym, v, 'closed', new Date(2026, 8, 1)])], formats: { D: '@' } },
     EVAL_COMPARE_MONTHLY: { values: [HC, ...Object.entries(cmp).map(([ym, act]) => HC.map((h) => ({ target_month: ym, actual_total: act,
@@ -359,23 +363,38 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   assert.deepEqual(env.errors().filter((e) => /BUDGET_DRAFTS/.test(e.where)).map((e) => e.message), [], '下書きのエラーは無い');
 }
 
-// ==== 7. 仮予算（seedDummyBudgets）: 未編集は月次予測または真ん中 + 5%、手で直した跡は触らない ====
+// ==== 7. 仮の予算策定（seedDummyBudgets）: 測る専用は印を外して入力と予算を書く。確定版・手で直した予算は触らない ====
 {
+  const beforeA = nums(planA).monthly.map((m) => [m.adopted, m.uplift]);
   const planB = env.seedPlan(planBook('別の製薬', FY, { p50: P0, sales: salesA }));
+  const planM = env.seedPlan(planBook('測る製薬', FY, { p50: P0, sales: salesA }));
+  env.props.OWNER_TASK = JSON.stringify({ action: 'setPlanPurpose', planId: planM, purpose: 'MEASURE' });
+  const setM = env.call('apiOwnerTask()');
+  assert.equal(setM.ok, true, JSON.stringify(setM));
+  assert.equal(env.table('PLANS').filter((p) => p.plan_id === planM)[0].purpose, 'MEASURE');
   env.props.OWNER_TASK = JSON.stringify({ action: 'seedDummyBudgets', fy: FY });
   const full = env.call('apiOwnerTask()');
   assert.equal(full.ok, true, JSON.stringify(full));
-  const filled = (full.result.filled || []).map((x) => x.planId);
+  const filled = full.result.filled || [];
   const skipped = full.result.skipped || [];
-  assert.ok(filled.includes(planB), '未編集の計画は仮予算を書く');
-  assert.ok(!filled.includes(planA), '手で直した計画は書かない');
-  assert.ok(skipped.some((x) => x.planId === planA && x.reason === 'edited'), JSON.stringify(skipped));
+  assert.ok(filled.some((x) => x.planId === planB && (x.did || []).includes('budget')), '未編集の計画は仮予算を書く');
+  const aHit = filled.concat(skipped).find((x) => x.planId === planA);
+  assert.ok(aHit && (aHit.reason === 'edited' || aHit.skippedBudget === 'edited'), '手で直した予算は上書きしない: ' + JSON.stringify(aHit));
+  assert.deepEqual(nums(planA).monthly.map((m) => [m.adopted, m.uplift]), beforeA);
+  const mHit = filled.find((x) => x.planId === planM);
+  assert.ok(mHit && (mHit.did || []).includes('purpose') && (mHit.did || []).includes('budget'), '測る専用は印を外して仮予算を書く: ' + JSON.stringify(mHit));
+  assert.equal(env.table('PLANS').filter((p) => p.plan_id === planM)[0].purpose, '');
+  assert.ok(env.call(`appReadPlanTable_('ENG_CLIENT', '${planM}')`).length, '動向の仮入力がある');
+  assert.ok(env.call(`appReadPlanTable_('ENG_OPINIONS', '${planM}')`).length, '見解の仮入力がある');
+  assert.ok(env.call(`appReadPlanTable_('ENG_DEV_SPOT', '${planM}')`).length, 'スポットの仮入力がある');
   const n = nums(planB);
-  assert.deepEqual(n.monthly.map((m) => m.adopted), P0);
-  assert.deepEqual(n.monthly.map((m) => m.uplift), P0.map((x) => Math.round(x * 0.05)));
+  assert.equal(n.monthly.length, 12);
+  assert.ok(n.monthly.every((m) => Number.isInteger(m.adopted) && m.adopted >= 0), '仮予算の採用予測が入る');
+  const afterB = n.monthly.map((m) => [m.adopted, m.uplift]);
   env.props.OWNER_TASK = JSON.stringify({ action: 'seedDummyBudgets', fy: FY });
   const again = env.call('apiOwnerTask()');
-  assert.ok((again.result.filled || []).every((x) => x.planId !== planB), '2 回目は直した跡として飛ばす');
+  assert.ok(!(again.result.filled || []).some((x) => x.planId === planB && (x.did || []).includes('budget')), '2 回目は予算を書き直さない');
+  assert.deepEqual(nums(planB).monthly.map((m) => [m.adopted, m.uplift]), afterB);
 }
 
 console.log('app-v11-drafts: all tests passed');
