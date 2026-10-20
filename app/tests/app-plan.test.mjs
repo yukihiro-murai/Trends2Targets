@@ -323,15 +323,16 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   assert.match(homeHtml, /data-sky="mousho"[\s\S]*data-sky="kaisei"[\s\S]*data-sky="harenochi"[\s\S]*data-sky="kumori"[\s\S]*data-sky="ame"[\s\S]*data-sky="sekka"[\s\S]*data-sky="mikakunin"[\s\S]*data-sky="tenpen"/);
   assert.doesNotMatch(homeHtml, /<span class="nm">/);
   assert.doesNotMatch(homeHtml.replace(/data-tip="[^"]*"|aria-label="[^"]*"/g, ''), /大幅超え|予算内|未達|未算定|急変|売上なし|>超え</);
+  assert.match(homeHtml, /data-tip="(テスト製薬|該当するメーカーはありません)/);
   assert.doesNotMatch(homeHtml, /猛暑|快晴|天変地異/);
   assert.equal((homeHtml.match(/class="sky( none)?"/g) || []).length, 8);
   // ホームは全体だけ: 空模様は数だけで、押しても画面を移らない・メーカーの名前を出さない（行き来は左のメニューから。2026-10-13）
   assert.match(homeHtml, /<div class="sky[^"]*"[^>]*tabindex="0" role="group"/);
   assert.doesNotMatch(homeHtml, /onclick="go\('analysis'\)"/);
-  // 2026-10-06 村井さん: ホームは全体の概要だけ（個社の表・名前は出さない。最近の動き・あなたの役割も出さない）
+  // 2026-10-06 村井さん: ホームは全体の概要だけ（個社の表は出さない。名前は予実の分布のカーソル説明だけ。最近の動き・あなたの役割も出さない）
   assert.doesNotMatch(homeHtml, /最近の動き|あなたの役割|クライアント|計画の状態/);
-  const visible = homeHtml.replace(/data-tip="[^"]*"/g, '');
-  assert.doesNotMatch(visible, /テスト製薬|別の製薬/, 'ホームに個社の名前を出さない');
+  const visible = homeHtml.replace(/data-tip="[^"]*"|aria-label="[^"]*"/g, '');
+  assert.doesNotMatch(visible, /テスト製薬|別の製薬/, 'ホームの表に個社の名前を出さない（分布のカーソル説明だけ）');
   // 2026-10-06 村井さん: 「よみが観測しました（時刻）」は出さない・1 カラム（左右に分けない）・「状態を見る」のボタンは出さない
   assert.doesNotMatch(homeHtml, /よみが観測しました|class="dash"|状態を見る/);
   // 2026-10-06 村井さん: 読み込みの待ちは、右下ではなく画面の中で、よみが「観測中…」と話す

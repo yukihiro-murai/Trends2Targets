@@ -434,3 +434,71 @@ function appBudgetProposal_(input) {
     (k ? '締まった ' + k + ' か月は実績のまま、残りの ' + (12 - k) + ' か月に割り振りました。' : '') + how + '上乗せはそのままです。';
   return out;
 }
+
+/** 仮の人間補正（採用予測の 5%。画面確認用。本決めの値ではない） */
+const APP_BUDGET_DUMMY_UPLIFT = 0.05;
+/** 仮予算の一括書き込みで、次の計画に進むのをやめる残り時間（ミリ秒。1 計画の保存が途中で切れないように） */
+const APP_BUDGET_DUMMY_TIME_MS = 4 * 60 * 1000;
+
+/**
+ * 月ごとの仮予算の行（AI の月次予測があればそれ、無ければ月の真ん中。上乗せは 5%）。
+ * 予測の月が 12 そろわなければ null。usedAi: 月次予測を使ったか
+ */
+function appDummyBudgetRows_(planId) {
+  const nums = appPlanNumbers_(planId);
+  if (!nums || !nums.monthly || nums.monthly.length !== 12) return null;
+  if (nums.monthly.every(m => m.p50 === null && m.adopted === null)) return null;
+  let points = null;
+  try {
+    const plan = appPlanOf_(planId);
+    const latest = appBudgetLatestRun_(planId);
+    const planning = latest ? appForecastPlanningOf_(latest.planning_json, plan.fy, latest.annual_p50) : null;
+    if (planning && planning.months && planning.months.length === 12) {
+      points = planning.months.map(m => m && typeof m.point === 'number' && isFinite(m.point) ? m.point : null);
+      if (points.some(v => v === null)) points = null;
+    }
+  } catch (e) {
+    Logger.log('仮予算の月次予測: ' + (e && e.message ? e.message : e));
+  }
+  const rows = nums.monthly.map((m, i) => {
+    const base = points && points[i] !== null ? points[i] : m.p50;
+    const adopted = base === null ? 0 : Math.round(base);
+    return { row: 29 + i, adopted: adopted, uplift: Math.round(adopted * APP_BUDGET_DUMMY_UPLIFT) };
+  });
+  return { rows: rows, usedAi: !!points };
+}
+
+/**
+ * 今の年度（または fy）の、予算を立てる計画へ仮予算を書く（所有者。手で直した跡・承認済みの確定版は触らない）。
+ * 予測の月が無い計画は飛ばす。時間切れなら remaining に残す（もう一度実行する）
+ */
+function appSeedDummyBudgets_(ctx, fy) {
+  const y = fy === undefined || fy === null || fy === '' ? appFy_(new Date()) : Number(fy);
+  appRequireOpenYear_(y);
+  const plans = appReadTable_('PLANS').filter(p => String(p.fy) === String(y) && p.state !== 'ARCHIVED')
+    .sort((a, b) => String(a.client_label || '').localeCompare(String(b.client_label || ''), 'ja') || String(a.plan_id).localeCompare(String(b.plan_id)));
+  const out = { fy: y, filled: [], skipped: [], failed: [], remaining: [] };
+  const t0 = new Date().getTime();
+  let stop = false;
+  plans.forEach(p => {
+    const item = { planId: p.plan_id, name: p.client_label || '' };
+    if (stop) { out.remaining.push(item); return; }
+    if (new Date().getTime() - t0 > APP_BUDGET_DUMMY_TIME_MS) { stop = true; out.remaining.push(item); return; }
+    if (appPlanIsMeasure_(p)) { out.skipped.push(Object.assign({ reason: 'measure' }, item)); return; }
+    const vers = appVersionRows_(p.plan_id);
+    if (vers.some(v => v.state === 'APPROVED')) { out.skipped.push(Object.assign({ reason: 'official' }, item)); return; }
+    const months = appBudgetStoredMonths_(p.plan_id);
+    if (!months.length) { out.skipped.push(Object.assign({ reason: 'no_forecast' }, item)); return; }
+    if (appBudgetEdited_(months)) { out.skipped.push(Object.assign({ reason: 'edited' }, item)); return; }
+    const dummy = appDummyBudgetRows_(p.plan_id);
+    if (!dummy) { out.skipped.push(Object.assign({ reason: 'no_forecast' }, item)); return; }
+    try {
+      appPlanEdit_(ctx, { planId: p.plan_id, action: 'BUDGET.SAVE',
+        args: { rows: dummy.rows, basis: 'MANUAL', alloc: 'MANUAL' }, inputHash: appPlanInputHash_(p.plan_id) });
+      out.filled.push(Object.assign({ usedAi: dummy.usedAi }, item));
+    } catch (e) {
+      out.failed.push(Object.assign({ error: String(e && e.message ? e.message : e).slice(0, 160) }, item));
+    }
+  });
+  return out;
+}

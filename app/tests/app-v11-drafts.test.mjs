@@ -359,4 +359,23 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   assert.deepEqual(env.errors().filter((e) => /BUDGET_DRAFTS/.test(e.where)).map((e) => e.message), [], '下書きのエラーは無い');
 }
 
+// ==== 7. 仮予算（seedDummyBudgets）: 未編集は月次予測または真ん中 + 5%、手で直した跡は触らない ====
+{
+  const planB = env.seedPlan(planBook('別の製薬', FY, { p50: P0, sales: salesA }));
+  env.props.OWNER_TASK = JSON.stringify({ action: 'seedDummyBudgets', fy: FY });
+  const full = env.call('apiOwnerTask()');
+  assert.equal(full.ok, true, JSON.stringify(full));
+  const filled = (full.result.filled || []).map((x) => x.planId);
+  const skipped = full.result.skipped || [];
+  assert.ok(filled.includes(planB), '未編集の計画は仮予算を書く');
+  assert.ok(!filled.includes(planA), '手で直した計画は書かない');
+  assert.ok(skipped.some((x) => x.planId === planA && x.reason === 'edited'), JSON.stringify(skipped));
+  const n = nums(planB);
+  assert.deepEqual(n.monthly.map((m) => m.adopted), P0);
+  assert.deepEqual(n.monthly.map((m) => m.uplift), P0.map((x) => Math.round(x * 0.05)));
+  env.props.OWNER_TASK = JSON.stringify({ action: 'seedDummyBudgets', fy: FY });
+  const again = env.call('apiOwnerTask()');
+  assert.ok((again.result.filled || []).every((x) => x.planId !== planB), '2 回目は直した跡として飛ばす');
+}
+
 console.log('app-v11-drafts: all tests passed');
