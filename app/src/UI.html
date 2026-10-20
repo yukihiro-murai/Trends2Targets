@@ -147,8 +147,8 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 /* 天気のキャラ（小さく並べるとき。大きさは skyChar の引数） */
 .skych{display:inline-block;vertical-align:middle;flex:0 0 auto;width:var(--sz,32px);height:var(--sz,32px)}
 .skych svg{width:100%;height:100%;display:block}
-.skycell{display:inline-flex;align-items:center;gap:var(--s2);max-width:100%;vertical-align:middle}   /* 表の中の空模様（キャラ + 名前） */
-.skyn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skycell{display:inline-flex;align-items:center;justify-content:center;gap:0;max-width:100%;vertical-align:middle}   /* 表の中の見通し（キャラだけ。名前は出さない） */
+.skyn{display:none}
 
 /* ---- ボタン（高さと最小幅をそろえる） ---- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);height:var(--h-btn);min-width:var(--w-btn);padding:0 14px;border-radius:var(--radius-s);font-size:var(--fs-b);background:var(--btn);color:#fff;white-space:nowrap;text-decoration:none;transition:background var(--ease),border-color var(--ease),box-shadow var(--ease)}
@@ -191,11 +191,11 @@ h1{font-size:var(--fs-h1);line-height:1.35;color:var(--navy);margin-bottom:var(-
 input.inp[type=number]{-moz-appearance:textfield;appearance:textfield}
 input.inp[type=number]::-webkit-inner-spin-button,input.inp[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 /* ---- プルダウン（ブラウザの標準の見た目をやめ、入力欄と同じ形に。開いた一覧も角丸・影・選んだ行の印。対応しないブラウザは標準の一覧） ---- */
-select.inp{-webkit-appearance:none;appearance:none;padding-right:44px;line-height:calc(var(--h-input) - 3px);background:#fff var(--chev) no-repeat right 14px center/18px 18px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+select.inp{-webkit-appearance:none;appearance:none;display:flex;align-items:center;padding:0 44px 0 14px;line-height:1;background:#fff var(--chev) no-repeat right 14px center/18px 18px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 select.inp:hover{background-color:var(--primary-soft-2)}
 select.inp:focus{background-color:#fff}
 select.inp:disabled{background-color:var(--gray);color:var(--muted);cursor:not-allowed;border-color:var(--line)}
-select.inp.cell{padding-right:30px;padding-top:0;padding-bottom:0;line-height:calc(var(--h-cell) - 3px);background-position:right 8px center;background-size:16px 16px}
+select.inp.cell{padding:0 30px 0 var(--s2);line-height:1;background-position:right 8px center;background-size:16px 16px}
 select.inp option{color:var(--text);background:#fff}
 @supports (appearance: base-select){
   select.inp,select.inp::picker(select){appearance:base-select}
@@ -276,12 +276,18 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .tbl td.empty{text-align:center;color:var(--muted);height:64px}
 .tbl .rowlink{color:var(--navy);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--primary-line);cursor:pointer;word-break:keep-all;overflow-wrap:normal}   /* 表のメーカーの名前（押すとその計画を開く。スマホでは「開く」の列の代わり）。名前の途中では折り返さない（空白の所だけ） */
 .tbl .rowlink:hover{text-decoration-color:var(--primary)}
-.tbl.edit td{padding:6px 8px;height:52px;vertical-align:middle}
-.tbl.edit .inp.cell{height:40px;margin:0;display:block;line-height:38px;padding-top:0;padding-bottom:0;box-sizing:border-box;vertical-align:middle}
-.tbl.edit select.inp.cell{line-height:37px}
-.tbl.edit .incell{display:flex;align-items:center;min-width:0;min-height:40px}
-.tbl.edit .incell > .inp.cell{flex:1 1 auto;width:100%;min-width:0}
-.tbl.edit td > .btn{vertical-align:middle;margin-top:0}
+/* 入力行は見出しの下線と行の下線のあいだでコントロールを上下中央（セル余白 16 + 欄 40 + 余白 16 = 72） */
+.tbl.edit th{height:40px;padding:0 12px;line-height:40px}
+.tbl.edit td{padding:16px 8px;height:72px;vertical-align:middle;line-height:normal}
+.tbl.edit .inp.cell{height:40px;margin:0;vertical-align:middle;line-height:40px;padding-top:0;padding-bottom:0;box-sizing:border-box}
+.tbl.edit select.inp.cell{display:block;width:100%;line-height:40px}
+.tbl.edit .incell{display:flex;align-items:center;min-width:0;height:40px;margin:0}
+.tbl.edit .incell > .inp.cell{flex:1 1 auto;width:100%;min-width:0;margin:0}
+.tbl.edit td > .btn{display:inline-flex;align-items:center;justify-content:center;height:40px;margin:0;vertical-align:middle}
+.tbl.edit tr:last-child td{border-bottom:1px solid var(--line)}
+@supports (appearance: base-select){
+  .tbl.edit select.inp.cell{display:inline-flex;align-items:center;width:100%;line-height:1}
+}
 
 /* ---- 小さな印（丸い札） ---- */
 .chip{display:inline-flex;align-items:center;gap:6px;height:var(--h-chip);padding:0 12px;border-radius:var(--pill);font-size:var(--fs-s);margin:0 4px 2px 0;background:var(--soft);color:var(--navy);white-space:nowrap}
@@ -289,7 +295,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .chip.off{background:var(--gray);color:var(--muted)}
 .chip.ng{background:var(--error-bg);color:var(--error)}
 .chip.warn{background:#fff;color:var(--warn-fg);box-shadow:inset 0 0 0 1.5px #E3B46A}
-.chip.st{min-width:112px;justify-content:center;margin-right:0}   /* 状態の列の札は同じ幅（表の中で頭がそろう） */
+.chip.st{width:112px;min-width:112px;justify-content:center;margin-right:0}   /* 状態の列の札は同じ幅（表の中で頭がそろう） */
 
 /* ---- 通知・処理中 ---- */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;min-width:320px;max-width:min(560px, calc(100% - 32px));padding:8px 22px 8px 10px;border-radius:6px;font-size:var(--fs-s);color:#fff;background:var(--navy);box-shadow:inset 0 -3px 0 var(--primary),0 4px 16px rgba(0,0,0,.16);opacity:0;transition:opacity .3s;z-index:95;pointer-events:none}
@@ -377,10 +383,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 /* 予実の分布: 8 つを決まった順に 1 行で（狭い画面では 4 つずつ 2 行。半端な行を作らない）。0 のものは絵だけ淡く（名前と数は読める濃さ） */
 .skys{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:var(--s3)}
 @media (max-width:1180px){.skys{grid-template-columns:repeat(4,minmax(0,1fr))}}
-.sky{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;padding:16px 8px 14px;border:1px solid var(--line);border-radius:var(--radius-s);background:#fff;cursor:pointer;font:inherit;color:var(--navy);text-align:center}
+.sky{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:0;height:152px;padding:16px 8px;border:1px solid var(--line);border-radius:var(--radius-s);background:#fff;cursor:pointer;font:inherit;color:var(--navy);text-align:center;box-sizing:border-box}
 .sky:hover{border-color:var(--primary)}
 .sky.none{background:#fff;box-shadow:none}
-.sky.none .ch{opacity:.42}.sky.none .ct,.sky.none .nm{color:var(--muted)}
+.sky.none .ch{opacity:.42}.sky.none .ct{color:var(--muted)}
+.sky .nm{display:none}
 .sky .ch{position:relative;width:88px;height:88px}
 .sky .ch-bg{position:absolute;inset:10px;border-radius:50%;background:radial-gradient(circle at 50% 38%,#fff 0%,#E8F6FD 62%,#D4EEF8 100%);box-shadow:inset 0 0 0 1px rgba(154,216,244,.45)}
 .sky[data-sky="mousho"] .ch-bg{background:radial-gradient(circle at 50% 38%,#fff 0%,#FFE8D6 70%,#FFD2B3 100%)}
@@ -391,7 +398,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .sky[data-sky="tenpen"] .ch-bg{background:radial-gradient(circle at 50% 38%,#fff 0%,#FBEFED 70%,#F0D4D0 100%)}
 .sky .ch svg{position:relative;z-index:1;width:100%;height:100%;display:block;filter:drop-shadow(0 3px 6px rgba(15,53,87,.12))}
 .sky .mk{display:none}
-.sky .nm{font-size:var(--fs-s);line-height:1.35;word-break:keep-all;overflow-wrap:normal}
+.sky .nm{display:none}
 .sky .ct{font-size:var(--fs-h2);line-height:1.2;font-variant-numeric:tabular-nums}
 /* 学び: 精度の天気と、承認待ちの見直し案（「学びを見る」で AI の学び） */
 .hm-lr{display:grid;grid-template-columns:1fr;gap:var(--s3)}   /* 学びの進みは 1 カラム（2026-10-13 村井さん） */
@@ -411,13 +418,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
   .hm-pair{grid-template-columns:1fr;gap:var(--s6)}
   .hm-pair > .card{height:240px}
   .skys{grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s2)}
-  .sky{padding:12px 4px 10px}.sky .ch{width:64px;height:64px}.sky .ch-bg{inset:6px}.sky .ct{font-size:var(--fs-h3)}
+  .sky{height:128px;padding:12px 4px}.sky .ch{width:64px;height:64px}.sky .ch-bg{inset:6px}.sky .ct{font-size:var(--fs-h3)}
   .hm-lrbox{min-height:80px;gap:var(--s3)}
   .todo li .btn.hm-mk{display:none}   /* 続きの行の「メーカー」は下のメニューと同じなので、スマホでは出さない（行を短く） */
 }
 
 /* ==== CSS: MAKERS ==== */
-.mk-sum{display:flex;flex-wrap:wrap;gap:var(--s1)}.mk-sum .chip{margin:0}
+.mk-sum{display:grid;grid-template-columns:repeat(4,var(--col));gap:var(--s3);align-items:stretch;margin:0;flex:0 0 auto}
+.mk-sum .chip{margin:0;width:var(--col);min-width:var(--col);max-width:var(--col);height:var(--h-pill);justify-content:center;box-sizing:border-box}
 /* メーカーの表: 名前の列は、いちばん長い名前が 1 行に入る幅を残す（見出しの .colmin。決まった幅の列 808px + 名前）。入らない画面では表ごと横に送る（スマホは「開く」の列を出さず、名前を押して開く） */
 .tbl.mk td,.tbl.mk th{padding-left:var(--s2);padding-right:var(--s2)}
 /* 予測一覧の予測の帯（全メーカーで同じ目盛り） */
@@ -479,6 +487,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .mkb-dot{position:absolute;top:11px;width:8px;height:8px;margin-left:-4px;border-radius:50%;background:var(--primary);border:0;box-shadow:0 0 0 3px rgba(0,160,233,.16)}
 .tbl.mkf tr.mkf-sum td{background:var(--primary-soft-2)}
 @media (max-width:760px){
+  .mk-sum{grid-template-columns:repeat(2,minmax(0,1fr))}
   .tbl.mk{width:max(100%,720px)}
   .tbl.mk th:first-child,.tbl.mk td:first-child{position:sticky;left:0;z-index:1;background:var(--card);box-shadow:inset -1px 0 0 var(--line)}
   .tbl.mk th:first-child,.tbl.mk tr.total td:first-child{background:var(--head)}
@@ -522,7 +531,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .bud-extra .field .inp,.bud-extra .btn{width:100%;min-width:0}
 .bud-note{font-size:var(--fs-s);color:var(--muted);line-height:1.5}
 .in-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--s3);margin:0 0 var(--s5);padding:0;list-style:none}
-.in-steps li{display:flex;align-items:center;gap:10px;height:56px;padding:0 14px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--surface)}
+.in-steps li{display:flex;align-items:center;gap:10px;height:64px;padding:0 14px;border:1px solid var(--line);border-radius:var(--radius-s);background:var(--surface)}
 .in-steps .n{flex:0 0 24px;width:24px;height:24px;border-radius:4px;background:var(--primary-soft);color:var(--primary-dark);font-size:13px;line-height:24px;text-align:center}
 .in-steps .t{font-size:var(--fs-s);line-height:1.3;color:var(--navy)}
 @media (max-width:760px){.bud-steps,.in-steps,.bud-grid,.bud-src,.bud-tog,.bud-extra{grid-template-columns:1fr}.bud-grid > .bud-pane:first-child{grid-column:auto}}
@@ -1518,7 +1527,7 @@ function skyWhy(p){ return [skyReasonText(p), skyHow(p)].filter(Boolean).join('\
 /** 天気のキャラの絵（px 四方。名前は aria-label。見える名前は呼び出し側で並べる） */
 function skyChar(key, px, nm){ px = px || 32; return '<span class="skych" style="--sz:' + px + 'px" role="img" aria-label="' + esc(nm || skyName(key)) + '">' + (CHAR_SVG[key] || '') + '</span>'; }   // 大きさは CSS の --sz（スマホの決まりで幅を変えられる）
 /** 表の中の空模様（キャラ 32px + 名前。説明は名前・決まり・理由）。メーカー・予測の「メーカーを選ぶ」で同じ形 */
-function skyCell(p, px){ var k = skyKey(p), why = skyWhy(p); return '<span class="skycell" data-tip="' + esc(skyName(k) + '：' + skyRule(k) + (why ? '\n' + why : '')) + '">' + skyChar(k, px || 32) + '<span class="skyn">' + esc(skyName(k)) + '</span></span>'; }
+function skyCell(p, px){ var k = skyKey(p), why = skyWhy(p); return '<span class="skycell" data-tip="' + esc(skyRule(k) + (why ? '\n' + why : '')) + '">' + skyChar(k, px || 32) + '</span>'; }
 /** 精度の天気のキー: 外れ幅（合計の比）が 10% 未満 快晴・15% 未満 晴れのち曇り・20% 未満 曇り・30% 未満 雨・それ以上か荒れている 台風・値なし 霧 */
 function accWeather(mape, turbulent){
   if (turbulent) return 'taifuu';
@@ -2386,10 +2395,10 @@ function homeSkyCard(plans){
   var by = {}; plans.forEach(function(p){ var k = skyKey(p); (by[k] = by[k] || []).push(p.clientName); });
   var tiles = SKY8.map(function(s){
     var n = (by[s.key] || []).length;
-    return '<div class="sky' + (n ? '' : ' none') + '" data-sky="' + s.key + '" tabindex="0" role="group" aria-label="' + esc(s.name + ' ' + n + ' メーカー') + '"'
-      + ' data-tip="' + esc(s.name + '：' + s.rule) + '">'
+    return '<div class="sky' + (n ? '' : ' none') + '" data-sky="' + s.key + '" tabindex="0" role="group" aria-label="' + esc(s.rule + ' ' + n + ' メーカー') + '"'
+      + ' data-tip="' + esc(s.rule) + '">'
       + '<span class="ch"><span class="ch-bg" aria-hidden="true"></span>' + (CHAR_SVG[s.key] || '') + '</span>'
-      + '<span class="ct">' + n + '</span><span class="nm">' + esc(s.name) + '</span></div>';
+      + '<span class="ct">' + n + '</span></div>';
   }).join('');
   return '<div class="card"><div class="card-head"><h2>予実の分布</h2></div><div class="skys">' + tiles + '</div></div>';
 }

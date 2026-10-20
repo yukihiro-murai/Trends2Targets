@@ -927,7 +927,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   const kpiTip = (h, k) => (new RegExp('<div class="kpi" data-tip="([^"]*)"><div class="k">' + k + '</div>').exec(h) || [])[1];
   const check = (how) => {
     // メーカーの表の空模様・着地の推定のセル
-    assert.match(run('skyCell(__p)', { __p: P }), new RegExp('<span class="skycell" data-tip="未算定：[^"\\n]*\\n当たり具合の計算待ち\\n' + how + '">'));
+    assert.match(run('skyCell(__p)', { __p: P }), new RegExp('<span class="skycell" data-tip="[^"]*\\n当たり具合の計算待ち\\n' + how + '">'));
     assert.equal(run('mkLanding(__p)', { __p: P }), '<td class="num" data-tip="着地を推定できません（当たり具合の計算待ち）\n' + how + '">-</td>');
     // ホームのよみのセリフ（見える文は短く、出し方は説明に）
     const says = Array.from(run('yomiSays(__h)', { __h: { fy: '2026', plans: [P, Object.assign({}, P, { planId: 'P2', clientName: '別の製薬', skyReason: 'no_budget' })] } }));

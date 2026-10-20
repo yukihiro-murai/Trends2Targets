@@ -319,9 +319,10 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   ui.__home = env.call('apiHome()');
   const homeHtml = vm.runInContext(`S.view = 'home'; B.home = __home; viewHome()`, ui);
   assert.match(homeHtml, /年間予算[\s\S]*着地の推定[\s\S]*暫定実績[\s\S]*外れ幅[\s\S]*予実の分布[\s\S]*<h2>学び<\/h2>[\s\S]*<h2>分析<\/h2>/);
-  // 分布はいつも 8 つ（大幅超え → 超え → 予算内 → 未達 → 大幅未達 → 売上なし → 未算定 → 急変）。社名は出さない
-  assert.match(homeHtml, /aria-label="大幅超え[\s\S]*aria-label="超え[\s\S]*aria-label="予算内[\s\S]*aria-label="未達[\s\S]*aria-label="大幅未達[\s\S]*aria-label="売上なし[\s\S]*aria-label="未算定[\s\S]*aria-label="急変/);
-  assert.match(homeHtml, /<span class="nm">大幅超え<\/span>/);
+  // 分布はいつも 8 つ（絵と数だけ。ラベル文字は出さない）。社名は出さない
+  assert.match(homeHtml, /data-sky="mousho"[\s\S]*data-sky="kaisei"[\s\S]*data-sky="harenochi"[\s\S]*data-sky="kumori"[\s\S]*data-sky="ame"[\s\S]*data-sky="sekka"[\s\S]*data-sky="mikakunin"[\s\S]*data-sky="tenpen"/);
+  assert.doesNotMatch(homeHtml, /<span class="nm">/);
+  assert.doesNotMatch(homeHtml.replace(/data-tip="[^"]*"|aria-label="[^"]*"/g, ''), /大幅超え|予算内|未達|未算定|急変|売上なし|>超え</);
   assert.doesNotMatch(homeHtml, /猛暑|快晴|天変地異/);
   assert.equal((homeHtml.match(/class="sky( none)?"/g) || []).length, 8);
   // ホームは全体だけ: 空模様は数だけで、押しても画面を移らない・メーカーの名前を出さない（行き来は左のメニューから。2026-10-13）
