@@ -464,6 +464,23 @@ function appDummyPerson_(plan) {
   return '検証担当';
 }
 
+/** 予算保存が書ける月見出しか（OUTPUT 29〜40 行の A が 'yyyy/MM' の文字。日付セルだと旧来の保存が拒否する） */
+function appDummyOutputWritable_(planId) {
+  const rows = {};
+  try {
+    appReadPlanTable_('ENG_ROWS', planId).filter(r => r.sheet === 'OUTPUT' && Number(r.col_from) === 1)
+      .forEach(s => { rows[Number(s.row_no)] = JSON.parse(s.cells_json); });
+  } catch (e) { return false; }
+  for (let r = 29; r <= 40; r++) {
+    const x = (rows[r] || [])[0];
+    if (!x) return false;
+    const t = x.charAt(0);
+    const v = t === 'f' ? '' : appCellDecode_(t, x.slice(1));
+    if (appIsDate_(v) || !/^20\d\d\/\d{2}$/.test(String(v || '').trim())) return false;
+  }
+  return true;
+}
+
 function appDummyKindRows_(planId, kind) {
   const sheet = { client: 'CLIENT', opinions: 'OPINIONS', devspot: 'DEV_SPOT', product: 'PRODUCT' }[kind];
   if (!sheet) return [];
@@ -548,6 +565,7 @@ function appSeedDummyOne_(ctx, plan, fy, index) {
     if (!item.did.length) return { skipped: Object.assign({ reason: 'done' }, item) };
     return { filled: Object.assign({ skippedBudget: 'edited' }, item) };
   }
+  if (!appDummyOutputWritable_(p.plan_id)) return { skipped: Object.assign({ reason: 'no_output' }, item) };
   const dummy = appDummyBudgetRows_(p.plan_id, appDummyPick_(APP_BUDGET_DUMMY_SCALES, index), appDummyPick_(APP_BUDGET_DUMMY_UPLIFT, index));
   if (!dummy) return { skipped: Object.assign({ reason: 'no_forecast' }, item) };
   try {

@@ -367,6 +367,7 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
 {
   const beforeA = nums(planA).monthly.map((m) => [m.adopted, m.uplift]);
   const planB = env.seedPlan(planBook('別の製薬', FY, { p50: P0, sales: salesA }));
+  assert.equal(env.call(`appDummyOutputWritable_('${planB}')`), true, '文字の月見出しなら予算を書ける');
   const planM = env.seedPlan(planBook('測る製薬', FY, { p50: P0, sales: salesA }));
   env.props.OWNER_TASK = JSON.stringify({ action: 'setPlanPurpose', planId: planM, purpose: 'MEASURE' });
   const setM = env.call('apiOwnerTask()');
