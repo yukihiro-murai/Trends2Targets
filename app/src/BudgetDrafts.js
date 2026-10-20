@@ -435,16 +435,47 @@ function appBudgetProposal_(input) {
   return out;
 }
 
-/** 仮の人間補正（採用予測の 5%。画面確認用。本決めの値ではない） */
-const APP_BUDGET_DUMMY_UPLIFT = 0.05;
+/** 仮の人間補正の幅（画面確認用。計画ごとに変えて予実の分布が分かれて見えるようにする） */
+const APP_BUDGET_DUMMY_SCALES = [0.62, 0.82, 0.92, 1.0, 1.08, 1.22, 1.55, 2.1];
+const APP_BUDGET_DUMMY_UPLIFT = [0.02, 0.05, 0.08, 0.12, 0, 0.03, 0.15, 0.06];
+const APP_BUDGET_DUMMY_STEPS = ['-10', '-5', '-2', '0', '5', '8', '10', '-8'];
+const APP_BUDGET_DUMMY_CONF = ['高い', 'ふつう', '低い'];
 /** 仮予算の一括書き込みで、次の計画に進むのをやめる残り時間（ミリ秒。1 計画の保存が途中で切れないように） */
 const APP_BUDGET_DUMMY_TIME_MS = 4 * 60 * 1000;
+const APP_BUDGET_DUMMY_CONTINUE_MS = 8 * 1000;
+
+function appDummyPick_(arr, i) {
+  return arr[Math.abs(Number(i) || 0) % arr.length];
+}
+
+function appDummyYm_(fy, i) {
+  const m = 4 + (Math.abs(Number(i) || 0) % 12);
+  const y = m > 12 ? Number(fy) + 1 : Number(fy);
+  const mm = m > 12 ? m - 12 : m;
+  return y + '-' + String(mm).padStart(2, '0');
+}
+
+function appDummyPerson_(plan) {
+  const csv = String((plan && plan.people_csv) || '').split(/[,、，]/).map(s => s.trim()).filter(Boolean);
+  if (csv.length) return csv[0];
+  try {
+    const m = appReadTable_('MEMBERS').filter(r => r.is_active !== false && String(r.display_name || '').trim())[0];
+    if (m) return String(m.display_name).trim();
+  } catch (e) { /* 名簿が無いときは下の仮の名前 */ }
+  return '検証担当';
+}
+
+function appDummyKindRows_(planId, kind) {
+  const sheet = { client: 'CLIENT', opinions: 'OPINIONS', devspot: 'DEV_SPOT', product: 'PRODUCT' }[kind];
+  if (!sheet) return [];
+  try { return appReadPlanTable_('ENG_' + sheet, planId) || []; } catch (e) { return []; }
+}
 
 /**
- * 月ごとの仮予算の行（AI の月次予測があればそれ、無ければ月の真ん中。上乗せは 5%）。
+ * 月ごとの仮予算の行（AI の月次予測があればそれ、無ければ月の真ん中。scale で予算の大きさを変える）。
  * 予測の月が 12 そろわなければ null。usedAi: 月次予測を使ったか
  */
-function appDummyBudgetRows_(planId) {
+function appDummyBudgetRows_(planId, scale, upliftRate) {
   const nums = appPlanNumbers_(planId);
   if (!nums || !nums.monthly || nums.monthly.length !== 12) return null;
   if (nums.monthly.every(m => m.p50 === null && m.adopted === null)) return null;
@@ -460,45 +491,115 @@ function appDummyBudgetRows_(planId) {
   } catch (e) {
     Logger.log('仮予算の月次予測: ' + (e && e.message ? e.message : e));
   }
+  const s = (scale === undefined || scale === null || !isFinite(Number(scale))) ? 1 : Number(scale);
+  const u = (upliftRate === undefined || upliftRate === null || !isFinite(Number(upliftRate))) ? 0.05 : Number(upliftRate);
   const rows = nums.monthly.map((m, i) => {
     const base = points && points[i] !== null ? points[i] : m.p50;
-    const adopted = base === null ? 0 : Math.round(base);
-    return { row: 29 + i, adopted: adopted, uplift: Math.round(adopted * APP_BUDGET_DUMMY_UPLIFT) };
+    const adopted = base === null ? 0 : Math.round(base * s);
+    return { row: 29 + i, adopted: adopted, uplift: Math.round(adopted * u) };
   });
   return { rows: rows, usedAi: !!points };
 }
 
+function appDummySeedEdit_(ctx, planId, action, args) {
+  return appPlanEdit_(ctx, { planId: planId, action: action, args: args, inputHash: appPlanInputHash_(planId) });
+}
+
+/** 1 計画へ、画面確認用の仮の担当者・人間入力・予算を書く（確定版は触らない。予測の月が無ければ予算だけ飛ばす） */
+function appSeedDummyOne_(ctx, plan, fy, index) {
+  const item = { planId: plan.plan_id, name: plan.client_label || '', did: [] };
+  let p = plan;
+  if (appPlanIsMeasure_(p)) {
+    appSetPlanPurpose_(ctx, { planId: p.plan_id, purpose: '' });
+    p = appReadTable_('PLANS').filter(x => x.plan_id === p.plan_id)[0] || p;
+    item.did.push('purpose');
+  }
+  const vers = appVersionRows_(p.plan_id);
+  if (vers.some(v => v.state === 'APPROVED')) return { skipped: Object.assign({ reason: 'official' }, item) };
+  if (!String(p.people_csv || '').trim()) {
+    appDummySeedEdit_(ctx, p.plan_id, 'SETUP.PEOPLE', { peopleCsv: appDummyPerson_(p) });
+    p = appReadTable_('PLANS').filter(x => x.plan_id === p.plan_id)[0] || p;
+    item.did.push('people');
+  }
+  const person = appDummyPerson_(p);
+  const ym = appDummyYm_(fy, index);
+  const step = appDummyPick_(APP_BUDGET_DUMMY_STEPS, index);
+  const conf = appDummyPick_(APP_BUDGET_DUMMY_CONF, index);
+  const kinds = [
+    ['client', { person: person, ym: ym, step: step, reason: '検証用の仮の動向', selfConf: conf }],
+    ['opinions', { person: person, ym: ym, step: appDummyPick_(APP_BUDGET_DUMMY_STEPS, index + 3),
+      conf: String(0.35 + (Math.abs(index) % 5) * 0.12), note: '検証用の仮の見解' }],
+    ['devspot', { person: person, ym: ym, project: '検証スポット' + String((Math.abs(index) % 9) + 1),
+      amount: 180000 + (Math.abs(index) % 8) * 70000, conf: String(0.4 + (Math.abs(index) % 4) * 0.15) }]
+  ];
+  kinds.forEach(pair => {
+    if (appDummyKindRows_(p.plan_id, pair[0]).length) return;
+    try {
+      appDummySeedEdit_(ctx, p.plan_id, 'INPUT.SAVE', { kind: pair[0], fromRows: true, rows: [pair[1]] });
+      item.did.push(pair[0]);
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      if (!/シートがありません/.test(msg)) throw e;
+      Logger.log('仮入力を飛ばす: ' + pair[0] + ' ' + msg);
+    }
+  });
+  const months = appBudgetStoredMonths_(p.plan_id);
+  if (!months.length) return { skipped: Object.assign({ reason: 'no_forecast' }, item) };
+  if (appBudgetEdited_(months)) return { filled: Object.assign({ skippedBudget: 'edited' }, item) };
+  const dummy = appDummyBudgetRows_(p.plan_id, appDummyPick_(APP_BUDGET_DUMMY_SCALES, index), appDummyPick_(APP_BUDGET_DUMMY_UPLIFT, index));
+  if (!dummy) return { skipped: Object.assign({ reason: 'no_forecast' }, item) };
+  appDummySeedEdit_(ctx, p.plan_id, 'BUDGET.SAVE', { rows: dummy.rows, basis: 'MANUAL', alloc: 'MANUAL' });
+  item.did.push('budget');
+  return { filled: Object.assign({ usedAi: dummy.usedAi }, item) };
+}
+
+/** apiOwnerTask の続き（仮予算の残り）。この入口への時間トリガーだけを足す・片付ける */
+function appDummySeedTriggers_() {
+  try {
+    return (ScriptApp.getProjectTriggers() || []).filter(t => {
+      try { return t.getHandlerFunction() === 'apiOwnerTask'; } catch (e) { return false; }
+    });
+  } catch (e) { return []; }
+}
+function appDummySeedSchedule_() {
+  try {
+    appDummySeedTriggers_().forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (e) { /* 残っても次で消す */ } });
+    ScriptApp.newTrigger('apiOwnerTask').timeBased().after(APP_BUDGET_DUMMY_CONTINUE_MS).create();
+  } catch (e) {
+    Logger.log('仮予算の続きの予約: ' + (e && e.message ? e.message : e));
+  }
+}
+function appDummySeedClearSchedule_() {
+  try { appDummySeedTriggers_().forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (e) { /* 無い */ } }); }
+  catch (e) { /* テストや権限の無いときは何もしない */ }
+}
+
 /**
- * 今の年度（または fy）の、予算を立てる計画へ仮予算を書く（所有者。手で直した跡・承認済みの確定版は触らない）。
- * 予測の月が無い計画は飛ばす。時間切れなら remaining に残す（もう一度実行する）
+ * 今の年度（または fy）の計画を、画面確認用の「予算策定した状態」にする（所有者。検証用。確定版は触らない）。
+ * 測る専用の印は外す。担当者が無ければ仮の名前。人間入力が無ければ動向・見解・スポットを 1 行ずつ。
+ * 予測の月があれば仮予算（AI の月次予測があればそれ）。時間切れなら remaining に残し、OWNER_TASK を残して続く。
  */
 function appSeedDummyBudgets_(ctx, fy) {
   const y = fy === undefined || fy === null || fy === '' ? appFy_(new Date()) : Number(fy);
   appRequireOpenYear_(y);
-  const plans = appReadTable_('PLANS').filter(p => String(p.fy) === String(y) && p.state !== 'ARCHIVED')
+  let plans = appReadTable_('PLANS').filter(p => String(p.fy) === String(y) && p.state !== 'ARCHIVED')
     .sort((a, b) => String(a.client_label || '').localeCompare(String(b.client_label || ''), 'ja') || String(a.plan_id).localeCompare(String(b.plan_id)));
   const out = { fy: y, filled: [], skipped: [], failed: [], remaining: [] };
   const t0 = new Date().getTime();
   let stop = false;
-  plans.forEach(p => {
+  plans.forEach((p, i) => {
     const item = { planId: p.plan_id, name: p.client_label || '' };
     if (stop) { out.remaining.push(item); return; }
     if (new Date().getTime() - t0 > APP_BUDGET_DUMMY_TIME_MS) { stop = true; out.remaining.push(item); return; }
-    if (appPlanIsMeasure_(p)) { out.skipped.push(Object.assign({ reason: 'measure' }, item)); return; }
-    const vers = appVersionRows_(p.plan_id);
-    if (vers.some(v => v.state === 'APPROVED')) { out.skipped.push(Object.assign({ reason: 'official' }, item)); return; }
-    const months = appBudgetStoredMonths_(p.plan_id);
-    if (!months.length) { out.skipped.push(Object.assign({ reason: 'no_forecast' }, item)); return; }
-    if (appBudgetEdited_(months)) { out.skipped.push(Object.assign({ reason: 'edited' }, item)); return; }
-    const dummy = appDummyBudgetRows_(p.plan_id);
-    if (!dummy) { out.skipped.push(Object.assign({ reason: 'no_forecast' }, item)); return; }
     try {
-      appPlanEdit_(ctx, { planId: p.plan_id, action: 'BUDGET.SAVE',
-        args: { rows: dummy.rows, basis: 'MANUAL', alloc: 'MANUAL' }, inputHash: appPlanInputHash_(p.plan_id) });
-      out.filled.push(Object.assign({ usedAi: dummy.usedAi }, item));
+      const r = appSeedDummyOne_(ctx, p, y, i);
+      if (r.filled) out.filled.push(r.filled);
+      else if (r.skipped) out.skipped.push(r.skipped);
     } catch (e) {
       out.failed.push(Object.assign({ error: String(e && e.message ? e.message : e).slice(0, 160) }, item));
     }
   });
+  if (out.remaining.length) appDummySeedSchedule_();
+  else appDummySeedClearSchedule_();
   return out;
 }
