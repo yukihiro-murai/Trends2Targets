@@ -852,8 +852,64 @@ function busy(delta){
 /** 読むだけの入口（同時に呼んでよい。load() に渡せるのもこれだけ）。それ以外は書き込みで、終わるまで次の書き込みを受け付けない */
 var READS = { apiHome: 1, apiPortfolio: 1, apiListPlans: 1, apiForecastLatest: 1, apiPlanView: 1, apiForecastBasis: 1, apiVersionList: 1, apiLearningView: 1, apiJobStatus: 1, apiCrossMaker: 1, apiPeopleLearning: 1, apiAiLearning: 1, apiBudgetProposal: 1, apiForecastPage: 1 };
 /**
+ * google.script.run の共通入口。読む処理は時間が来たら打ち切り、一時的な通信の失敗は 1 回だけやり直す。
+ * 書く処理はやり直さない（二重保存を避ける）。CALL_TO はテストで短くできる
+ */
+var CALL_TO = 45000;
+var CALL_WRITE_TO = 90000;
+var CALL_RETRY_MS = 700;
+function gsRun(fn, args, onOk, onFail, opt){
+  opt = opt || {};
+  var write = !!opt.write;
+  var timeout = opt.timeout != null ? opt.timeout : (write ? CALL_WRITE_TO : CALL_TO);
+  var retriesLeft = write || opt.retry === false ? 0 : 1;
+  var token = { n: 0, done: false, timer: 0 };
+  function finish(res, err){
+    if (token.done) return;
+    token.done = true;
+    if (token.timer) { try { clearTimeout(token.timer); } catch (x) {} token.timer = 0; }
+    if (err) { if (onFail) onFail(err); }
+    else if (onOk) onOk(res);
+  }
+  function fire(res, err, n){
+    if (token.done || n !== token.n) return;
+    if (err && retriesLeft > 0 && isTransientErr(err)) {
+      retriesLeft--;
+      token.n++;   // 打ち切りの時計と、遅れて届く前の応答を無効にする（clearTimeout が効かない試験でも）
+      if (token.timer) { try { clearTimeout(token.timer); } catch (x) {} }
+      token.timer = setTimeout(launch, CALL_RETRY_MS);
+      return;
+    }
+    finish(res, err);
+  }
+  function launch(){
+    var n = ++token.n;
+    if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) {
+      fire(null, { message: 'NetworkError: offline' }, n);
+      return;
+    }
+    if (timeout > 0) {
+      token.timer = setTimeout(function(){ fire(null, { message: '通信が時間内に終わりませんでした' }, n); }, timeout);
+    }
+    var r = google.script.run
+      .withSuccessHandler(function(res){ fire(res, null, n); })
+      .withFailureHandler(function(e){ fire(null, e, n); });
+    // 入口の無いサーバー（古い版）は同期で投げる。呼び出し側の try が「画面を読み直してください」を出す
+    if (typeof r[fn] !== 'function') {
+      token.done = true;
+      if (token.timer) { try { clearTimeout(token.timer); } catch (x) {} token.timer = 0; }
+      throw new Error('入口が見つかりません');
+    }
+    try { r[fn].apply(r, args || []); }
+    catch (e) { fire(null, e, n); }
+  }
+  launch();
+  return token;
+}
+/**
  * サーバーの api* を呼ぶ。失敗は通知に出す（入力は消さない）。
  * fail が false を返したときは通知を出さない（読み込みの失敗は、その場所に理由と「もう一度読み込む」を出す: load()）
+ * ok が false を返したときは描き直さない（届く前に別の読み込みへ移った応答）
  */
 var writeT = null;
 function call(fn, args, ok, fail){
@@ -866,10 +922,17 @@ function call(fn, args, ok, fail){
   }
   var end = function(){ if (write) { S.writing = false; S.writeShow = false; clearTimeout(writeT); } };
   busy(1);
-  var r = google.script.run
-    .withSuccessHandler(function(res){ end(); busy(-1); if (ok) ok(res); render(); })
-    .withFailureHandler(function(e){ end(); busy(-1); refreshJobBox(); var quiet = fail ? fail(e) === false : false; if (!quiet) toast((e && e.message) || String(e), true); });
-  r[fn].apply(r, args || []);
+  gsRun(fn, args, function(res){
+    end(); busy(-1);
+    var skip = false;
+    try { if (ok) skip = ok(res) === false; }
+    catch (e) { try { console.error(e); } catch (x) {} toast(errText((e && e.message) || e), true); }
+    if (!skip) render();
+  }, function(e){
+    end(); busy(-1); refreshJobBox();
+    var quiet = fail ? fail(e) === false : false;
+    if (!quiet) toast((e && e.message) || String(e), true);
+  }, { write: write, retry: !write });
 }
 
 // ---- 読み込み（どの画面もこれを使う。失敗しても「観測中…」のままにせず、繰り返し呼び直さない） ----
@@ -884,7 +947,7 @@ function load(key, fn, args, onOk, tag){
   if (typeof fn === 'string' && !READS[fn]) throw new Error('load() は読むだけの入口に使います: ' + fn);
   var t = { loading: true, start: Date.now(), tag: tag };
   S.ld[key] = t;
-  var ok = function(r){ if (S.ld[key] !== t) return; S.ld[key] = { at: t.stale ? 0 : Date.now(), ms: Date.now() - t.start, tag: tag }; if (onOk) onOk(r); };
+  var ok = function(r){ if (S.ld[key] !== t) return false; S.ld[key] = { at: t.stale ? 0 : Date.now(), ms: Date.now() - t.start, tag: tag }; if (onOk) onOk(r); };
   var fail = function(e){ if (S.ld[key] !== t) return false; S.ld[key] = { error: errText((e && e.message) || String(e)), at: Date.now() }; render(); return false; };
   if (typeof fn === 'function') fn(ok, fail); else call(fn, args || [], ok, fail);
 }
@@ -914,6 +977,22 @@ function ldFresh(key, ms){ var x = S.ld[key]; return !!(x && !x.loading && !x.er
 var LD_KEEP = 600000;
 /** 画面・タブを開いたときに読むか: 中身が無い（has が偽）・10 分より古い・古いの印・失敗のとき。読み込み中は重ねて読まない（「もう一度読み込む」は読む関数を直接呼ぶ） */
 function ldNeed(key, has){ return !ldBusy(key) && !(has && ldFresh(key, LD_KEEP)); }
+/** 通信の切れで失敗した印か（画面に戻ったとき・オンラインに戻ったときに読み直す） */
+function ldTransient(key){ var x = S.ld[key]; return !!(x && x.error && /通信が途中|時間内に終わり/.test(x.error)); }
+function ldRetryVisible(){
+  if (S.writing || S.job || S.starting) return;
+  var v = S.view;
+  if (v === 'home' && ldTransient('home')) homeLoad();
+  else if ((v === 'makers' || v === 'budgets') && ldTransient('mk')) mkLoad();
+  else if (fcView(v) && (ldTransient('fcLatest') || ldTransient('fcView') || ldTransient('fcBasis') || ldTransient('fcLearn') || ldTransient('fcVer'))) fcRetry();
+  else if (v === 'analysis' && ldTransient('an')) anLoad();
+  else if (v === 'learning') { if (ldTransient('lrPeople')) lrLoad('people'); if (ldTransient('lrAi')) lrLoad('ai'); }
+}
+(function(){
+  function kick(){ try { if (typeof document === 'undefined' || !document.hidden) ldRetryVisible(); } catch (e) { /* 起動直後でも落とさない */ } }
+  if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('online', kick);
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('visibilitychange', function(){ if (!document.hidden) kick(); });
+})();
 /**
  * 先読み（ほかの画面の中身を、今の画面が待っていない間に 1 つずつ裏で読む。2026-10-13 村井さん「読み込みが遅すぎる」）。
  * load と同じ読み込みの印（S.ld[key]）を付けるので、その画面を開いたときに重ねて読まない。届いても、その画面（view）を見ているときだけ描き直す
@@ -932,9 +1011,14 @@ function preNext(){
   S.ld[key] = t; S.preBusy = true;
   var fin = function(){ S.preBusy = false; if (S.view === j[4]) render(); S.preT = setTimeout(preNext, 200); };
   try {
-    google.script.run.withSuccessHandler(function(r){ if (S.ld[key] === t) { S.ld[key] = { at: t.stale ? 0 : Date.now(), ms: Date.now() - t.start }; j[3](r); } fin(); })
-      .withFailureHandler(function(){ if (S.ld[key] === t) delete S.ld[key]; fin(); })[fn].apply(null, j[2] || []);
-  } catch (e) { if (S.ld[key] === t) delete S.ld[key]; S.preBusy = false; }
+    gsRun(fn, j[2] || [], function(r){
+      if (S.ld[key] === t) { S.ld[key] = { at: t.stale ? 0 : Date.now(), ms: Date.now() - t.start }; j[3](r); }
+      fin();
+    }, function(){
+      if (S.ld[key] === t) delete S.ld[key];
+      fin();
+    }, { retry: true });
+  } catch (e) { if (S.ld[key] === t) delete S.ld[key]; fin(); }
 }
 
 // ---- 時間のかかる処理（裏で動かし、数秒ごとに状態を尋ねる。通信が長く続いて切れるのを避ける） ----
@@ -1016,7 +1100,7 @@ function pollJob(){
   if (!j) return;
   // 処理が終わった・止まった: 中身が変わったかもしれないので、読んだ中身の控えを古いとみなす（次に開いたとき読み直す）
   var done = function(){ S.job = null; busy(0); crossStale(); refreshJobBox(); };
-  google.script.run.withSuccessHandler(function(st){
+  gsRun('apiJobStatus', [{ jobId: j.id }], function(st){
     if (!S.job || S.job.id !== j.id) return;
     if (st.jobId && st.jobId !== j.id) { j.id = st.jobId; j.kind = st.kind || j.kind; }   // 終わった続きの処理は、サーバーがたどって返す
     if (st.status === 'CONTINUED') { j.id = st.nextJobId; j.kind = st.nextKind || j.kind; j.status = 'QUEUED'; busy(0); setTimeout(pollJob, 3000); return; }
@@ -1025,12 +1109,12 @@ function pollJob(){
     j.status = st.status; j.fails = 0; busy(0);
     if ($('jobBox')) $('jobBox').innerHTML = jobBanner();   // 進みの表示だけを新しくする（入力中の欄を消さない）
     setTimeout(pollJob, 3000);
-  }).withFailureHandler(function(e){
+  }, function(e){
     if (!S.job || S.job.id !== j.id) return;
     j.fails++;
     if (j.fails >= 5) { done(); jobFail(j.kind, { status: 'LOST', error: (e && e.message) || String(e) }, j.payload); toast('処理の状態を確かめられません。画面を読み直して、処理が終わったか確かめてください。', true); try { console.error(e); } catch (x) { /* コンソールが無い */ } return; }
     setTimeout(pollJob, 5000);   // 一時的な通信の失敗は、少し待って尋ね直す（処理は裏で続いている）
-  }).apiJobStatus({ jobId: j.id });
+  }, { retry: true, timeout: 20000 });
 }
 
 // ---- 画面の切り替え（メニュー: ホーム・メーカー・予測・分析・学び。使える人は全員同じ。管理の画面は外した。2026-10-06 村井さん） ----
@@ -1110,31 +1194,47 @@ function focusRestore(f){
   } catch (e) { /* 選び直せなくても描き直しは続ける */ }
 }
 function render(){
-  var fk = focusSave();
-  var nav = navItems();
-  $('nav').innerHTML = nav.map(function(n){
-    var sep = NAV_SEP[n[0]] ? '<div class="navsep">' + NAV_SEP[n[0]] + '</div>' : '';
-    return sep + '<button type="button" class="navbtn' + (S.view === n[0] ? ' on' : '') + '"' + (S.view === n[0] ? ' aria-current="page"' : '') + ' onclick="go(\'' + n[0] + '\')">' + (NAV_ICON[n[0]] || NAV_ICON.home) + '<span>' + n[1] + '</span></button>';
-  }).join('');
-  // スマホの下のメニューは横に送るので、今の画面の項目を見える所へ（縦には動かさない）
-  try { var onBtn = $('nav').querySelector('.navbtn.on'); if (onBtn && window.innerWidth <= 760 && onBtn.scrollIntoView) onBtn.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch (e) { /* 送れなくても描く */ }
-  var v = { home: viewHome, makers: viewMakers, budgets: viewBudgets, prep: viewForecast, forecast: viewForecast, tri: viewForecast, budget: viewForecast, analysis: viewAnalysis, learning: viewLearning }[S.view] || viewHome;
-  // 知らせ（エラー・裏の処理の進み）は、画面の見出しのすぐ下に出す（見出しの位置をどの画面でもそろえる）
-  var body = v();
-  var m = body.match(/^(<div class="page-head">[\s\S]*?<\/h1>[\s\S]*?<\/div>|<h1>[\s\S]*?<\/h1>)/);
-  var head = m ? m[0] : '';
-  var vt = viewTitle(head);
-  $('hdrTools').innerHTML = headerTools(vt.tools);
-  $('main').innerHTML = vt.title + errorBanner() + '<div id="jobBox">' + jobBanner() + '</div>' + body.slice(head.length);
-  tipFocus($('main'));
-  // 画面の中のタブが入りきらず横に送るときは、選んだタブが見える所まで送る（縦には動かさない）
-  var on = document.querySelector('#main .tabs .tab.on'), tb = on && on.parentElement;
-  if (tb && tb.scrollWidth > tb.clientWidth + 1 && on.getBoundingClientRect) {
-    var r = on.getBoundingClientRect(), pr = tb.getBoundingClientRect();
-    if (r.right > pr.right) tb.scrollLeft += r.right - pr.right + 8; else if (r.left < pr.left) tb.scrollLeft -= pr.left - r.left + 8;
+  if (S._rendering) { S._rerender = true; return; }
+  S._rendering = true;
+  S._rerender = false;
+  try {
+    var fk = focusSave();
+    var nav = navItems();
+    var navEl = $('nav');
+    if (navEl) navEl.innerHTML = nav.map(function(n){
+      var sep = NAV_SEP[n[0]] ? '<div class="navsep">' + NAV_SEP[n[0]] + '</div>' : '';
+      return sep + '<button type="button" class="navbtn' + (S.view === n[0] ? ' on' : '') + '"' + (S.view === n[0] ? ' aria-current="page"' : '') + ' onclick="go(\'' + n[0] + '\')">' + (NAV_ICON[n[0]] || NAV_ICON.home) + '<span>' + n[1] + '</span></button>';
+    }).join('');
+    // スマホの下のメニューは横に送るので、今の画面の項目を見える所へ（縦には動かさない）
+    try { var onBtn = navEl && navEl.querySelector('.navbtn.on'); if (onBtn && window.innerWidth <= 760 && onBtn.scrollIntoView) onBtn.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch (e) { /* 送れなくても描く */ }
+    var v = { home: viewHome, makers: viewMakers, budgets: viewBudgets, prep: viewForecast, forecast: viewForecast, tri: viewForecast, budget: viewForecast, analysis: viewAnalysis, learning: viewLearning }[S.view] || viewHome;
+    // 知らせ（エラー・裏の処理の進み）は、画面の見出しのすぐ下に出す（見出しの位置をどの画面でもそろえる）
+    var body;
+    try { body = v(); }
+    catch (e) {
+      try { console.error(e); } catch (x) {}
+      body = '<div class="card alert" role="alert"><p class="err-text">この画面を表示できませんでした</p><p class="note">' + esc(errText((e && e.message) || e)) + '</p></div>';
+    }
+    var m = String(body || '').match(/^(<div class="page-head">[\s\S]*?<\/h1>[\s\S]*?<\/div>|<h1>[\s\S]*?<\/h1>)/);
+    var head = m ? m[0] : '';
+    var vt = viewTitle(head);
+    var toolsEl = $('hdrTools');
+    if (toolsEl) toolsEl.innerHTML = headerTools(vt.tools);
+    var mainEl = $('main');
+    if (mainEl) mainEl.innerHTML = vt.title + errorBanner() + '<div id="jobBox">' + jobBanner() + '</div>' + String(body || '').slice(head.length);
+    tipFocus($('main'));
+    // 画面の中のタブが入りきらず横に送るときは、選んだタブが見える所まで送る（縦には動かさない）
+    var on = document.querySelector('#main .tabs .tab.on'), tb = on && on.parentElement;
+    if (tb && tb.scrollWidth > tb.clientWidth + 1 && on.getBoundingClientRect) {
+      var r = on.getBoundingClientRect(), pr = tb.getBoundingClientRect();
+      if (r.right > pr.right) tb.scrollLeft += r.right - pr.right + 8; else if (r.left < pr.left) tb.scrollLeft -= pr.left - r.left + 8;
+    }
+    if (S.jobScroll) { S.jobScroll = false; jobBoxIntoView(); }
+    focusRestore(fk);
+  } finally {
+    S._rendering = false;
+    if (S._rerender) render();
   }
-  if (S.jobScroll) { S.jobScroll = false; jobBoxIntoView(); }
-  focusRestore(fk);
 }
 /** 裏で動いている処理の進み（画面の上にも出す） */
 function jobBanner(){
@@ -1290,7 +1390,7 @@ function plainMsg(s){
  * エラーの知らせ・エラーの欄・読み込みの失敗に出す文。プログラムの例外（英語の TypeError など）は中身を見せず、元の文はコンソールに残す。
  * 通信が切れたときは、待ってやり直すよう言う。ほかは plainMsg（旧来の番号・表の名前をふつうの言葉に）
  */
-var NET_ERR = /NetworkError|Failed to fetch|HTTP 50\d|ネットワーク/;
+var NET_ERR = /NetworkError|Failed to fetch|HTTP 50\d|HTTP 429|ネットワーク|時間内に終わり|Too many simultaneous|invoked too many times|Exceeded maximum execution|We're sorry|server error occurred|Service unavailable|timed out|Timeout|ECONNRESET|ERR_NETWORK|ERR_CONNECTION|offline/i;
 var RAW_ERR = /^(Uncaught\s+)?(TypeError|ReferenceError|RangeError|SyntaxError|InternalError|Exception|ScriptError)\b|Cannot read propert|is not a function|is not defined|undefined is not|of undefined|of null\b/;
 function errText(s){
   s = String(s == null ? '' : s);
@@ -1298,6 +1398,11 @@ function errText(s){
   if (NET_ERR.test(s)) return '通信が途中で切れました。少し待って、もう一度試してください（裏の処理は続いていることがあります）。';
   if (RAW_ERR.test(s)) return '思いがけないエラーで止まりました。もう一度試し、続くときは管理者に知らせてください。';
   return plainMsg(s);
+}
+/** 一時的な通信の失敗か（読み直しの対象。権限や入力の誤りは含めない） */
+function isTransientErr(e){
+  var s = String((e && e.message) || e || '');
+  return !s || NET_ERR.test(s);
 }
 /**
  * 旧来の計算が予測の前に確かめる文（極端な入力）を、画面の言葉とボタンの名前に直す（旧来の計算は変えない）。
@@ -2692,12 +2797,17 @@ function fcSecData(force, more){
 function fcFetch(planId, parts){
   var ts = {}, now = Date.now();
   parts.forEach(function(p){ ts[p] = { loading: true, start: now, tag: planId }; S.ld[FC_PARTS[p][0]] = ts[p]; });
-  call('apiForecastPage', [{ planId: planId, parts: parts }], function(r){ fcApply(planId, r || {}, ts); }, function(e){
+  fcSlowKick();
+  // 先読みが同じ計画を通信中なら、その応答を使う（重ねて読まない。先読みの失敗は fcPreNext が印を付ける）
+  if (S.fcPreBusy && S.fcPreId === planId) return;
+  call('apiForecastPage', [{ planId: planId, parts: parts }], function(r){
+    fcApply(planId, r || {}, ts);
+    if (S.fc.planId !== planId) return false;
+  }, function(e){
     var msg = errText((e && e.message) || String(e));
     parts.forEach(function(p){ var k = FC_PARTS[p][0]; if (S.ld[k] === ts[p]) S.ld[k] = { error: msg, at: Date.now() }; });
     render(); return false;
   });
-  fcSlowKick();
 }
 /** 届いた中身を入れる（ts: 中身ごとの読み込みの印。印が変わっていれば、その中身はもう待っていない）。届いた中身は先読みの控えにも入れる */
 function fcApply(planId, r, ts){
@@ -2727,7 +2837,7 @@ function fcMemUse(planId, p){
 }
 /**
  * 先読み: 見ている年度のメーカーの中身を、画面が待っていない間に 1 つずつ読んで控える（メーカーを切り替えたときに待たない）。
- * ホームを開いたときは、予測を開いたときに出る最初のメーカーを読む。通信は google.script.run を直接使い、画面は描き直さない（選ぶ欄を開いている間に閉じない）。
+ * ホームを開いたときは、予測を開いたときに出る最初のメーカーを読む。通信は gsRun（画面は描き直さない。選ぶ欄を開いている間に閉じない）。
  * ほかの通信の途中・保存の途中・処理の途中は待つ。失敗しても何も出さない（開いたときに読む）
  */
 var FC_PRE_MAX = 12;
@@ -2745,21 +2855,35 @@ function fcPreNext(){
   var busyNow = Object.keys(FC_PARTS).some(function(p){ var x = S.ld[FC_PARTS[p][0]]; return x && x.loading && x.tag === id; });
   if (fresh || busyNow) { S.fcPreT = setTimeout(fcPreNext, 0); return; }
   S.fcPreBusy = true;
+  S.fcPreId = id;
   var gen = S.fcMemGen;
-  var done = function(){ S.fcPreBusy = false; S.fcPreT = setTimeout(fcPreNext, 300); };
+  var done = function(){ S.fcPreBusy = false; S.fcPreId = ''; S.fcPreT = setTimeout(fcPreNext, 300); };
+  var applyOpen = function(r){
+    if (S.fc.planId !== id) return;
+    var ts = {};
+    Object.keys(FC_PARTS).forEach(function(p){ var x = S.ld[FC_PARTS[p][0]]; if (x && x.loading && x.tag === id) ts[p] = x; });
+    if (Object.keys(ts).length) { fcApply(id, r, ts); if (fcView()) render(); }
+  };
   try {
-    google.script.run.withSuccessHandler(function(r){
+    gsRun('apiForecastPage', [{ planId: id }], function(r){
       if (gen === S.fcMemGen && r) {
         fcMemPut(id, r);
         // 先読みの途中でそのメーカーを開いていたら（まだ読み込み中なら）、届いた中身をそのまま使う
-        if (S.fc.planId === id) {
-          var ts = {};
-          Object.keys(FC_PARTS).forEach(function(p){ var x = S.ld[FC_PARTS[p][0]]; if (x && x.loading && x.tag === id) ts[p] = x; });
-          if (Object.keys(ts).length) { fcApply(id, r, ts); if (fcView()) render(); }
-        }
+        applyOpen(r);
       }
       done();
-    }).withFailureHandler(done).apiForecastPage({ planId: id });
+    }, function(e){
+      if (S.fc.planId === id) {
+        var msg = errText((e && e.message) || String(e) || '読み込めませんでした');
+        var hit = false;
+        Object.keys(FC_PARTS).forEach(function(p){
+          var k = FC_PARTS[p][0], x = S.ld[k];
+          if (x && x.loading && x.tag === id) { S.ld[k] = { error: msg, at: Date.now() }; hit = true; }
+        });
+        if (hit && fcView()) render();
+      }
+      done();
+    }, { retry: true });
   } catch (e) { done(); }
 }
 /** 見ている年度のほかのメーカーを先読みする（予測の画面を開いて中身が出た後） */
@@ -5886,10 +6010,11 @@ function lrLandingCard(x){
 // ==== END REGION: LEARNING ====
 
 // ---- 起動（区切りの外。最後に置く） ----
-render();
+try { render(); }
+catch (e) { try { console.error(e); } catch (x) {} }
 if (B.setUp && B.allowed && !B.home) homeLoad();   // 初期データにホームの中身が無ければ読む（失敗したらホームに理由と「もう一度読み込む」）
 else if (B.home) S.ld.home = { at: Date.now(), ms: 0 };   // 初期データのホームは、今読んだものとして控える（ほかの画面から戻ってもすぐには読み直さない。LD_KEEP）
-if (B.activeJob) { if (/^(PLAN\.(EDIT|RUN)|FORECAST\.RUN)/.test(B.activeJob.kind)) { if (B.activeJob.payload && B.activeJob.payload.planId) S.fc.planId = B.activeJob.payload.planId; go('forecast'); } render(); watchJob(B.activeJob); }
+if (B.activeJob) { if (/^(PLAN\.(EDIT|RUN)|FORECAST\.RUN)/.test(B.activeJob.kind)) { if (B.activeJob.payload && B.activeJob.payload.planId) S.fc.planId = B.activeJob.payload.planId; go('forecast'); } try { render(); } catch (e) { try { console.error(e); } catch (x) {} } watchJob(B.activeJob); }
 </script>
 </body>
 </html>
