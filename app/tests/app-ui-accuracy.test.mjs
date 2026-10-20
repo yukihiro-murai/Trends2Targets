@@ -58,20 +58,20 @@ const text = (html) => unesc(String(html).replace(/<[^>]*>/g, ' '));
   assert.equal(run('ACC_MIN_MONTHS'), Number(/^const AUTOLEARN_MIN_EVAL_MONTHS = (\d+);/m.exec(src)[1]));
   assert.deepEqual([0, 1, 2, 3, null, undefined].map((n) => run('accFew(__n)', { __n: n })), [false, true, true, false, false, false]);
 
-  // 振り返りの精度の天気: 1 か月だけ（外れ 50%・+100%）は霧にして「比べた月がまだ 1 か月」。強気とは言わない
+  // 振り返りの外れの水準: 1 か月だけ（外れ 50%・+100%）は未計測にして「比べた月がまだ 1 か月」。強気とは言わない
   const acc = (o) => Object.assign({ months: [], n: 1, leaks: 0, mape: 0.5, bias: 1, coverage: 0, coverageN: 1, trend: null }, o);
   const one = run('fcRvWeather(__a)', { __a: acc() });
-  assert.match(one, /aria-label="霧"/);
-  assert.ok(tips(one).includes('比べた月がまだ 1 か月（精度の天気と強気・弱気は 3 か月から決めます）'), '霧の決まりの代わり');
+  assert.match(one, /aria-label="未計測"/);
+  assert.ok(tips(one).includes('比べた月がまだ 1 か月（外れの水準と強気・弱気は 3 か月から決めます）'), '未計測の決まりの代わり');
   assert.match(text(one), /読みのクセ\s+まだ\s*1 か月/);
-  assert.doesNotMatch(text(one), /強気|弱気|台風/);
+  assert.doesNotMatch(text(one), /強気|弱気|台風|荒れ/);
   assert.ok(tips(one).some((t) => /^比べた月がまだ 1 か月です。強気・弱気は 3 か月から言います（今は \+100\.0%）\n読みのクセ = 予測の中心の合計 ÷ 実績の合計 − 1/.test(t)));
   // 3 か月あれば、今までどおり決める
   const three = run('fcRvWeather(__a)', { __a: acc({ n: 3, mape: 0.12, bias: 0.05, coverageN: 3 }) });
-  assert.match(three, /aria-label="晴れのち曇り"/);
+  assert.match(three, /aria-label="やや外れ"/);
   assert.match(text(three), /読みのクセ\s+強気\s*\+5\.0%/);
   // 月の数が分からない（0 か月の形）ときは今までどおり
-  assert.match(run('fcRvWeather(__a)', { __a: acc({ n: 0, mape: 0.12 }) }), /aria-label="晴れのち曇り"/);
+  assert.match(run('fcRvWeather(__a)', { __a: acc({ n: 0, mape: 0.12 }) }), /aria-label="やや外れ"/);
 
   // 読みのクセの定義をそろえる: 実績 50・150・100、予測 100・100・100（3 か月）
   //   計画の画面（サーバーの偏り）= Σw(予測 − 実績) ÷ Σw|実績|（新しい月ほど重い）、ホーム = 予測の合計 ÷ 実績の合計 − 1
@@ -90,39 +90,38 @@ const text = (html) => unesc(String(html).replace(/<[^>]*>/g, ' '));
   assert.doesNotMatch(text(h2), /強気です|弱気です/);
   assert.match(text(home([{ planId: 'P', clientName: 'A', forecastYtd: 300, actualYtd: 200, actualMonths: 3 }])), /予測は実績より 50\.0% 強気です/);
 
-  // ホームの精度の天気: 比べた月が 3 か月より少ないメーカーは入れない。どれも少なければ霧で「比べた月がまだ N か月」
+  // ホームの学び: 天気の名前は出さず外れ幅。比べた月が 3 か月より少ないメーカーは水準に入れない
   const fy = '2026';
   const card = (plans) => run('S.lr.ai = { health: [], pending: [] }; homeLearnCard(__h, __h.plans)', { __h: { fy, plans } });
   const c1 = card([{ planId: 'P1', clientName: '甲', fy, mape: 0.5, mapeMonths: 1 }, { planId: 'P2', clientName: '乙', fy, mape: 0.08, mapeMonths: 2 }]);
-  assert.match(c1, /<span class="t1">霧<\/span>/);
+  assert.match(c1, /<span class="k">外れ幅<\/span>/);
   assert.match(c1, /<span class="t2">比べた月がまだ 2 か月<\/span>/);
-  assert.ok(tips(c1).some((t) => t.startsWith('霧：比べた月がまだ 2 か月（精度の天気と強気・弱気は 3 か月から決めます）\n比べた月が 3 か月以上のメーカーがまだありません')));
+  assert.ok(tips(c1).some((t) => t.startsWith('未計測：比べた月がまだ 2 か月（外れの水準と強気・弱気は 3 か月から決めます）\n比べた月が 3 か月以上のメーカーがまだありません')));
   const c2 = card([{ planId: 'P1', clientName: '甲', fy, mape: 0.5, mapeMonths: 1 }, { planId: 'P2', clientName: '乙', fy, mape: 0.12, mapeMonths: 4 }]);
-  assert.match(c2, /<span class="t1">晴れのち曇り<\/span>/, '1 か月の 50% は入れない（入れると雨）');
-  assert.match(c2, /<span class="t2">外れ幅 12\.0%<\/span>/);
+  assert.match(c2, /<span class="t2">外れ幅 12\.0%<\/span>/, '1 か月の 50% は入れない（入れると大きく外れ）');
   assert.ok(tips(c2).some((t) => t.includes('外れ幅の平均 12.0%（1 メーカー。比べた月が 3 か月より少ない 1 メーカーは入れていません）')));
-  assert.match(card([{ planId: 'P2', clientName: '乙', fy, mape: 0.12 }]), /<span class="t1">晴れのち曇り<\/span>/, '月の数を返さないサーバーは今までどおり');
+  assert.match(card([{ planId: 'P2', clientName: '乙', fy, mape: 0.12 }]), /<span class="t2">外れ幅 12\.0%<\/span>/, '月の数を返さないサーバーは今までどおり');
 
   // AI の学びの精度の天気も同じ（ホームの中身から）
   const keepHome = run('B.home');
   try {
     run('B.home = __h', { __h: { fy, plans: [{ planId: 'P1', clientName: '甲', fy, mape: 0.5, mapeMonths: 1 }] } });
     const hero = run('lrAiHero(__d)', { __d: { health: [], timeline: [], pending: [] } });
-    assert.match(hero, /<span class="nm">霧<\/span><span class="v">比べた月がまだ 1 か月<\/span>/);
-    assert.match(hero, /<div class="bubble">比べた月がまだ 1 か月です。精度の天気は 3 か月から決めます。<\/div>/);
-    assert.ok(tips(hero).some((t) => t.startsWith('精度の天気「霧」: 比べた月がまだ 1 か月（精度の天気と強気・弱気は 3 か月から決めます）')));
+    assert.match(hero, /<span class="nm">未計測<\/span><span class="v">比べた月がまだ 1 か月<\/span>/);
+    assert.match(hero, /<div class="bubble">比べた月がまだ 1 か月です。外れの水準は 3 か月から決めます。<\/div>/);
+    assert.ok(tips(hero).some((t) => t.startsWith('外れの水準「未計測」: 比べた月がまだ 1 か月（外れの水準と強気・弱気は 3 か月から決めます）')));
     // ホームの中身に外れ幅が無く、全計画の推移の直近 3 か月が のべ 2 か月だけ
     run('B.home = __h', { __h: { fy, plans: [] } });
     assert.match(run('lrAiHero(__d)', { __d: { health: [], timeline: [{ ym: '2026/05', n: 2, mape: 0.4, rolling3: 0.4, rolling3N: 2 }], pending: [] } }), /<span class="v">比べた月がまだ 2 か月<\/span>/);
-    assert.match(run('lrAiHero(__d)', { __d: { health: [], timeline: [{ ym: '2026/05', n: 3, mape: 0.12, rolling3: 0.12, rolling3N: 3 }], pending: [] } }), /外れ幅は平均 12\.0%、精度の天気は「晴れのち曇り」です。/);
+    assert.match(run('lrAiHero(__d)', { __d: { health: [], timeline: [{ ym: '2026/05', n: 3, mape: 0.12, rolling3: 0.12, rolling3N: 3 }], pending: [] } }), /外れ幅は平均 12\.0%、外れの水準は「やや外れ」です。/);
   } finally { run('B.home = __h', { __h: keepHome }); }
 
-  // 分析: 比べた月が少ないメーカーは、天気は霧・向きは「まだ」
+  // 分析: 比べた月が少ないメーカーは、水準は未計測・向きは「まだ」
   const pl = (id, name, a) => ({ planId: id, clientName: name, fy, accuracy: Object.assign({ leaks: 0, coverage: null, coverageN: 0 }, a) });
   const plans = [pl('P1', '甲製薬', { mape: 0.6, bias: 0.6, n: 1 }), pl('P2', '乙製薬', { mape: 0.12, bias: -0.08, n: 5 })];
   const mape = run(`S.cv['an.mape'] = 'table'; anMapeCard(__p)`, { __p: plans });
-  assert.match(mape, /<td data-tip="霧：比べた月がまだ 1 か月（精度の天気と強気・弱気は 3 か月から決めます）"><span class="anwx"><span class="skych"[^>]*><\/span>霧<\/span><\/td><td class="num">1 か月<\/td>/);
-  assert.match(mape, /<span class="anwx"><span class="skych"[^>]*><\/span>晴れのち曇り<\/span>/);
+  assert.match(mape, /<td data-tip="未計測：比べた月がまだ 1 か月（外れの水準と強気・弱気は 3 か月から決めます）"><span class="anwx"><span class="skych"[^>]*><\/span>未計測<\/span><\/td><td class="num">1 か月<\/td>/);
+  assert.match(mape, /<span class="anwx"><span class="skych"[^>]*><\/span>やや外れ<\/span>/);
   assert.ok(tips(mape).includes('締まった月の、予測の中心と実績の差（向きは問わない）の合計 ÷ 実績の合計'));
   const bias = run(`S.cv['an.bias'] = 'table'; anBiasCard(__p)`, { __p: plans });
   assert.match(bias, /<td class="num">\+60\.0%<\/td><td data-tip="比べた月がまだ 1 か月（強気・弱気は 3 か月から言います）">まだ<\/td>/);

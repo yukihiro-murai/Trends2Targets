@@ -357,7 +357,7 @@ const VERSION_REFUSED = 'この計画では公式版を発行できません。'
   assert.doesNotMatch(stepsM, /k-bud|tri-bud/, '測る専用は最終予算の線を出さない');
   run('S.fc.ver = __r', { __r: env.call('apiVersionList(__in)', { __in: { planId: planM } }) });
   const verM = clean(run('fcVersionTab(S.fc.data, S.fc.view)'), '公式版（測る専用）');
-  assert.match(verM, /この計画では公式版を発行できません。/);
+  assert.match(verM, /この計画では確定版を発行できません。/);
   assert.doesNotMatch(verM, /verSubmit\(\)/);
   // 予算を立てる計画は今までどおり
   const A = fc(planA);

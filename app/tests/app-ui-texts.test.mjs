@@ -142,7 +142,7 @@ const OWNER_NOTE = 'owner-approved 2026-10-07 09:30: 自動の学びを止める
 {
   const basis = (learning, cal) => {
     const v = planView({ learning });
-    return tipOf(run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: v, __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied: null, calibration: cal } }), '自動補正');
+    return tipOf(run(`S.view = 'budget'; S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: v, __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied: null, calibration: cal } }), '自動補正');
   };
   const cal = { factor: 1, aiWeight: 0, aiMax: null, monthBias: {}, updatedAt: '2026-10-07T09:30:00+09:00', quarter: '' };
   const OFF = '\n自動の学びを止めているので、「補正を学び直す」と「見直しを反映」では変わりません';
@@ -168,7 +168,7 @@ const OWNER_NOTE = 'owner-approved 2026-10-07 09:30: 自動の学びを止める
   assert.match(run(`S.fc.view = __v; fcRvProposals({ title: '', period: '', reviewId: 'R-1', applied: false, logRecent: [], proposals: __p })`, { __v: planView(), __p: props }),
     /AI の効き<\/td><td class="num"[^>]*>0\.08%<\/td><td class="num"[^>]*>0\.04%<\/td>/);
   // 根拠の補正の説明
-  const tipLines = (w) => (/<p class="fc-say" data-tip="([^"]*)"/.exec(run(`S.fc.basis = __b; fcBasisTab(S.fc.data, S.fc.view)`,
+  const tipLines = (w) => (/<p class="fc-say" data-tip="([^"]*)"/.exec(run(`S.view = 'budget'; S.fc.basis = __b; fcBasisTab(S.fc.data, S.fc.view)`,
     { __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied: null, calibration: { factor: 1, aiWeight: w, aiMax: 0.05, monthBias: {}, updatedAt: '', quarter: '' } } })) || [])[1];
   assert.match(tipLines(0.0004), /AI の効き 0\.04%・上限 ±5%/);
   assert.match(tipLines(0), /AI の効き 0%・上限 ±5%/);
@@ -256,7 +256,7 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
   // ホーム: 外れ幅は「-」、説明で当たり具合を計算を案内する。精度の天気は霧
   const h = clean(run(`S.view = 'home'; B.home = __h; S.lr.ai = __ai; viewHome()`, { __h: home, __ai: ai }), 'ホーム');
   assert.match(h, /<div class="kpi"><div class="k">外れ幅<\/div><div class="v">-<\/div><\/div>/, '年度の数字は説明なし（2026-10-13）');
-  assert.match(h, /data-tip="霧：比べられる実績がまだない\n各計画の振り返りで「当たり具合を計算」を動かすと出ます\n[^"]*"[\s\S]*精度の天気[\s\S]*霧[\s\S]*比べる実績はまだです/);
+  assert.match(h, /data-tip="未計測：比べられる実績がまだない\n各計画の振り返りで「当たり具合を計算」を動かすと出ます\n[^"]*"[\s\S]*外れ幅[\s\S]*比べる実績はまだです/);
   // 分析: 外れ幅・読みのクセのカードは出さず、案内に当たり具合を計算を出す
   const a = clean(run(`S.view = 'analysis'; S.an.data = __a; viewAnalysis()`, { __a: an }), '分析');
   assert.match(a, /外れ幅・読みのクセ[^<]*は出していません。[^<]*各計画の振り返りで「当たり具合を計算」を動かすと/);
@@ -318,7 +318,7 @@ const anGuide = (plans, fy = '2026') => (/<span class="(?:t )?anmiss">([\s\S]*?)
     assert.match(run('lrAiHero({ health: [], timeline: [] })'), /<div class="bubble">まだ実績と比べた月がありません。当たり具合が計算されると、外れ幅がここに出ます。/);
     // ホーム: 外れ幅の箱・精度の天気の説明
     assert.match(run('homeKpis(__h, __h.plans)', { __h: home }), /<div class="kpi"><div class="k">外れ幅<\/div>/, '年度の数字は説明なし（2026-10-13）');
-    assert.match(run('S.lr.ai = { health: [], pending: [] }; homeLearnCard(__h, __h.plans)', { __h: home }), /data-tip="霧：比べられる実績がまだない\n当たり具合が計算されると出ます\n精度の推移は/);
+    assert.match(run('S.lr.ai = { health: [], pending: [] }; homeLearnCard(__h, __h.plans)', { __h: home }), /data-tip="未計測：比べられる実績がまだない\n当たり具合が計算されると出ます\n精度の推移は/);
     // 分析
     assert.equal(anGuide([AN_PLAN]), 'まだ数字がそろっていないため、外れ幅・読みのクセは出していません。当たり具合が計算されると、ここに出てきます。');
     // 見える文・説明のどこにも「当たり具合を計算」を動かすようには言わない
@@ -373,8 +373,8 @@ const anGuide = (plans, fy = '2026') => (/<span class="(?:t )?anmiss">([\s\S]*?)
   // ホームの学びの進み: 印が 1 種類ならその名前、比べた月が無ければ説明で出し方を言う
   const home = { fy, plans: [{ planId: 'P1', clientName: 'テスト製薬', fy, mape: null }] };
   const card = (health) => run('S.lr.ai = { health: __hl, pending: [] }; homeLearnCard(__h, __h.plans)', { __hl: health, __h: home });
-  assert.match(card([clamp]), /<span class="t1">台風<\/span><span class="t2">補正が限度（1 メーカー）<\/span>/);
-  assert.match(card([clamp]), /data-tip="台風：[^"\n]*\nまだ実績と比べたメーカーがありません。各計画の振り返りで「当たり具合を計算」を動かすと出ます\n荒れている印: 補正が上限か下限に張りついたメーカー 1\n/);
+  assert.match(card([clamp]), /<span class="t1">-<\/span><span class="t2">補正が限度（1 メーカー）<\/span>/);
+  assert.match(card([clamp]), /data-tip="荒れ：[^"\n]*\nまだ実績と比べたメーカーがありません。各計画の振り返りで「当たり具合を計算」を動かすと出ます\n荒れている印: 補正が上限か下限に張りついたメーカー 1\n/);
   assert.match(card([cov]), /<span class="t2">幅が狭すぎる（1 メーカー）<\/span>/);
   assert.match(card([clamp, cov]), /<span class="t2">荒れています（2 メーカー）<\/span>/);
   assert.match(card([]), /<span class="t2">比べる実績はまだです<\/span>/);
@@ -383,7 +383,7 @@ const anGuide = (plans, fy = '2026') => (/<span class="(?:t )?anmiss">([\s\S]*?)
 // ==== 11. 根拠の補正: 出している予測の補正と今の補正が違うとき（所有者が戻した直後など） ====
 {
   const cal = (applied, factor) => {
-    const html = run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
+    const html = run(`S.view = 'budget'; S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
       calibration: { factor, aiWeight: null, aiMax: null, monthBias: {}, updatedAt: '', quarter: '' } } });
     const m = /<h2>[^<]*補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
     return { tip: m[1], say: m[2] };
@@ -557,7 +557,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
 // ==== 20. 根拠の補正: 出している予測が使った月ごとの補正・今の補正が空 ====
 {
   const cal = (applied, factor, monthBias) => {
-    const html = run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
+    const html = run(`S.view = 'budget'; S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
       calibration: { factor, aiWeight: null, aiMax: null, monthBias: monthBias || {}, updatedAt: '', quarter: '' } } });
     const m = /<h2>[^<]*補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
     return { tip: m[1].split('\n'), say: m[2] };
@@ -612,7 +612,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
 // ==== 22. 根拠の補正: 倍率は同じで、月ごとの補正だけが違う（出している予測が使った分を言う） ====
 {
   const cal = (applied, factor, monthBias) => {
-    const html = run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
+    const html = run(`S.view = 'budget'; S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
       calibration: { factor, aiWeight: null, aiMax: null, monthBias: monthBias || {}, updatedAt: '', quarter: '' } } });
     const m = /<h2>[^<]*補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
     return { tip: m[1].split('\n'), say: m[2] };
@@ -698,14 +698,14 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   // ホームの精度の天気: 説明と見える短い言い方
   const card = (plans, health) => run('S.lr.ai = { health: __hl, pending: [] }; homeLearnCard(__h, __h.plans)', { __hl: health || [], __h: { fy, plans } });
   const c1 = card([zp]);
-  assert.match(c1, new RegExp('data-tip="霧：外れ幅を % で出せる月がまだない\\n' + ZERO2 + '\\n精度の推移は'), '霧の決まりは「比べられる実績がまだない」と言わない（28）');
+  assert.match(c1, new RegExp('data-tip="未計測：外れ幅を % で出せる月がまだない\\n' + ZERO2 + '\\n精度の推移は'), '未計測の決まりは「比べられる実績がまだない」と言わない（28）');
   assert.doesNotMatch(c1, /比べられる実績がまだない/);
   assert.match(c1, /<span class="t2">売上 0 円の月だけ<\/span>/);
   assert.doesNotMatch(c1, /当たり具合を計算|比べる実績はまだです/);
-  assert.match(card([zp, np]), new RegExp('data-tip="霧：外れ幅を % で出せる月がまだない\\n' + ZERO2 + 'ほかのメーカーは、各計画の振り返りで「当たり具合を計算」を動かすと出ます\\n'));
+  assert.match(card([zp, np]), new RegExp('data-tip="未計測：外れ幅を % で出せる月がまだない\\n' + ZERO2 + 'ほかのメーカーは、各計画の振り返りで「当たり具合を計算」を動かすと出ます\\n'));
   const clamp = { planId: 'P1', clientName: 'テスト製薬', fy, key: 'factor_clamp', label: '', value: 0.75 };
   const c2 = card([zp], [clamp]);
-  assert.match(c2, new RegExp('data-tip="台風：[^"\\n]*\\n' + ZERO2 + '\\n荒れている印'));
+  assert.match(c2, new RegExp('data-tip="荒れ：[^"\\n]*\\n' + ZERO2 + '\\n荒れている印'));
   assert.match(c2, /<span class="t2">補正が限度（1 メーカー）<\/span>/);
   assert.match(card([Object.assign({}, zp, { scoredMonths: undefined })]), /<span class="t2">比べる実績はまだです<\/span>/, '比べた月の数が無いサーバーは今までどおり');
 
@@ -740,7 +740,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
     const h1 = ai([zp]);
     assert.equal(bubbleOf(h1), ZERO2);
     assert.match(h1, /<span class="v">売上 0 円の月だけ<\/span>/);
-    assert.match(h1, new RegExp('data-tip="精度の天気「霧」: 外れ幅を % で出せる月がまだない\\n' + ZERO2 + '\\n荒れている'));
+    assert.match(h1, new RegExp('data-tip="外れの水準「未計測」: 外れ幅を % で出せる月がまだない\\n' + ZERO2 + '\\n荒れている'));
     assert.doesNotMatch(h1, /比べられる実績がまだない/);
     assert.equal(pose(h1), 'explain');
     assert.equal(bubbleOf(ai([zp, np])), ZERO2 + 'ほかのメーカーは、各計画の振り返りで「当たり具合を計算」を動かすと、外れ幅がここに出ます。');
@@ -868,10 +868,10 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   // (d) 年度が締まった（reach.done）: 届いたかどうかと実績の合計。届く金額・前提・（試し）は言わない
   const done = meta(tab({ aligned: aligned({ k: 12, done: true, p10: null, p90: null }), reach: reach({ done: true, actual: 121e6, k: 12 }) }));
   assert.equal(done.say, 'この予算に届きました（実績の合計 1.2億円）');
-  assert.deepEqual(done.tip, ['今の最終予算 120,000,000 円 に届きました', '実績の合計 121,000,000 円（締まった 12 か月）', '承認済みの公式版（v2）の最終予算 118,000,000 円 には届きました']);
+  assert.deepEqual(done.tip, ['今の最終予算 120,000,000 円 に届きました', '実績の合計 121,000,000 円（締まった 12 か月）', '承認済みの確定版（v2）の最終予算 118,000,000 円 には届きました']);
   const miss = meta(tab({ reach: reach({ done: true, actual: 119e6, k: 12 }) }));
   assert.equal(miss.say, 'この予算に届きませんでした（実績の合計 1.2億円）');
-  assert.deepEqual(miss.tip.slice(0, 3), ['今の最終予算 120,000,000 円 に届きませんでした', '実績の合計 119,000,000 円（締まった 12 か月）', '承認済みの公式版（v2）の最終予算 118,000,000 円 には届きました']);
+  assert.deepEqual(miss.tip.slice(0, 3), ['今の最終予算 120,000,000 円 に届きませんでした', '実績の合計 119,000,000 円（締まった 12 か月）', '承認済みの確定版（v2）の最終予算 118,000,000 円 には届きました']);
   [done, miss].forEach((x) => assert.doesNotMatch(x.say + x.tip.join('\n'), /届く見込み|% の金額|前提|試し/));
   // done が無いサーバー: 12 か月の実績がそろった・締め済みの年度なら同じ（実績の合計は締まった月の合計）
   assert.equal(meta(tab({ reach: reach({ k: 12, actualYtd: 125e6 }) })).say, 'この予算に届きました（実績の合計 1.3億円）');
@@ -892,12 +892,12 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   assert.equal(run(`accRuleZ('taifuu', true)`), run(`accRule('taifuu')`), '霧のほかは今までどおり');
   // 外れ幅のあるメーカーがあれば、売上 0 円のメーカーがあっても霧にならない（決まりも今までどおり）
   const fy = '2026', home = { fy, plans: [{ planId: 'P1', clientName: 'テスト製薬', fy, mape: null, scoredMonths: 2 }, { planId: 'P2', clientName: '別の製薬', fy, mape: 0.12, scoredMonths: 3 }] };
-  assert.match(run('S.lr.ai = { health: [], pending: [] }; homeLearnCard(__h, __h.plans)', { __h: home }), /data-tip="晴れのち曇り：外れ幅が 10〜15%\n外れ幅の平均 12\.0%（1 メーカー）/);
+  assert.match(run('S.lr.ai = { health: [], pending: [] }; homeLearnCard(__h, __h.plans)', { __h: home }), /data-tip="やや外れ：外れ幅が 10〜15%\n外れ幅の平均 12\.0%（1 メーカー）/);
 }
 
 // ==== 29. 根拠「前回の予測からの変化」: 理由は changeCause から（日付は言わない） ====
 {
-  const basis = (o) => run(`S.fc.planId = 'P1'; S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: Object.assign({ planId: 'P1', annual: { p50: 1000, prevP50: 900 },
+  const basis = (o) => run(`S.fc.planId = 'P1'; S.view = 'budget'; S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: Object.assign({ planId: 'P1', annual: { p50: 1000, prevP50: 900 },
     monthly: [], research: [], applied: null, calibration: null, latestRunAt: '2026-10-08T10:00:00+09:00', prevRunAt: '2026-10-01T10:00:00+09:00', inputChanged: false, between: [] }, o) });
   const H = '前回の予測からの変化', OPS = [{ at: '2026-10-05T10:00:00+09:00', action: 'PLAN.EDIT', actor: OWNER, changed: ['PRODUCT'] }];
   assert.equal(tipOf(basis({ changeCause: 'jitter' }), H), '前の予測は、同じ入力でも実行ごとに少し揺れていました（今の版から、同じ入力なら同じ数字になります）');
@@ -927,16 +927,16 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   const kpiTip = (h, k) => (new RegExp('<div class="kpi" data-tip="([^"]*)"><div class="k">' + k + '</div>').exec(h) || [])[1];
   const check = (how) => {
     // メーカーの表の空模様・着地の推定のセル
-    assert.match(run('skyCell(__p)', { __p: P }), new RegExp('<span class="skycell" data-tip="霧：[^"\\n]*\\n当たり具合の計算待ち\\n' + how + '">'));
+    assert.match(run('skyCell(__p)', { __p: P }), new RegExp('<span class="skycell" data-tip="未算定：[^"\\n]*\\n当たり具合の計算待ち\\n' + how + '">'));
     assert.equal(run('mkLanding(__p)', { __p: P }), '<td class="num" data-tip="着地を推定できません（当たり具合の計算待ち）\n' + how + '">-</td>');
     // ホームのよみのセリフ（見える文は短く、出し方は説明に）
     const says = Array.from(run('yomiSays(__h)', { __h: { fy: '2026', plans: [P, Object.assign({}, P, { planId: 'P2', clientName: '別の製薬', skyReason: 'no_budget' })] } }));
-    const fog = says.filter((x) => /は霧で/.test(x.text))[0];
-    assert.equal(fog.text, '2 メーカーは霧で、着地を推定できません（予算なし 1・当たり具合の計算待ち 1）。');
+    const fog = says.filter((x) => /着地を推定できません/.test(x.text))[0];
+    assert.equal(fog.text, '2 メーカーは着地を推定できません（予算なし 1・当たり具合の計算待ち 1）。');
     assert.ok(fog.tip.endsWith('\n当たり具合の計算待ちは、' + how), fog.tip);
     // 分析: メーカーの札の説明・霧の数
-    assert.deepEqual(run('anPlanTip(__p)', { __p: P }).split('\n').slice(0, 3), ['テスト製薬', '霧：当たり具合の計算待ち', how]);
-    assert.ok(kpiTip(run('anTotals({ totals: {} }, __ps)', { __ps: [P] }), '霧の数').endsWith('\nテスト製薬（当たり具合の計算待ち）\n当たり具合の計算待ちは、' + how));
+    assert.deepEqual(run('anPlanTip(__p)', { __p: P }).split('\n').slice(0, 3), ['テスト製薬', '未算定：当たり具合の計算待ち', how]);
+    assert.ok(kpiTip(run('anTotals({ totals: {} }, __ps)', { __ps: [P] }), '未算定の数').endsWith('\nテスト製薬（当たり具合の計算待ち）\n当たり具合の計算待ちは、' + how));
   };
   check(HOW);
   asRoles(VIEWER_ROLES, () => check(HOW_V));
@@ -944,8 +944,8 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   const nb = Object.assign({}, P, { skyReason: 'no_budget' });
   assert.equal(run('skyHow(__p)', { __p: nb }), '');
   assert.doesNotMatch(run('skyCell(__p)', { __p: nb }) + run('mkLanding(__p)', { __p: nb }), /を動かすと|計算されると/);
-  const one = Array.from(run('yomiSays(__h)', { __h: { fy: '2026', plans: [nb] } })).filter((x) => /は霧で/.test(x.text))[0];
-  assert.equal(one.tip, '霧：' + run(`skyRule('mikakunin')`));
+  const one = Array.from(run('yomiSays(__h)', { __h: { fy: '2026', plans: [nb] } })).filter((x) => /着地を推定できません/.test(x.text))[0];
+  assert.equal(one.tip, '未算定：' + run(`skyRule('mikakunin')`));
 }
 
 // ==== エラーの文: 計算用の表の名前は画面の名前に、プログラムの例外と通信の切れは中身を見せず、分かる文に（2026-10-13） ====
@@ -971,9 +971,9 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   // 雪（予算があるのに売上が 0 の月）は、着地と予算の比では決めないので「予算を 10% 以上下回る」とは言わない
   const says = (plans) => Array.from(run('yomiSays(__h)', { __h: { fy: '2026', plans } })).map((x) => x.text).join('\n');
   const snowSay = says([{ planId: 'S', clientName: '雪の製薬', fy: '2026', sky: 'sekka', budget: 600, landing: 572 }]);
-  assert.match(snowSay, /1 メーカーは、予算があるのに売上が 0 の月があります（雪）/);
+  assert.match(snowSay, /1 メーカーは、予算があるのに売上が 0 の月があります/);
   assert.doesNotMatch(snowSay, /10% 以上下回る/);
-  assert.match(says([{ planId: 'K', clientName: '曇りの製薬', fy: '2026', sky: 'kumori', budget: 600, landing: 500 }]), /1 メーカーが、予算を 10% 以上下回る見込みです（曇り）/);
+  assert.match(says([{ planId: 'K', clientName: '曇りの製薬', fy: '2026', sky: 'kumori', budget: 600, landing: 500 }]), /1 メーカーが、予算を 10% 以上下回る見込みです/);
   // 元に戻せない承認（公式版の承認・却下、見直し案の承認して反映）は、確かめる画面で「やめる」を先に選んでおく
   run(`globalThis.__asks = []; ask = function(m, l, f, d){ __asks.push([l, !!d]); };
     S.fc.ver = { planId: 'P', pending: { no: 3, versionId: 'V', rowVersion: 1 } }; verDecide('APPROVED');`);

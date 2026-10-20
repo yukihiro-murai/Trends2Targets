@@ -310,7 +310,7 @@ const port = () => Object.fromEntries(env.call('apiPortfolio()').plans.map((p) =
   assert.match(t, /採用予測 = 約束、上乗せ = 挑戦/);
   assert.match(t, /届く見込みが 50% の金額 [^・]+・60% の金額 [^・]+・70% の金額 [^・]+・80% の金額 /);
   assert.doesNotMatch(t, /90% の金額/, '90% 以上は出さない');
-  assert.match(t, /承認済みの公式版（v2）の最終予算 900 円 には /);
+  assert.match(t, /承認済みの確定版（v2）の最終予算 900 円 には /);
   assert.match(t, /年の水準のぶれ 15%・幅の倍率 1\.5 倍（締まった 6 か月の実績を入れています）/, 'いま使っている前提（書いた値。τ は 0.15 に戻した）');
   assert.match(t, /保存している数字は変わりません/);
   noCodes(html.replace(/<[^>]*>/g, ' ') + '\n' + t.replace(/80% の幅/g, ''), '予測と予算');
