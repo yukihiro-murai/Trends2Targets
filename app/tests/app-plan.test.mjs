@@ -318,7 +318,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   // ホーム: 数字・計画の状態・最近の動きと、よみのセリフ（状況から選ぶ）
   ui.__home = env.call('apiHome()');
   const homeHtml = vm.runInContext(`S.view = 'home'; B.home = __home; viewHome()`, ui);
-  assert.match(homeHtml, /年間予算[\s\S]*着地の推定[\s\S]*暫定実績[\s\S]*外れ幅[\s\S]*予実の空模様[\s\S]*学びの状況[\s\S]*分析からわかること/);
+  assert.match(homeHtml, /年間予算[\s\S]*着地の推定[\s\S]*暫定実績[\s\S]*外れ幅[\s\S]*予実の空模様[\s\S]*<h2>学び<\/h2>[\s\S]*<h2>分析<\/h2>/);
   // 空模様はいつも 8 つ（猛暑 → 快晴 → 晴れのち曇り → 曇り → 雨 → 雪 → 霧 → 天変地異）。社名は出さず、空模様の名前は出す
   assert.match(homeHtml, /aria-label="猛暑[\s\S]*aria-label="快晴[\s\S]*aria-label="晴れのち曇り[\s\S]*aria-label="曇り[\s\S]*aria-label="雨[\s\S]*aria-label="雪[\s\S]*aria-label="霧[\s\S]*aria-label="天変地異/);
   assert.match(homeHtml, /<span class="nm">猛暑<\/span>/);
@@ -336,7 +336,7 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   const waitHtml = vm.runInContext(`S.homeLoading = true; B.home = null; var __w = viewHome(); B.home = __home; S.homeLoading = false; __w`, ui);
   assert.match(waitHtml, /class="card loading[^"]*"[\s\S]*観測中…[\s\S]*読み込んでいます/);
   // 2026-10-13 村井さん: 読み込み中もカードを出しておく（読めたら同じ場所に入る。画面が動かない）
-  assert.deepEqual([...waitHtml.matchAll(/<div class="card skel-card"><div class="card-head">(?:<h2>([^<]*)<\/h2>)?/g)].map((m) => m[1] || ''), ['', '予実の空模様', '学びの状況', '分析からわかること'], '数字・空模様・学びの状況・わかることのカード');
+  assert.deepEqual([...waitHtml.matchAll(/<div class="card skel-card"><div class="card-head">(?:<h2>([^<]*)<\/h2>)?/g)].map((m) => m[1] || ''), ['', '予実の空模様', '学び', '分析'], '数字・空模様・学び・分析のカード');
   assert.doesNotMatch(waitHtml, /読み込み中…/);
   // 読み込みに失敗したら、理由と「もう一度読み込む」を出し、描くたびに読み直さない（前は失敗のたびに apiHome を呼び直していた）
   const failHtml = JSON.parse(vm.runInContext(`var __n = 0, __c0 = call; call = function(){ __n++; }; B.home = null; S.ld.home = { error: 'つながりません', at: Date.now() }; var __f = viewHome() + viewHome(); call = __c0; B.home = __home; S.ld.home = { at: Date.now() }; JSON.stringify([__f, __n])`, ui));
@@ -398,14 +398,15 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   ui.__pf = env.call('apiPortfolio()').plans;
   // 予算一覧（2026-10-16 にメーカー一覧を予測一覧と予算一覧に分けた。予算・予実はこちら）
   const mkHtml = vm.runInContext(`S.pf = __pf; S.mkFy = String(__pf[0].fy); viewBudgets()`, ui);
-  assert.match(mkHtml, /<h1>予算一覧<\/h1><select[^>]*data-near[\s\S]*ステータス[\s\S]*年間予算[\s\S]*暫定実績[\s\S]*着地の推定[\s\S]*テスト製薬[\s\S]*(未着手|策定中|承認待ち|承認済み)[\s\S]*合計/);
+  assert.match(mkHtml, /<h1>予算一覧<\/h1><select[^>]*data-near[\s\S]*<h2>予算一覧<\/h2>[\s\S]*ステータス[\s\S]*年間予算[\s\S]*暫定実績[\s\S]*着地の推定[\s\S]*テスト製薬[\s\S]*(未着手|策定中|承認待ち|承認済み)[\s\S]*合計/);
+  assert.doesNotMatch(mkHtml, /予算と実績/, 'カード見出しは予算一覧');
   assert.equal((mkHtml.match(/>テスト製薬</g) || []).length, 1);
   assert.doesNotMatch(mkHtml, /ZAC コード|絞り込|並べ方|計画を作る|undefined|NaN/, '絞り込み・並べ替え・ZAC コード・計画を作るは出さない');
   // 計画の一覧を読む前は、ホームの初期データ（同じ項目）ですぐ描く
   assert.match(vm.runInContext(`var __kp = S.pf; S.pf = null; B.home = __home; var __m = viewBudgets(); S.pf = __kp; __m`, ui), /<h1>予算一覧<\/h1>[\s\S]*テスト製薬[\s\S]*開く/);
   // 予測一覧: メーカーごとの見通しの帯（同じ目盛り）・中心・前回から・外れ幅。名前を押すと予測結果
   const fcl = vm.runInContext(`S.pf = __pf; S.mkFy = String(__pf[0].fy); viewMakers()`, ui);
-  assert.match(fcl, /<h1>予測一覧<\/h1>[\s\S]*予測[\s\S]*テスト製薬/);
+  assert.match(fcl, /<h1>予測一覧<\/h1>[\s\S]*<h2>予測一覧<\/h2>[\s\S]*テスト製薬/);
   assert.match(fcl, /openPlan\('[^']+','forecast'\)/, '名前を押すと予測結果');
   assert.doesNotMatch(fcl, /undefined|NaN|年間予算/, '予算は出さない');
   // 2026-10-16: 画面の題の行は出さない（題は読み上げだけ）。年度の選ぶ欄は上の帯の右へ
