@@ -285,6 +285,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .tbl.edit .incell > .inp.cell{flex:1 1 auto;width:100%;min-width:0;margin:0}
 .tbl.edit td > .btn{display:inline-flex;align-items:center;justify-content:center;height:40px;margin:0;vertical-align:middle}
 .tbl.edit tr:last-child td{border-bottom:1px solid var(--line)}
+.tbl.fc-in th,.tbl.fc-in th.num{text-align:left}
 @supports (appearance: base-select){
   .tbl.edit select.inp.cell{display:inline-flex;align-items:center;width:100%;line-height:1}
 }
@@ -834,7 +835,7 @@ function actBtn(btnHtml, text){ return '<span class="act"' + (text ? ' data-tip=
   window.addEventListener('scroll', hide, true);
 })();
 /** 説明（data-tip）の付いた数字・文・見出しを、キーボードでも選べるようにする（描いた後に呼ぶ。グラフの中・ボタン・欄はそのまま） */
-var TIP_FOCUS = '.kpi[data-tip],.todo [data-tip],.hm-lrbox[data-tip],.hm-lrt[data-tip],.anbh[data-tip],.anx[data-tip],.meta[data-tip],.fc-say[data-tip],.fc-wxnm[data-tip],.fc-stats [data-tip],.bubble [data-tip],th[data-tip],td[data-tip],.fc-src[data-tip],.lr-err[data-tip],.lr-q [data-tip],.chip[data-tip],.skycell[data-tip]';
+var TIP_FOCUS = '.kpi[data-tip],.todo [data-tip],.hm-lrbox[data-tip],.hm-lrt[data-tip],.anbh[data-tip],.anx[data-tip],.meta[data-tip],.fc-say[data-tip],.fc-wxnm[data-tip],.fc-stats [data-tip],.bubble [data-tip],th[data-tip],td[data-tip],.fc-src[data-tip],.lr-err[data-tip],.lr-q [data-tip],.chip[data-tip],.skycell[data-tip],.sky[data-tip]';
 function tipFocus(root){
   root = root || document;
   if (!root || !root.querySelectorAll) return;
@@ -2391,12 +2392,25 @@ function homeKpis(h, plans){
 }
 
 // ---- 見通しの空模様（サーバーの推定 p.sky。いつも 8 つ・決まった順。押すと分析へ） ----
+/** 予実の分布の説明: 該当メーカー名を列記（決まり文は出さない） */
+function skyMakerTip(names){
+  var seen = {}, out = [];
+  (names || []).forEach(function(n){
+    n = String(n || '').trim();
+    if (!n || seen[n]) return;
+    seen[n] = 1;
+    out.push(n);
+  });
+  out.sort(function(a, b){ return a.localeCompare(b, 'ja'); });
+  return out.length ? out.join('\n') : '該当するメーカーはありません';
+}
 function homeSkyCard(plans){
   var by = {}; plans.forEach(function(p){ var k = skyKey(p); (by[k] = by[k] || []).push(p.clientName); });
   var tiles = SKY8.map(function(s){
-    var n = (by[s.key] || []).length;
-    return '<div class="sky' + (n ? '' : ' none') + '" data-sky="' + s.key + '" tabindex="0" role="group" aria-label="' + esc(s.rule + ' ' + n + ' メーカー') + '"'
-      + ' data-tip="' + esc(s.rule) + '">'
+    var names = by[s.key] || [];
+    var n = names.length, tip = skyMakerTip(names);
+    return '<div class="sky' + (n ? '' : ' none') + '" data-sky="' + s.key + '" tabindex="0" role="group" aria-label="' + esc(tip.replace(/\n/g, '、')) + '"'
+      + ' data-tip="' + esc(tip) + '">'
       + '<span class="ch"><span class="ch-bg" aria-hidden="true"></span>' + (CHAR_SVG[s.key] || '') + '</span>'
       + '<span class="ct">' + n + '</span></div>';
   }).join('');
@@ -4057,7 +4071,7 @@ function fcInputCard(v, kind){
   var dirty = S.fc.inputDirty[kind];
   var html = '<div class="card fc-inkind" id="fc-in-' + kind + '"><div class="card-head"><h2>' + esc(INPUT_TITLE[kind]) + (canPlan ? '' : tip('入力は予算策定担当ができます')) + '</h2>' + (dirty ? '<span class="chip warn">未保存</span>' : '') + '</div>'
     + '<div class="tblwrap"><table class="tbl scroll fc-in' + (canPlan ? ' edit' : '') + '" style="--inw:' + inw + 'px"><colgroup>' + cols.map(function(c){ return '<col' + (c[3] ? ' style="width:' + c[3] + 'px"' : '') + '>'; }).join('') + (canPlan ? '<col style="width:144px">' : '') + '</colgroup>'
-    + '<thead><tr>' + cols.map(function(c){ return '<th' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + (c[2] === 'selfconf' ? ' data-tip="' + esc(FC_CONF_TIP) + '"' : '') + '>' + c[1] + '</th>'; }).join('') + (canPlan ? '<th data-tip="空にした行は消えます"></th>' : '') + '</tr></thead><tbody>'
+    + '<thead><tr>' + cols.map(function(c){ return '<th' + (c[2] === 'selfconf' ? ' data-tip="' + esc(FC_CONF_TIP) + '"' : '') + '>' + c[1] + '</th>'; }).join('') + (canPlan ? '<th data-tip="空にした行は消えます"></th>' : '') + '</tr></thead><tbody>'
     + (rows.length ? rows.map(function(r, i){ return '<tr>' + cols.map(function(c){ return '<td' + (c[2] === 'conf' || c[2] === 'money' || c[2] === 'step' ? ' class="num"' : '') + '>' + cellHtml(c, r, i) + '</td>'; }).join('')
       + (canPlan ? '<td>' + fcRowSave('fcSaveInput(' + q + ',' + i + ')', !!r._dirty) + '</td>' : '') + '</tr>'; }).join('')
       : '<tr><td colspan="' + (cols.length + (canPlan ? 1 : 0)) + '" class="empty">まだ入力がありません</td></tr>')

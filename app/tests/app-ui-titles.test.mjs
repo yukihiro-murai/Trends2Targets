@@ -26,6 +26,7 @@ assert.match(css, /select\.inp\{[^}]*display:flex;align-items:center/, 'プル�
 assert.match(css, /\.mk-sum\{[^}]*grid-template-columns:repeat\(4,var\(--col\)\)/, '予算一覧の状態札は同じ幅');
 assert.match(css, /\.sky\{[^}]*height:152px/, '予実の分布タイルは同じ高さ');
 assert.match(css, /\.sky \.nm\{display:none\}/, '予実の分布にラベル文字を出さない');
+assert.match(css, /\.tbl\.fc-in th,\.tbl\.fc-in th\.num\{text-align:left\}/, '入力のフィールド名は左揃え');
 assert.match(css, /\.cvt\{[^}]*height:360px/, 'グラフと表は同じ高さの枠');
 assert.match(css, /\.hm-pair\{[^}]*grid-template-columns:1fr 1fr/, 'ホームの学びと分析は同じ高さ');
 assert.match(css, /\.bud-src\{[^}]*grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/, '予算案の予測カードは 4 列');
@@ -86,10 +87,16 @@ const inHtml = run(`S.view = 'prep'; S.fc.planId = 'P1'; S.fc.view = __v; S.fc.i
 assert.match(inHtml, /class="in-steps"/);
 assert.match(inHtml, /class="tbl scroll fc-in edit"/);
 assert.match(inHtml, /class="inp cell"/);
+assert.doesNotMatch(inHtml, /<th class="num">/, '入力のフィールド名に右揃えを付けない');
 assert.deepEqual(JSON.parse(run(`JSON.stringify(FC_SECS.map(function(s){ return s[1]; }))`)), ['予測結果', '根拠', '入力', '振り返り', '予算案', '確定版', '手法ごとの予測']);
 assert.doesNotMatch(run(`SKY8.map(function(s){ return s.name; }).join()`), /猛暑|快晴|曇り|霧|天変地異/);
 const skyHtml = run('homeSkyCard(__p)', { __p: [] });
 assert.doesNotMatch(skyHtml, /<span class="nm">|大幅超え|>超え</);
 assert.equal((skyHtml.match(/class="sky none"/g) || []).length, 8);
+assert.match(skyHtml, /data-tip="該当するメーカーはありません"/);
+const namedSky = run('homeSkyCard(__p)', { __p: [{ clientName: 'テスト製薬', sky: 'kaisei' }, { clientName: '別の製薬', sky: 'kaisei' }] });
+assert.match(namedSky, /data-sky="kaisei"[^>]*data-tip="[^"]*テスト製薬[^"]*"/);
+assert.match(namedSky, /data-sky="kaisei"[^>]*data-tip="[^"]*別の製薬[^"]*"/);
+assert.doesNotMatch(namedSky, /data-tip="着地の推定が予算の/);
 
 console.log('app-ui-titles: ok');

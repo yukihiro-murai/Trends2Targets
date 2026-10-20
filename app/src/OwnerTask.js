@@ -139,6 +139,11 @@ const APP_OWNER_ACTIONS = {
   runForecastAll: { name: 'BULK.START', args: ['fy', 'backtest'], check: t => appOwnerCheckBulkFy_(t),
     opts: i => ({ minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'BULK', detail: Object.assign({ mode: 'FORECAST' }, i) }),
     run: (ctx, i) => appBulkStart_(ctx, 'FORECAST', i.fy, i.backtest === true) },
+  // 画面確認用の仮予算（AI の月次予測があればそれ、無ければ月の真ん中 + 上乗せ 5%。手で直した跡・確定版は触らない）
+  seedDummyBudgets: { name: 'BUDGET.DUMMY_SEED', args: ['fy'], check: t => appOwnerCheckDummyFy_(t),
+    opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'BUDGET_DUMMY', detail: i,
+      after: res => ({ fy: res.fy, filled: (res.filled || []).length, skipped: (res.skipped || []).length, failed: (res.failed || []).length, remaining: (res.remaining || []).length }) }),
+    run: (ctx, i) => appSeedDummyBudgets_(ctx, i.fy) },
   // まとめて動かしている状態（今の計画・残り・済んだ計画と結果）
   bulkStatus: { name: 'BULK.STATUS', opts: () => ({ minRole: 'ADMIN', audit: false }), run: () => appBulkStatus_() },
   // 全メーカーの履歴のみの計画を用意し、取込→集計→予測を保存する。既存の通常計画は保持する。
@@ -305,6 +310,11 @@ function appOwnerCheckBulkFy_(t) {
   if (t.fy !== undefined && !/^\d{4}$/.test(String(t.fy === null ? '' : t.fy).trim())) throw new Error(t.action + ' の fy（年度）は 4 桁の数で入れてください（例: "fy":2026。省くと今の年度）。');
   if (t.backtest !== undefined && typeof t.backtest !== 'boolean') throw new Error(t.action + ' の backtest は true か false で入れてください。');
   if (!appBulkQueue_(t.fy).length) throw new Error('動かせる計画がありません（片付けていない・売上を取り込んだ・年度を締めていない計画）。');
+}
+
+/** seedDummyBudgets の年度（省ける。入れるなら 4 桁） */
+function appOwnerCheckDummyFy_(t) {
+  if (t.fy !== undefined && !/^\d{4}$/.test(String(t.fy === null ? '' : t.fy).trim())) throw new Error(t.action + ' の fy（年度）は 4 桁の数で入れてください（例: "fy":2026。省くと今の年度）。');
 }
 
 function appOwnerCheckCutoffFy_(t) {
