@@ -5,7 +5,7 @@
  *   {"action":"saveSetting","key":"source.zac_spreadsheet","value":"https://docs.google.com/spreadsheets/d/…/edit"}
  * 結果は OWNER_TASK_RESULT（1 つの値は約 9KB までなので、大きいときは要約）と実行ログ（Logger。長すぎれば途中まで）に残す。
  * うまくいった後の OWNER_TASK: 読むだけの操作は残す（もう一度実行すると読み直す）。書く操作は消す（同じ頼みを 2 度動かさない）。
- * 仮の予算策定（seedDummyBudgets）だけ、残りがあれば残す（同じ JSON でもう一度実行する。続きの予約も入れる）。
+ * 仮の予算策定（seedDummyBudgets）だけ、残りがあれば残す（同じ JSON でもう一度実行する。自動予約はしない）。
  * 裏の処理を始めたら {"action":"jobStatus","jobId":"…"} に置き換える（プロパティを触らずに、もう一度実行すると結果を確かめられる）。
  * 実行中に書き換えられた頼みは触らない。失敗したら残す（直してもう一度実行する）。
  *
@@ -140,7 +140,7 @@ const APP_OWNER_ACTIONS = {
   runForecastAll: { name: 'BULK.START', args: ['fy', 'backtest'], check: t => appOwnerCheckBulkFy_(t),
     opts: i => ({ minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'BULK', detail: Object.assign({ mode: 'FORECAST' }, i) }),
     run: (ctx, i) => appBulkStart_(ctx, 'FORECAST', i.fy, i.backtest === true) },
-  // 画面確認用の仮の予算策定（測る専用の印を外し、担当者・人間入力・仮予算を書く。AI の月次予測があれば採用。確定版は触らない。残りがあれば OWNER_TASK を残して続く）
+  // 画面確認用の仮の予算策定（測る専用の印を外し、担当者・人間入力・仮予算を書く。AI の月次予測があれば採用。確定版は触らない。残りがあれば OWNER_TASK を残す）
   seedDummyBudgets: { name: 'BUDGET.DUMMY_SEED', args: ['fy'], check: t => appOwnerCheckDummyFy_(t),
     opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'BUDGET_DUMMY', detail: i,
       after: res => ({ fy: res.fy, filled: (res.filled || []).length, skipped: (res.skipped || []).length, failed: (res.failed || []).length, remaining: (res.remaining || []).length }) }),
@@ -258,7 +258,7 @@ function appOwnerHint_(out, taskState) {
   // まとめて動かす操作（runForecastAll・runBacktestAll。Bulk.js）は、書いた後に裏の処理を始めている
   if (out.kind !== 'job' && out.name === 'BULK.START') return '裏の処理を始めました（計画を 1 つずつ順に動かします）。様子は {"action":"bulkStatus"} で分かります。' + task;
   if (out.kind !== 'job' && out.name === 'BUDGET.DUMMY_SEED' && (out.result && (out.result.remaining || []).length)) {
-    return 'まだ残りがあります。OWNER_TASK はそのままなので、apiOwnerTask をもう一度実行してください（続きの予約も入れています）。';
+    return 'まだ残りがあります。OWNER_TASK はそのままなので、今の実行が終わってから apiOwnerTask をもう一度実行してください。';
   }
   if (out.kind !== 'job') return 'すぐに終わりました（' + (out.kind === 'read' ? '読むだけ' : '書きました') + '。裏の処理はありません）。' + task;
   const r = out.result || {};

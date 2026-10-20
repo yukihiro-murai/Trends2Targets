@@ -442,7 +442,6 @@ const APP_BUDGET_DUMMY_STEPS = ['-10', '-5', '-2', '0', '5', '8', '10', '-8'];
 const APP_BUDGET_DUMMY_CONF = ['高い', 'ふつう', '低い'];
 /** 仮予算の一括書き込みで、次の計画に進むのをやめる残り時間（ミリ秒。1 計画の保存が途中で切れないように） */
 const APP_BUDGET_DUMMY_TIME_MS = 4 * 60 * 1000;
-const APP_BUDGET_DUMMY_CONTINUE_MS = 20 * 1000;
 
 function appDummyPick_(arr, i) {
   return arr[Math.abs(Number(i) || 0) % arr.length];
@@ -562,31 +561,21 @@ function appSeedDummyOne_(ctx, plan, fy, index) {
   return { filled: Object.assign({ usedAi: dummy.usedAi }, item) };
 }
 
-/** apiOwnerTask の続き（仮予算の残り）。この入口への時間トリガーだけを足す・片付ける */
-function appDummySeedTriggers_() {
-  try {
-    return (ScriptApp.getProjectTriggers() || []).filter(t => {
-      try { return t.getHandlerFunction() === 'apiOwnerTask'; } catch (e) { return false; }
-    });
-  } catch (e) { return []; }
-}
-function appDummySeedSchedule_() {
-  try {
-    appDummySeedTriggers_().forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (e) { /* 残っても次で消す */ } });
-    ScriptApp.newTrigger('apiOwnerTask').timeBased().after(APP_BUDGET_DUMMY_CONTINUE_MS).create();
-  } catch (e) {
-    Logger.log('仮予算の続きの予約: ' + (e && e.message ? e.message : e));
-  }
-}
+/** 以前入れた apiOwnerTask の時間予約が残っていれば消す（手動実行と重ならないように） */
 function appDummySeedClearSchedule_() {
-  try { appDummySeedTriggers_().forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (e) { /* 無い */ } }); }
-  catch (e) { /* テストや権限の無いときは何もしない */ }
+  try {
+    (ScriptApp.getProjectTriggers() || []).forEach(t => {
+      try {
+        if (t.getHandlerFunction() === 'apiOwnerTask') ScriptApp.deleteTrigger(t);
+      } catch (e) { /* 残っても次で消す */ }
+    });
+  } catch (e) { /* テストや権限の無いときは何もしない */ }
 }
 
 /**
  * 今の年度（または fy）の計画を、画面確認用の「予算策定した状態」にする（所有者。検証用。確定版は触らない）。
  * 測る専用の印は外す。担当者が無ければ仮の名前。人間入力が無ければ動向・見解・スポットを 1 行ずつ。
- * 予測の月があれば仮予算（AI の月次予測があればそれ）。時間切れなら remaining に残し、OWNER_TASK を残して続く。
+ * 予測の月があれば仮予算（AI の月次予測があればそれ）。時間切れなら remaining に残し、OWNER_TASK を残す（手動でもう一度実行する。自動予約はしない）。
  */
 function appSeedDummyBudgets_(ctx, fy) {
   const y = fy === undefined || fy === null || fy === '' ? appFy_(new Date()) : Number(fy);
@@ -597,7 +586,6 @@ function appSeedDummyBudgets_(ctx, fy) {
   const out = { fy: y, filled: [], skipped: [], failed: [], remaining: [] };
   const t0 = new Date().getTime();
   let stop = false;
-  let overlap = false;
   plans.forEach((p, i) => {
     const item = { planId: p.plan_id, name: p.client_label || '' };
     if (stop) { out.remaining.push(item); return; }
@@ -609,7 +597,6 @@ function appSeedDummyBudgets_(ctx, fy) {
     } catch (e) {
       const msg = String(e && e.message ? e.message : e);
       if (/ロックのタイムアウト|サービス エラー/.test(msg)) {
-        overlap = true;
         stop = true;
         out.remaining.push(Object.assign({ error: msg.slice(0, 160) }, item));
         return;
@@ -617,7 +604,6 @@ function appSeedDummyBudgets_(ctx, fy) {
       out.failed.push(Object.assign({ error: msg.slice(0, 160) }, item));
     }
   });
-  if (out.remaining.length && !overlap) appDummySeedSchedule_();
-  else appDummySeedClearSchedule_();
+  appDummySeedClearSchedule_();
   return out;
 }
