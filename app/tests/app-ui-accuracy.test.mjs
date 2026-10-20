@@ -94,14 +94,14 @@ const text = (html) => unesc(String(html).replace(/<[^>]*>/g, ' '));
   const fy = '2026';
   const card = (plans) => run('S.lr.ai = { health: [], pending: [] }; homeLearnCard(__h, __h.plans)', { __h: { fy, plans } });
   const c1 = card([{ planId: 'P1', clientName: '甲', fy, mape: 0.5, mapeMonths: 1 }, { planId: 'P2', clientName: '乙', fy, mape: 0.08, mapeMonths: 2 }]);
-  assert.match(c1, /aria-label="霧"/);
+  assert.match(c1, /<span class="t1">霧<\/span>/);
   assert.match(c1, /<span class="t2">比べた月がまだ 2 か月<\/span>/);
   assert.ok(tips(c1).some((t) => t.startsWith('霧：比べた月がまだ 2 か月（精度の天気と強気・弱気は 3 か月から決めます）\n比べた月が 3 か月以上のメーカーがまだありません')));
   const c2 = card([{ planId: 'P1', clientName: '甲', fy, mape: 0.5, mapeMonths: 1 }, { planId: 'P2', clientName: '乙', fy, mape: 0.12, mapeMonths: 4 }]);
-  assert.match(c2, /aria-label="晴れのち曇り"/, '1 か月の 50% は入れない（入れると雨）');
+  assert.match(c2, /<span class="t1">晴れのち曇り<\/span>/, '1 か月の 50% は入れない（入れると雨）');
   assert.match(c2, /<span class="t2">外れ幅 12\.0%<\/span>/);
   assert.ok(tips(c2).some((t) => t.includes('外れ幅の平均 12.0%（1 メーカー。比べた月が 3 か月より少ない 1 メーカーは入れていません）')));
-  assert.match(card([{ planId: 'P2', clientName: '乙', fy, mape: 0.12 }]), /aria-label="晴れのち曇り"/, '月の数を返さないサーバーは今までどおり');
+  assert.match(card([{ planId: 'P2', clientName: '乙', fy, mape: 0.12 }]), /<span class="t1">晴れのち曇り<\/span>/, '月の数を返さないサーバーは今までどおり');
 
   // AI の学びの精度の天気も同じ（ホームの中身から）
   const keepHome = run('B.home');

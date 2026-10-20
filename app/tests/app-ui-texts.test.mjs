@@ -142,7 +142,7 @@ const OWNER_NOTE = 'owner-approved 2026-10-07 09:30: 自動の学びを止める
 {
   const basis = (learning, cal) => {
     const v = planView({ learning });
-    return tipOf(run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: v, __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied: null, calibration: cal } }), '補正');
+    return tipOf(run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: v, __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied: null, calibration: cal } }), '自動補正');
   };
   const cal = { factor: 1, aiWeight: 0, aiMax: null, monthBias: {}, updatedAt: '2026-10-07T09:30:00+09:00', quarter: '' };
   const OFF = '\n自動の学びを止めているので、「補正を学び直す」と「見直しを反映」では変わりません';
@@ -256,7 +256,7 @@ const NONE_SAY = 'まだ実績と比べた月がありません。各計画の�
   // ホーム: 外れ幅は「-」、説明で当たり具合を計算を案内する。精度の天気は霧
   const h = clean(run(`S.view = 'home'; B.home = __h; S.lr.ai = __ai; viewHome()`, { __h: home, __ai: ai }), 'ホーム');
   assert.match(h, /<div class="kpi"><div class="k">外れ幅<\/div><div class="v">-<\/div><\/div>/, '年度の数字は説明なし（2026-10-13）');
-  assert.match(h, /data-tip="霧：比べられる実績がまだない\n各計画の振り返りで「当たり具合を計算」を動かすと出ます\n[^"]*"><span class="skych"[^>]*aria-label="霧"[\s\S]*精度の天気[\s\S]*霧[\s\S]*比べる実績はまだです/);
+  assert.match(h, /data-tip="霧：比べられる実績がまだない\n各計画の振り返りで「当たり具合を計算」を動かすと出ます\n[^"]*"[\s\S]*精度の天気[\s\S]*霧[\s\S]*比べる実績はまだです/);
   // 分析: 外れ幅・読みのクセのカードは出さず、案内に当たり具合を計算を出す
   const a = clean(run(`S.view = 'analysis'; S.an.data = __a; viewAnalysis()`, { __a: an }), '分析');
   assert.match(a, /外れ幅・読みのクセ[^<]*は出していません。[^<]*各計画の振り返りで「当たり具合を計算」を動かすと/);
@@ -385,7 +385,7 @@ const anGuide = (plans, fy = '2026') => (/<span class="(?:t )?anmiss">([\s\S]*?)
   const cal = (applied, factor) => {
     const html = run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
       calibration: { factor, aiWeight: null, aiMax: null, monthBias: {}, updatedAt: '', quarter: '' } } });
-    const m = /<h2>補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
+    const m = /<h2>[^<]*補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
     return { tip: m[1], say: m[2] };
   };
   const reset = cal({ bias_correction_factor: 0.97 }, 1);
@@ -559,7 +559,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   const cal = (applied, factor, monthBias) => {
     const html = run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
       calibration: { factor, aiWeight: null, aiMax: null, monthBias: monthBias || {}, updatedAt: '', quarter: '' } } });
-    const m = /<h2>補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
+    const m = /<h2>[^<]*補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
     return { tip: m[1].split('\n'), say: m[2] };
   };
   // 所有者が戻した直後: 出している予測は 3.0% 下げ・3 月と 4 月も直した。今は補正なし・月ごとの補正なし
@@ -614,7 +614,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   const cal = (applied, factor, monthBias) => {
     const html = run(`S.fc.view = __v; S.fc.basis = __b; fcBasisTab(S.fc.data, __v)`, { __v: planView(), __b: { planId: 'P1', annual: {}, monthly: [], research: [], applied,
       calibration: { factor, aiWeight: null, aiMax: null, monthBias: monthBias || {}, updatedAt: '', quarter: '' } } });
-    const m = /<h2>補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
+    const m = /<h2>[^<]*補正<span[\s\S]*?<p class="fc-say" data-tip="([^"]*)">([^<]*)<\/p>/.exec(html);
     return { tip: m[1].split('\n'), say: m[2] };
   };
   const END = '補正は、実績がまだの月だけに効きます';

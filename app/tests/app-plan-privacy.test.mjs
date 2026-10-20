@@ -328,7 +328,7 @@ const redactedBasis = (full) => {
     vm.runInContext(js, ui);
     Object.assign(ui, { __v: view, __d: data, __b: basis, __l: learn });
     vm.runInContext(`S.view = 'forecast'; S.fc.plans = [{ planId: __v.plan.planId, clientName: 'x', fy: '2026' }]; S.fc.planId = __v.plan.planId; S.fc.view = __v; S.fc.data = __d; S.fc.basis = __b; S.fc.learn = __l;`, ui);
-    return { review: fcSection(vm.runInContext(`viewForecastAll()`, ui), 'review'), basisChart: fcSection(vm.runInContext(`viewForecastAll()`, ui), 'basis'),
+    return { review: vm.runInContext(`fcReviewSec()`, ui), basisChart: fcSection(vm.runInContext(`viewForecastAll()`, ui), 'basis'),
       basis: fcSection(vm.runInContext(`S.cv.fcPush = 'table'; S.cv.fcBasisM = 'table'; viewForecastAll()`, ui), 'basis') };   // 表で見る（月ごとの内訳の札）
   };
   const chips = (html) => [...html.matchAll(/<span class="fc-src"[^>]*>([^<]*)<\/span>/g)].map((m) => m[1].trim());

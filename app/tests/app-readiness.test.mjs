@@ -206,23 +206,25 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   ui.fcSection = fcSection;
   ui.__v = view; ui.__ver = env.call('apiVersionList(__in)', { __in: { planId } }); ui.__learn = env.call('apiLearningView(__in)', { __in: { planId } });
   vm.runInContext(`S.view='forecast'; S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.learn=__learn; S.fc.ver=__ver; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ui);
-  for (const tab of ['forecast', 'input', 'review', 'version', 'tri']) {
+  for (const tab of ['forecast', 'input', 'version', 'tri']) {
     const html = vm.runInContext(`S.fc.inputKind='product'; fcSection(viewForecastAll(), '${tab}')`, ui);
     assert.doesNotMatch(html, WRITE_MARKS, `閲覧の人の ${tab} タブに書き込みの操作を出さない`);
     assert.ok(html, tab + ' の区切りがある');
     assert.doesNotMatch(html, /<input|<select/, tab + ' の区切りに入力欄を出さない');
   }
+  assert.doesNotMatch(vm.runInContext(`S.fc.inputKind='product'; fcReviewSec()`, ui), WRITE_MARKS, '閲覧の人の振り返りに書き込みの操作を出さない');
   assert.doesNotMatch(vm.runInContext(`fcSection(viewForecastAll(), 'forecast')`, ui), /fcForecastRun\(\)/, '閲覧の人には予測を実行を出さない（注記も出さない。2026-10-13）');
   assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'input')`, ui), /入力は予算策定担当ができます/);
-  assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ui), /承認は承認者ができます/);
+  assert.match(vm.runInContext(`fcReviewSec()`, ui), /承認は承認者ができます/);
   assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'version')`, ui), /承認者が承認します/, '承認待ちを見せるが操作は出さない');
   // 入力が空の画面でも同じ（読むだけ。操作は出さない）
   const empty = env.call('apiPlanView(__in)', { __in: { planId: planId2 } });
   ui.__v2 = empty; ui.__ver2 = env.call('apiVersionList(__in)', { __in: { planId: planId2 } });
   vm.runInContext(`S.fc.view=__v2; S.fc.ver=__ver2; S.fc.inputKind='devspot';`, ui);
-  for (const tab of ['forecast', 'input', 'review', 'version', 'tri']) {
+  for (const tab of ['forecast', 'input', 'version', 'tri']) {
     assert.doesNotMatch(vm.runInContext(`fcSection(viewForecastAll(), '${tab}')`, ui), WRITE_MARKS, `空の画面（${tab}）でも操作を出さない`);
   }
+  assert.doesNotMatch(vm.runInContext(`fcReviewSec()`, ui), WRITE_MARKS, '空の振り返りでも操作を出さない');
   // ホームの役割の札は 2026-10-06 に外した（情報利得がない。村井さん）
   assert.equal(vm.runInContext(`typeof homeRolesCard`, ui), 'undefined');
   // ボタンの名前は 8 字まで（長い名前はツールチップへ）
@@ -239,11 +241,11 @@ const WRITE_MARKS = /fcRun\(|fcEdit\(|fcSaveInput|fcSaveIns|fcSaveDec|fcRvGo\(|v
   ua.fcSection = fcSection;
   ua.__v = av;
   vm.runInContext(`S.fc.plans=[{planId:'${planId}'}]; S.fc.planId='${planId}'; S.fc.view=__v; S.fc.data={plan:__v.plan,latest:null,runs:[],stored:null};`, ua);
-  const q = vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ua);
+  const q = vm.runInContext(`fcReviewSec()`, ua);
   assert.match(q, /fcRvGo\(/, '承認者には「承認して反映」（判断の保存 → 見直しを反映）を出す');
   assert.doesNotMatch(q, /fcRun\('(EVAL|LEARN|REVIEW)\./, '振り返りの更新は置かない（2026-10-16）');
   assert.match(q, /fcDec\(/, '承認の選択は出す');
-  const ev = vm.runInContext(`fcSection(viewForecastAll(), 'review')`, ua);
+  const ev = vm.runInContext(`fcReviewSec()`, ua);
   assert.doesNotMatch(ev, /IMPORT.ACTUALS/, '管理者だけの取り込みは出さない');
   assert.doesNotMatch(vm.runInContext(`viewForecastAll()`, ua), /IMPORT.SALES|fc_people/, '管理者だけの操作は出さない');
   assert.match(vm.runInContext(`fcSection(viewForecastAll(), 'input')`, ua), /fcInput\(|fcSaveInput/, '入力の保存は出る');
