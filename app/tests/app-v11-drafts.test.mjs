@@ -379,7 +379,7 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   const skipped = full.result.skipped || [];
   assert.ok(filled.some((x) => x.planId === planB && (x.did || []).includes('budget')), '未編集の計画は仮予算を書く');
   const aHit = filled.concat(skipped).find((x) => x.planId === planA);
-  assert.ok(aHit && (aHit.reason === 'edited' || aHit.skippedBudget === 'edited'), '手で直した予算は上書きしない: ' + JSON.stringify(aHit));
+  assert.ok(aHit && (aHit.reason === 'edited' || aHit.reason === 'done' || aHit.skippedBudget === 'edited'), '手で直した予算は上書きしない: ' + JSON.stringify(aHit));
   assert.deepEqual(nums(planA).monthly.map((m) => [m.adopted, m.uplift]), beforeA);
   const mHit = filled.find((x) => x.planId === planM);
   assert.ok(mHit && (mHit.did || []).includes('purpose') && (mHit.did || []).includes('budget'), '測る専用は印を外して仮予算を書く: ' + JSON.stringify(mHit));
@@ -394,6 +394,7 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   env.props.OWNER_TASK = JSON.stringify({ action: 'seedDummyBudgets', fy: FY });
   const again = env.call('apiOwnerTask()');
   assert.ok(!(again.result.filled || []).some((x) => x.planId === planB && (x.did || []).includes('budget')), '2 回目は予算を書き直さない');
+  assert.ok((again.result.skipped || []).some((x) => x.planId === planB && x.reason === 'done'), '済んだ計画は done として飛ばす');
   assert.deepEqual(nums(planB).monthly.map((m) => [m.adopted, m.uplift]), afterB);
 }
 
