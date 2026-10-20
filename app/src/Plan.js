@@ -502,6 +502,7 @@ function appPlanEdit_(ctx, p) {
     const reused = appScratchTryReuse_(scratch, plan.plan_id, act.sheets || null, token);
     const build = reused ? [] : appScratchFromStore_(scratch, plan.plan_id, act.sheets, token);
     const t1 = new Date().getTime();
+    if (p.action === 'BUDGET.SAVE') appBudgetCoerceMonthLabels_(scratch);
     const call = act.local ? appPlanLocalCall_(scratch, act.local, act.args(args || {}), { asOfMs: t0, seed: actionId, actor: ctx.actor })
       : appLegacyCall_(scratch, { asOfMs: t0, seed: actionId, actor: ctx.actor }, act.fn, act.args(args || {}));
     const t2 = new Date().getTime();

@@ -35,14 +35,18 @@ const HS = H('SALES_INPUT'), HC = H('EVAL_COMPARE_MONTHLY'), HP = H('PROCESS_STA
  * 計画のブック（旧来の OUTPUT の形: 26 行の年度合計・29〜40 行の月。H = 採用予測・I = 上乗せ・J = H + I の数式・年度の合計は SUM）。
  * p50[i] = 月の真ん中。adopted を省くと真ん中（旧来の初期値）。sales = 過去の売上 { 'yyyy/MM': 円 }、cmp = 締まった月の実績 { 'yyyy/MM': 円 }
  */
-function planBook(client, fy, { p50, adopted, uplift, sales = {}, cmp = {} }) {
+function planBook(client, fy, { p50, adopted, uplift, sales = {}, cmp = {}, monthAsDate = false }) {
   const yms = fyYms(fy);
   const output = [['FY' + fy + ' 売上予測（' + client + '）']];
   for (let r = 2; r <= 23; r++) output.push([]);
   output.push([' 混合（主要）'], []);
   output.push(['年度合計（予測）', sum(p50) * 0.9, sum(p50), sum(p50) * 1.1, '', '', '', '', '', '']);   // 26 行目
   output.push([], ['Month', 'Downside(P10)', 'Baseline(P50)', 'Upside(P90)', '', '', '', 'Adopted Forecast', 'Sales Uplift', 'Final Budget']);
-  yms.forEach((ym, i) => output.push([ym, p50[i] - 100, p50[i], p50[i] + 100, '', '', '', adopted ? adopted[i] : p50[i], uplift ? uplift[i] : '', '']));
+  yms.forEach((ym, i) => {
+    const parts = ym.split('/').map(Number);
+    const label = monthAsDate ? new Date(parts[0], parts[1] - 1, 1) : ym;
+    output.push([label, p50[i] - 100, p50[i], p50[i] + 100, '', '', '', adopted ? adopted[i] : p50[i], uplift ? uplift[i] : '', '']);
+  });
   const formulas = { H26: '=SUM(H29:H40)', I26: '=SUM(I29:I40)', J26: '=SUM(J29:J40)' };
   for (let i = 0; i < 12; i++) formulas['J' + (29 + i)] = `=H${29 + i}+I${29 + i}`;
   return env.makeBook(client, {
@@ -397,6 +401,17 @@ const propose = (planId, prob, alloc) => env.call('apiBudgetProposal(__in)', { _
   assert.ok(!(again.result.filled || []).some((x) => x.planId === planB && (x.did || []).includes('budget')), '2 回目は予算を書き直さない');
   assert.ok((again.result.skipped || []).some((x) => x.planId === planB && x.reason === 'done'), '済んだ計画は done として飛ばす');
   assert.deepEqual(nums(planB).monthly.map((m) => [m.adopted, m.uplift]), afterB);
+  const planD = env.seedPlan(planBook('日付見出し', FY, { p50: P0, sales: salesA, monthAsDate: true }));
+  assert.equal(env.call(`appDummyOutputWritable_('${planD}')`), true, '日付の月見出しも予算を書ける');
+  const saveD = save(planD, rowsOf(FY, P0.map((x) => Math.round(x * 1.1)), P0.map(() => 10)));
+  assert.equal(saveD.status, 'DONE', saveD.error);
+  assert.ok(nums(planD).monthly.every((m) => Number.isInteger(m.adopted) && m.adopted > 0), '日付見出しでも予算保存できる');
+  const planE = env.seedPlan(planBook('日付仮予算', FY, { p50: P0, sales: salesA, monthAsDate: true }));
+  env.props.OWNER_TASK = JSON.stringify({ action: 'seedDummyBudgets', fy: FY });
+  const seedE = env.call('apiOwnerTask()');
+  assert.equal(seedE.ok, true, JSON.stringify(seedE));
+  assert.ok((seedE.result.filled || []).some((x) => x.planId === planE && (x.did || []).includes('budget')),
+    '日付見出しの計画にも仮予算を書く: ' + JSON.stringify((seedE.result.filled || []).find((x) => x.planId === planE) || seedE.result.skipped));
 }
 
 console.log('app-v11-drafts: all tests passed');
