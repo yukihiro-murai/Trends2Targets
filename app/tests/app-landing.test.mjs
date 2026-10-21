@@ -608,4 +608,33 @@ const evalLogSheet = (env, rows) => {
   }
 }
 
+// ==== 仮の着地（seedDummyLanding）: 実績の遅れで消えていた着地を、仮実績と B-1/B-2 で出す ====
+{
+  const env = makeEnv();
+  env.run(`appToday_ = function () { return '2026-10-21'; }`);
+  env.as(OWNER);
+  env.call('apiSetup()');
+  const output = [['FY2026 売上予測']];
+  for (let r = 2; r <= 25; r++) output.push([]);
+  output.push(['年度合計（予測）', 1000, 1200, 1400]);
+  output.push([], ['月', 'P10', 'P50', 'P90', '', '', '', '採用予測', '上乗せ']);
+  yms.forEach((ym) => output.push([ym, 80, 100, 120, '', '', '', 100, '']));
+  const book = env.makeBook('着地欠け', {
+    CONFIG: { values: [['項目', '値'], ['[必須] メーカー名（外部集計キー）', '着地欠け'], ['[必須] 予測年度FY（YYYY）', 2026], ['[必須] 担当者（カンマ区切り）', '鷹野']] },
+    OUTPUT: { values: output, formats: { A: '@' } },
+  });
+  const id = env.seedPlan(book);
+  const before = env.call('apiPortfolio()').plans.filter((p) => p.planId === id)[0];
+  assert.equal(before.landing, null, 'B-1/B-2 が無ければ着地は出ない');
+  assert.equal(before.skyReason, 'stale_actuals');
+  env.props.OWNER_TASK = JSON.stringify({ action: 'seedDummyLanding', fy: 2026 });
+  const seed = env.call('apiOwnerTask()');
+  assert.equal(seed.ok, true, JSON.stringify(seed));
+  assert.ok((seed.result.filled || []).some((x) => x.planId === id && (x.did || []).includes('landing')), JSON.stringify(seed.result));
+  const after = env.call('apiPortfolio()').plans.filter((p) => p.planId === id)[0];
+  assert.ok(typeof after.landing === 'number' && after.landing > 0, '仮実績のあと着地が出る');
+  assert.notEqual(after.sky, 'mikakunin', '未算定のままにしない: ' + after.sky + '/' + after.skyReason);
+  assert.equal(after.k, 6, '10/21 なら締まった月は 6');
+}
+
 console.log('app-landing: all tests passed');

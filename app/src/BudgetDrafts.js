@@ -661,3 +661,186 @@ function appSeedDummyBudgets_(ctx, fy) {
   appDummySeedClearSchedule_();
   return out;
 }
+
+/** 着地 ÷ 予算が空模様で分かれて見える仮の実績倍率（猛暑〜雨） */
+const APP_LANDING_DUMMY_RATES = [1.65, 1.28, 1.08, 0.96, 0.72, 0.38, 1.18, 0.82];
+
+function appDummyCellNum_(cell) {
+  if (!cell || String(cell).charAt(0) !== 'n') return null;
+  const n = Number(String(cell).slice(1));
+  return isFinite(n) ? n : null;
+}
+
+function appDummyEnsureOutputMonths_(planId, fy, index) {
+  const yms = appLandingFyYms_(fy);
+  const all = (appReadPlanTable_('ENG_ROWS', planId) || []).filter(r => r.sheet === 'OUTPUT');
+  const byRow = {};
+  all.filter(r => Number(r.col_from) === 1).forEach(r => { byRow[Number(r.row_no)] = r; });
+  let changed = false;
+  const next = all.map(r => Object.assign({}, r));
+  const put = (rowNo, cells) => {
+    const i = next.findIndex(r => Number(r.row_no) === rowNo && Number(r.col_from) === 1);
+    const row = { plan_id: planId, sheet: 'OUTPUT', row_no: String(rowNo), col_from: '1', cells_json: JSON.stringify(cells) };
+    if (i >= 0) next[i] = row; else next.push(row);
+  };
+  yms.forEach((ym, i) => {
+    const rowNo = 29 + i;
+    const cur = byRow[rowNo];
+    const cells = cur ? JSON.parse(cur.cells_json || '[]').slice() : [];
+    while (cells.length < 9) cells.push('e');
+    const p50 = appDummyCellNum_(cells[2]);
+    const p10 = appDummyCellNum_(cells[1]);
+    const p90 = appDummyCellNum_(cells[3]);
+    const adopted = appDummyCellNum_(cells[7]);
+    const base = p50 !== null ? p50 : 800000 + (Math.abs(index) % 9) * 120000 + i * 15000;
+    if (!appBudgetYmOf_(cells[0] ? appCellDecode_(cells[0].charAt(0), cells[0].slice(1)) : '')) {
+      cells[0] = 's' + ym;
+      changed = true;
+    }
+    if (p10 === null || p50 === null || p90 === null) {
+      cells[1] = 'n' + Math.round(base * 0.85);
+      cells[2] = 'n' + Math.round(base);
+      cells[3] = 'n' + Math.round(base * 1.18);
+      changed = true;
+    }
+    if (adopted === null) {
+      const scale = appDummyPick_(APP_BUDGET_DUMMY_SCALES, index);
+      const up = appDummyPick_(APP_BUDGET_DUMMY_UPLIFT, index);
+      const ad = Math.round((p50 !== null ? p50 : base) * scale);
+      cells[7] = 'n' + ad;
+      cells[8] = 'n' + Math.round(ad * up);
+      changed = true;
+    }
+    if (changed || !cur) put(rowNo, cells);
+  });
+  return changed ? appOpReplacePlan_('ENG_ROWS', planId, ['OUTPUT'], next) : null;
+}
+
+function appDummyEvalRow_(planId, seq, ym, p10, p50, p90, actual) {
+  const header = APP_ENGINE_SHEETS.EVAL_COMPARE_MONTHLY.header;
+  const vals = {
+    target_month: ym, forecast_total: p50, actual_total: actual, gap_total: actual - p50,
+    forecast_total_p10: p10, forecast_total_p50: p50, forecast_total_p90: p90,
+    signed_error_p50: actual - p50, abs_error_p50: Math.abs(actual - p50),
+    ape_p50: p50 ? Math.abs(actual - p50) / p50 : 0, fy_label: 'FY' + ym.slice(0, 4),
+    range_outside_flag: (actual < p10 || actual > p90) ? 1 : 0
+  };
+  const o = { plan_id: planId, seq: String(seq) };
+  let types = '';
+  header.forEach(h => {
+    const v = vals[h];
+    if (v === undefined || v === '') { o[h] = ''; types += 'e'; }
+    else if (typeof v === 'number') { o[h] = String(v); types += 'n'; }
+    else { o[h] = String(v); types += 's'; }
+  });
+  o._types = types;
+  return o;
+}
+
+function appDummyStatusRows_(planId, name, atIso) {
+  const mk = (seq, key) => ({
+    plan_id: planId, seq: String(seq), step_key: key, last_run_date: atIso, last_run_by: '検証担当',
+    status: 'success', target_client: name || '', record_count: '6', error_summary: '', _types: 'sdsssns'
+  });
+  const keep = (appReadPlanTable_('ENG_PROCESS_STATUS', planId) || [])
+    .filter(r => r.step_key !== 'step2_status' && r.step_key !== 'step5_status')
+    .map((r, i) => Object.assign({}, r, { seq: String(i + 2) }));
+  return keep.concat([mk(keep.length + 2, 'step2_status'), mk(keep.length + 3, 'step5_status')]);
+}
+
+function appDummyLandingNeeded_(plan, todayYm) {
+  const o = {};
+  (appReadPlanTable_('ENG_ROWS', plan.plan_id) || []).filter(r => r.sheet === 'OUTPUT' && Number(r.col_from) === 1)
+    .forEach(r => { o[Number(r.row_no)] = JSON.parse(r.cells_json || '[]'); });
+  const months = appLandingMonths_(o);
+  const steps = appReadPlanTable_('ENG_PROCESS_STATUS', plan.plan_id) || [];
+  const cut = appLandingCutoff_(steps);
+  const adopted = months.reduce((s, m) => {
+    const row = o[29 + appLandingFyYms_(plan.fy).indexOf(m.ym)] || [];
+    const a = appDummyCellNum_(row[7]), u = appDummyCellNum_(row[8]);
+    return s + (a === null ? 0 : a) + (u === null ? 0 : u);
+  }, 0);
+  const budget = adopted > 0 ? adopted : null;
+  const yt = {};
+  (appReadPlanTable_('ENG_EVAL_COMPARE_MONTHLY', plan.plan_id) || []).forEach(r => {
+    const ym = appCellYm_(String(r._types || '').charAt(0), r.target_month);
+    const n = Number(r.actual_total);
+    if (ym) yt[ym] = r.actual_total === '' || r.actual_total === null || !isFinite(n) ? 0 : n;
+  });
+  const sky = appLandingSky_({ fy: plan.fy, months: months, actual: yt, cutoffYm: cut, todayYm: todayYm, budget: budget,
+    pendingCutoffYm: appLandingPendingCutoff_(steps) });
+  return sky.landing === null || sky.landingSd === null;
+}
+
+function appDummyLandingOps_(plan, fy, index, todayYm, atIso) {
+  const ops = [];
+  const outOp = appDummyEnsureOutputMonths_(plan.plan_id, fy, index);
+  if (outOp) ops.push(outOp);
+  const o = {};
+  (appReadPlanTable_('ENG_ROWS', plan.plan_id) || []).filter(r => r.sheet === 'OUTPUT' && Number(r.col_from) === 1)
+    .forEach(r => { o[Number(r.row_no)] = JSON.parse(r.cells_json || '[]'); });
+  if (outOp) {
+    (outOp.rows || []).filter(r => Number(r.col_from) === 1).forEach(r => { o[Number(r.row_no)] = JSON.parse(r.cells_json || '[]'); });
+  }
+  const months = appLandingMonths_(o);
+  const rate = appDummyPick_(APP_LANDING_DUMMY_RATES, index);
+  const closed = appLandingFyYms_(fy).filter(ym => ym < todayYm);
+  const evalRows = closed.map((ym, i) => {
+    const m = months.filter(x => x.ym === ym)[0] || {};
+    const p50 = m.p50 === null || m.p50 === undefined ? 1000000 : m.p50;
+    const p10 = m.p10 === null || m.p10 === undefined ? Math.round(p50 * 0.85) : m.p10;
+    const p90 = m.p90 === null || m.p90 === undefined ? Math.round(p50 * 1.18) : m.p90;
+    return appDummyEvalRow_(plan.plan_id, i + 2, ym, p10, p50, p90, Math.round(p50 * rate));
+  });
+  ops.push(appOpReplaceOrAppend_('ENG_EVAL_COMPARE_MONTHLY', plan.plan_id, evalRows));
+  ops.push(appOpReplaceOrAppend_('ENG_PROCESS_STATUS', plan.plan_id, appDummyStatusRows_(plan.plan_id, plan.client_label, atIso)));
+  return ops;
+}
+
+/**
+ * 画面確認用に、着地の推定が出る欠けるデータを仮で埋める（所有者。検証用。確定版は触らない）。
+ * 月の予測・仮予算が無ければ足す。締まった月の仮実績と B-1/B-2 の成功を書き、実績の遅れで着地が消えないようにする。
+ */
+function appSeedDummyLanding_(ctx, fy) {
+  const y = fy === undefined || fy === null || fy === '' ? appFy_(new Date()) : Number(fy);
+  appRequireOpenYear_(y);
+  appDummySeedClearSchedule_();
+  const today = appToday_();
+  const todayYm = appCloseCutoffYm_(today);
+  const atIso = today + 'T12:00:00+0900';
+  const plans = appReadTable_('PLANS').filter(p => String(p.fy) === String(y) && p.state !== 'ARCHIVED')
+    .sort((a, b) => String(a.client_label || '').localeCompare(String(b.client_label || ''), 'ja') || String(a.plan_id).localeCompare(String(b.plan_id)));
+  const out = { fy: y, filled: [], skipped: [], failed: [], remaining: [] };
+  const t0 = new Date().getTime();
+  let stop = false;
+  const opsAll = [];
+  plans.forEach((p, i) => {
+    const item = { planId: p.plan_id, name: p.client_label || '' };
+    if (stop) { out.remaining.push(item); return; }
+    if (new Date().getTime() - t0 > APP_BUDGET_DUMMY_TIME_MS) { stop = true; out.remaining.push(item); return; }
+    try {
+      if (!appDummyLandingNeeded_(p, todayYm)) {
+        out.skipped.push(Object.assign({ reason: 'done' }, item));
+        return;
+      }
+      const ops = appDummyLandingOps_(p, y, i, todayYm, atIso).filter(op => op && (op.mode !== 'ensure' || (op.rows && op.rows.length)));
+      opsAll.push.apply(opsAll, ops);
+      out.filled.push(Object.assign({ did: ['landing'] }, item));
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      if (/ロックのタイムアウト|サービス エラー/.test(msg)) {
+        stop = true;
+        out.remaining.push(Object.assign({ error: msg.slice(0, 160) }, item));
+        return;
+      }
+      out.failed.push(Object.assign({ error: msg.slice(0, 160) }, item));
+    }
+  });
+  if (opsAll.length) {
+    appWithLock_(() => {
+      appJournalRun_(ctx, '仮の着地（画面確認）', '', opsAll);
+    });
+  }
+  appDummySeedClearSchedule_();
+  return out;
+}
