@@ -14,6 +14,7 @@
  *   { table, mode: 'ensure', rows }        … キーの無い行だけ足す（追記だけの表・記録の表）
  *   { table, mode: 'append', rows }        … 版 10 の記録の表（appendOnly）に、キーの無い行だけ足す。キーの列だけを読んで確かめる（V10.js の appLogOps_ で作る）
  *   { table, mode: 'patch', key, patch }   … キーの行の列を、この値にする（同じ値なら書かない）
+ *   { table, mode: 'drop', planId, keys }  … keys のキーの行だけ消す（すでに無ければ何もしない）。ほかの行は書かない
  */
 const APP_JOURNAL_PROP = 'APP_WRITE_JOURNAL';
 
@@ -77,6 +78,7 @@ function appJournalRequireTables_(ops) {
   (ops || []).forEach(op => {
     if (!op || !op.table || seen[op.table]) return;
     if ((op.mode === 'ensure' || op.mode === 'append') && !(op.rows && op.rows.length)) return;
+    if (op.mode === 'drop' && !(op.keys && op.keys.length)) return;
     seen[op.table] = true;
     appTableSheet_(op.table, false);
     appRequireCurrentHead_(op.table);
@@ -121,6 +123,7 @@ function appJournalApply_(ops) {
     else if (op.mode === 'ensure') res = { appended: appEnsureRows_(op.table, op.rows).length };
     else if (op.mode === 'append') res = { appended: appAppendLogRows_(op.table, op.rows, ops).length };
     else if (op.mode === 'patch') res = { patched: appPatchRow_(op.table, op.key, op.patch, op.actor) ? 1 : 0 };
+    else if (op.mode === 'drop') res = appDropRowsByKey_(op.table, op.keys);
     else throw new Error('控えの書き方が不明です: ' + op.mode);
     written[op.table] = prev ? [].concat(prev, res) : res;
   });

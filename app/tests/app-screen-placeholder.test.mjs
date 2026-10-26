@@ -2,6 +2,7 @@
 /**
  * 画面確認の仮（仮予算・仮実績・B-1/B-2）を、人の MANUAL と分けて印を付け、印の行だけ消す。
  * 既存の行は、印を付ける操作を実行するまで変えない。数字だけ似ている行は消さない。
+ * 印が残っていても保存は止まらない。消す前の行と OUTPUT の H・I は控えから戻せる。
  *
  *   node app/tests/app-screen-placeholder.test.mjs
  */
@@ -76,11 +77,10 @@ assert.ok(drafts(human).every((r) => r.basis === 'MANUAL' && r.alloc === 'MANUAL
 assert.equal(env.table('ENG_CLIENT').filter((r) => r.plan_id === human).map((r) => r.Reason).join(','), '本物の動向');
 const beforeHuman = nums(human).monthly.map((m) => [m.adopted, m.uplift]);
 const beforeDummy = nums(dummy).monthly.map((m) => m.adopted);
-
-const blocked = save(dummy, [{ row: 29, adopted: 1, uplift: '' }]);
-assert.equal(blocked.status, 'FAILED', blocked.error);
-assert.match(blocked.error, /画面確認の仮が残っている/);
-assert.throws(() => env.call('apiBudgetProposal(__in)', { __in: { planId: dummy, prob: 50 } }), /画面確認の仮が残っている/);
+let proposalMsg = '';
+try { env.call('apiBudgetProposal(__in)', { __in: { planId: dummy, prob: 50 } }); }
+catch (e) { proposalMsg = String(e && e.message || e); }
+assert.doesNotMatch(proposalMsg, /画面確認の仮が残っている/, proposalMsg);
 const badBasis = save(human, [{ row: 30, adopted: 1600 }], { basis: 'SCREEN_CHECK' });
 assert.equal(badBasis.status, 'FAILED');
 assert.match(badBasis.error, /予算の決め方/);
@@ -98,19 +98,24 @@ const marked0 = task('markScreenPlaceholders', { fy: FY });
 assert.equal(marked0.ok, true, JSON.stringify(marked0));
 assert.deepEqual(marked0.result.marked, { drafts: 0, inputs: 0, evals: 0, status: 0, outputMonths: 0 });
 assert.ok(drafts(suspected).every((r) => r.basis === 'MANUAL'));
+const staleSave = save(suspected, [{ row: 29, adopted: 1700, uplift: 20 }]);
+assert.equal(staleSave.status, 'DONE', staleSave.error || '');
+assert.equal(staleSave.result.draft.basis, 'MANUAL', '印の無い仮が残っていても、予算の保存は止まらない');
+assert.equal(drafts(suspected).filter((r) => String(r.draft_id).indexOf('BDR-LEG-') === 0).length, 12, '印の無い下書きは保存では消えない');
 
 const legacy = env.seedPlan(book('旧仮の製薬'));
 env.run(`appInsertRows_('ENG_CLIENT', __r)`, { __r: [clientRow(legacy, '検証用の仮の動向')] });
 env.run(`appWithLock_(() => appAppendLogRows_('BUDGET_DRAFTS', __r, []))`, { __r: legacyDrafts(legacy, 0.82, 0.05) });
 preview = task('previewScreenPlaceholders', { fy: FY });
-assert.equal(preview.result.markable.drafts, 12);
+assert.equal(preview.result.markable.drafts, 0, '数字が似ていても下書きには印を付けない');
 assert.equal(preview.result.markable.inputs, 1);
+assert.ok(preview.result.suspected.drafts >= 12, JSON.stringify(preview.result.suspected));
 assert.ok(drafts(legacy).every((r) => r.basis === 'MANUAL'), '印を付けるまでは既存の行を変えない');
 const marked = task('markScreenPlaceholders', { fy: FY });
 assert.equal(marked.ok, true, JSON.stringify(marked));
-assert.equal(marked.result.marked.drafts, 12);
+assert.equal(marked.result.marked.drafts, 0);
 assert.equal(marked.result.marked.inputs, 1);
-assert.ok(drafts(legacy).every((r) => r.basis === 'SCREEN_CHECK' && r.alloc === 'SCREEN_CHECK'));
+assert.ok(drafts(legacy).every((r) => r.basis === 'MANUAL' && r.alloc === 'MANUAL'));
 assert.ok(env.table('ENG_CLIENT').some((r) => r.plan_id === legacy && r.Reason === 'SCREEN_CHECK 検証用の仮の動向'));
 assert.ok(drafts(human).every((r) => r.basis === 'MANUAL'));
 assert.ok(drafts(suspected).every((r) => r.basis === 'MANUAL'));
@@ -123,21 +128,66 @@ assert.equal(dry.result.deleted, null);
 assert.equal(drafts(dummy).length, 12, '確認だけでは消さない');
 assert.throws(() => task('deleteScreenPlaceholders', { fy: FY, apply: 'true' }), /apply/);
 
+env.run(`appWithLock_(() => {
+  const row = appReadPlanTable_('ENG_ROWS', __id).filter(r => r.sheet === 'OUTPUT' && Number(r.col_from) === 1 && Number(r.row_no) === 29)[0];
+  const cells = JSON.parse(row.cells_json);
+  while (cells.length < 9) cells.push('e');
+  cells[8] = 'n999';
+  appPatchRow_('ENG_ROWS', { plan_id: row.plan_id, sheet: row.sheet, row_no: row.row_no, col_from: row.col_from }, { cells_json: JSON.stringify(cells) }, 'test');
+})`, { __id: dummy });
+const hashOf = (id) => Object.fromEntries(env.table('ENG_SHEETS').filter((r) => r.plan_id === id && (r.sheet === 'OUTPUT' || r.sheet === 'CLIENT')).map((r) => [r.sheet, r.content_hash]));
+const hashBefore = hashOf(dummy);
 const gone = task('deleteScreenPlaceholders', { fy: FY, apply: true });
 assert.equal(gone.ok, true, JSON.stringify(gone));
 assert.equal(gone.result.apply, true);
 assert.ok(gone.result.deleted.drafts >= 12);
 assert.equal(drafts(dummy).length, 0);
-assert.equal(drafts(legacy).length, 0);
-assert.equal(drafts(suspected).length, 12, '数字だけ似ている行は残す');
+assert.equal(drafts(legacy).length, 12, '印の無い下書きは残す');
+assert.ok(drafts(legacy).every((r) => r.basis === 'MANUAL'));
+assert.equal(drafts(suspected).filter((r) => String(r.draft_id).indexOf('BDR-LEG-') === 0).length, 12, '数字だけ似ている行は残す');
 assert.ok(drafts(human).every((r) => r.basis === 'MANUAL' && r.alloc === 'MANUAL'));
 assert.deepEqual(nums(human).monthly.map((m) => [m.adopted, m.uplift]), beforeHuman);
-assert.deepEqual(nums(legacy).monthly.map((m) => [m.adopted, m.uplift]), legacyNums, '下書きと本体が違う月は戻さない');
-assert.ok(nums(dummy).monthly.every((m, i) => m.adopted === P50[i] && m.uplift === null), '仮の本体だけ、仮を書く前の真ん中に戻す');
+assert.deepEqual(nums(legacy).monthly.map((m) => [m.adopted, m.uplift]), legacyNums, '印の無い計画の本体は戻さない');
+assert.equal(nums(dummy).monthly[0].adopted, P50[0]);
+assert.equal(nums(dummy).monthly[0].uplift, 999, '仮が書いていない上乗せは残す');
+assert.ok(nums(dummy).monthly.slice(1).every((m, i) => m.adopted === P50[i + 1] && m.uplift === null), '仮の本体だけ、仮を書く前の真ん中に戻す');
 assert.ok(beforeDummy.some((v, i) => v !== P50[i]), '戻す前は仮の金額だった');
 assert.equal(env.table('ENG_CLIENT').filter((r) => r.plan_id === dummy).length, 0);
+assert.equal(env.table('ENG_CLIENT').filter((r) => r.plan_id === legacy && String(r.Reason).indexOf('SCREEN_CHECK') === 0).length, 0);
 assert.equal(env.table('ENG_CLIENT').filter((r) => r.plan_id === human).map((r) => r.Reason).join(','), '本物の動向');
 assert.equal(env.table('PLANS').filter((p) => p.plan_id === dummy)[0].people_csv, '鷹野');
+const hashAfter = hashOf(dummy);
+assert.notEqual(hashAfter.OUTPUT, hashBefore.OUTPUT, '消したあとの OUTPUT のハッシュを書き直す');
+assert.notEqual(hashAfter.CLIENT, hashBefore.CLIENT, '消したあとの入力のハッシュを書き直す');
+assert.equal(env.run(`(() => { const plan = appPlanOf_(__id); return appScratchTryReuse_(appWorkScratch_(plan), plan.plan_id, ['OUTPUT'], 'TOK-SCREEN') ? 'reused' : 'fresh'; })()`, { __id: dummy }), 'fresh', '消す前の計算用ブックは使い回さない');
+const diffAt = beforeDummy.findIndex((v, i) => v !== P50[i] && i >= 2);
+assert.ok(diffAt >= 2);
+const mid = save(dummy, [{ row: 30, adopted: 2222, uplift: 3 }]);
+assert.equal(mid.status, 'DONE', mid.error || '');
+assert.equal(nums(dummy).monthly[1].adopted, 2222);
+assert.equal(nums(dummy).monthly[0].uplift, 999, '1 か月の保存が、残した上乗せを仮の値に戻さない');
+assert.equal(nums(dummy).monthly[diffAt].adopted, P50[diffAt], '1 か月の保存が、消した仮の金額をほかの月へ戻さない');
+const april = env.table('SCREEN_HOLD').filter((r) => r.plan_id === dummy && r.kind === 'output').map((r) => JSON.parse(r.payload_json)).find((p) => Number(p.row_no) === 29);
+assert.equal(april.before[1], 'n999', '書き戻さない列の元の値も控えに残す');
+assert.deepEqual(april.wrote, [true, false]);
+assert.ok(env.table('SCREEN_HOLD').some((r) => r.plan_id === dummy && r.kind === 'row' && r.table_name === 'BUDGET_DRAFTS'));
+const back = task('restoreScreenPlaceholders', { fy: FY, batch: gone.result.batchId });
+assert.equal(back.ok, true, JSON.stringify(back));
+assert.equal(back.result.batchId, gone.result.batchId);
+assert.ok(back.result.restored.rows >= 12);
+assert.ok(drafts(dummy).some((r) => r.basis === 'SCREEN_CHECK'), '消した下書きが戻る');
+assert.equal(nums(dummy).monthly[0].adopted, beforeDummy[0]);
+assert.equal(nums(dummy).monthly[0].uplift, 999, '戻すときは、書き戻さなかった列も消す前の値に戻す');
+assert.equal(nums(dummy).monthly[diffAt].adopted, beforeDummy[diffAt]);
+assert.ok(env.table('ENG_CLIENT').some((r) => r.plan_id === dummy && String(r.Reason).indexOf('SCREEN_CHECK') === 0));
+assert.ok(env.table('ENG_CLIENT').some((r) => r.plan_id === legacy && r.Reason === 'SCREEN_CHECK 検証用の仮の動向'));
+const backAgain = task('restoreScreenPlaceholders', { fy: FY, batch: gone.result.batchId });
+assert.equal(backAgain.ok, true, JSON.stringify(backAgain));
+assert.equal(drafts(dummy).filter((r) => r.basis === 'SCREEN_CHECK').length, 12, '2 回戻しても下書きは増えない');
+const gone2 = task('deleteScreenPlaceholders', { fy: FY, apply: true });
+assert.equal(gone2.ok, true, JSON.stringify(gone2));
+assert.equal(drafts(dummy).some((r) => r.basis === 'SCREEN_CHECK'), false);
+assert.equal(drafts(legacy).filter((r) => r.basis === 'MANUAL').length, 12);
 
 const again = task('markScreenPlaceholders', { fy: FY });
 assert.deepEqual(again.result.marked, { drafts: 0, inputs: 0, evals: 0, status: 0, outputMonths: 0 });
@@ -167,7 +217,9 @@ assert.ok(steps().some((r) => r.step_key === 'step5_status' && r.error_summary =
 const notes = () => env.table('ENG_EVAL_COMPARE_MONTHLY').filter((r) => r.plan_id === landing);
 assert.ok(notes().some((r) => r.note_for_investigation === '本物の実績'));
 assert.ok(notes().some((r) => r.note_for_investigation === 'SCREEN_CHECK'));
-assert.throws(() => env.call('apiBudgetProposal(__in)', { __in: { planId: landing, prob: 60 } }), /画面確認の仮が残っている/);
+const landingSave = save(landing, [{ row: 29, adopted: 1900, uplift: 15 }]);
+assert.equal(landingSave.status, 'DONE', landingSave.error || '');
+assert.equal(landingSave.result.draft.basis, 'MANUAL', '印の付いた仮が残っていても、予算の保存は止まらない');
 const cleared = task('deleteScreenPlaceholders', { fy: FY, apply: true });
 assert.equal(cleared.ok, true, JSON.stringify(cleared));
 assert.ok(cleared.result.deleted.evals > 0);

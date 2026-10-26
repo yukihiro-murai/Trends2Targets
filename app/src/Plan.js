@@ -497,7 +497,6 @@ function appPlanEdit_(ctx, p) {
     if (p.inputHash !== inputHash) {
       throw new Error('画面を開いた後に、ほかの人の操作でデータが変わりました。画面を開き直して、もう一度入力してください。');
     }
-    if (p.action === 'BUDGET.SAVE' && p.screenPlaceholder !== true) appScreenPlaceholderRefuseBudget_(plan.plan_id);
     const scratch = appWorkScratch_(plan);
     const token = appId_('SCR');
     const reused = appScratchTryReuse_(scratch, plan.plan_id, act.sheets || null, token);

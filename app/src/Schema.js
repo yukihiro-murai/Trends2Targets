@@ -14,6 +14,7 @@
  * 版 11（2026-10-09 村井さん承認「推奨する対応を継続」。SCHEMA_PLAN_v10-12_JA.md の 4 章）で、予算の下書き（BUDGET_DRAFTS。追記だけ）を足し、
  * 公式版（PLAN_VERSIONS）の後ろに、出したときの届く見込みと前提の列を足した（APP_ADDED_COLUMNS。出した後は変えない）。中身は BudgetDrafts.js・V11.js・Versions.js
  * 版 16 は FORECAST_RUNS 末尾に計画用月額 planning_json を足す。既存の予測帯・旧回は書き換えず、新しい回の12月要約だけを保存する。
+ * SCREEN_HOLD（画面確認の仮を消す直前の控え）は版を上げずに足す。初期設定で作る。すでに版 16 の環境では、消す操作が表を作る。
  */
 const APP_SCHEMA_VERSION = 16;
 
@@ -195,6 +196,12 @@ const APP_TABLES = {
     key: ['draft_id'], appendOnly: true,
     columns: ['plan_id', 'draft_id', 'action_id', 'ym', 'adopted', 'uplift', 'basis', 'prob', 'alloc', 'run_id', 'center', 'actor_email', 'saved_at'],
     types: { adopted: 'num', uplift: 'num', prob: 'num', center: 'num' }
+  },
+  SCREEN_HOLD: {
+    // 画面確認の仮を消す直前の控え（追記だけ。同じ hold_id は足さない）。kind = row（消した行）・output（OUTPUT の H・I の元の値）。
+    // 版は上げない。無い環境では deleteScreenPlaceholders が表を作る（BudgetDrafts.js の appScreenEnsureHold_）。
+    key: ['hold_id'], appendOnly: true,
+    columns: ['plan_id', 'hold_id', 'batch_id', 'fy', 'table_name', 'row_key', 'kind', 'payload_json', 'actor_email', 'saved_at']
   },
   // ---- 版 12 の表（追記だけ。2026-10-15 村井さん承認。app/DESIGN_triangulation_bayes_JA.md の 2 章）----
   FORECAST_METHODS: {

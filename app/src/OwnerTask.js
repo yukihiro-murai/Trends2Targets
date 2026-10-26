@@ -158,10 +158,14 @@ const APP_OWNER_ACTIONS = {
   markScreenPlaceholders: { name: 'SCREEN.MARK', args: ['fy'], check: t => appOwnerCheckDummyFy_(t),
     opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'SCREEN_PLACEHOLDER', detail: i }),
     run: (ctx, i) => appScreenPlaceholderMark_(ctx, i.fy) },
-  // 印の付いた仮だけ消す。apply が true のときだけ消す（省くと件数だけ）
+  // 印の付いた仮だけ消す。apply が true のときだけ消す（省くと件数だけ）。消す前の行は SCREEN_HOLD に残る
   deleteScreenPlaceholders: { name: 'SCREEN.DELETE', args: ['fy', 'apply'], check: t => appOwnerCheckScreenApply_(t),
     opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'SCREEN_PLACEHOLDER', detail: i }),
     run: (ctx, i) => appScreenPlaceholderDelete_(ctx, i.fy, i.apply === true) },
+  // 消す直前の控えから戻す。batch を省くと、その年度でいちばん新しい控え。印の付いた行を消し直すまで、仮が戻る
+  restoreScreenPlaceholders: { name: 'SCREEN.RESTORE', args: ['fy', 'batch'], check: t => appOwnerCheckScreenRestore_(t),
+    opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'SCREEN_PLACEHOLDER', detail: i }),
+    run: (ctx, i) => appScreenPlaceholderRestore_(ctx, i.fy, i.batch) },
   // まとめて動かしている状態（今の計画・残り・済んだ計画と結果）
   bulkStatus: { name: 'BULK.STATUS', opts: () => ({ minRole: 'ADMIN', audit: false }), run: () => appBulkStatus_() },
   // 全メーカーの履歴のみの計画を用意し、取込→集計→予測を保存する。既存の通常計画は保持する。
@@ -343,6 +347,12 @@ function appOwnerCheckDummyFy_(t) {
 function appOwnerCheckScreenApply_(t) {
   appOwnerCheckDummyFy_(t);
   if (t.apply !== undefined && typeof t.apply !== 'boolean') throw new Error(t.action + ' の apply は true か false で入れてください（省くと消さずに件数だけ出します）。');
+}
+
+/** restoreScreenPlaceholders の batch（省ける。入れるなら、消したときの batchId） */
+function appOwnerCheckScreenRestore_(t) {
+  appOwnerCheckDummyFy_(t);
+  if (t.batch !== undefined && (typeof t.batch !== 'string' || !String(t.batch).trim())) throw new Error(t.action + ' の batch は、消したときの batchId を入れてください（省くと、その年度でいちばん新しい控えに戻します）。');
 }
 
 function appOwnerCheckCutoffFy_(t) {
