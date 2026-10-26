@@ -7,7 +7,8 @@
  *   node app/tests/app-screen-placeholder.test.mjs
  */
 import assert from 'node:assert/strict';
-import { OWNER, setUpEnv } from './gas-mock.mjs';
+import vm from 'node:vm';
+import { OWNER, setUpEnv, uiHtml } from './gas-mock.mjs';
 
 const env = setUpEnv();
 env.run(`appToday_ = function () { return '2026-10-21'; }`);
@@ -233,5 +234,31 @@ assert.equal(steps().some((r) => r.error_summary === 'SCREEN_CHECK'), false);
 assert.deepEqual(notes().map((r) => r.note_for_investigation), ['本物の実績']);
 assert.ok(drafts(human).every((r) => r.basis === 'MANUAL'));
 assert.ok(drafts(suspected).every((r) => r.basis === 'MANUAL'));
+
+const kept = env.seedPlan(book('保存後の製薬'));
+env.run(`appWithLock_(() => appAppendLogRows_('BUDGET_DRAFTS', __r, []))`, {
+  __r: yms.map((ym, i) => ({
+    plan_id: kept, draft_id: 'BDR-SCR-' + kept + '-' + i, action_id: 'ACT-SCR-' + kept, ym,
+    adopted: 626, uplift: null, basis: 'SCREEN_CHECK', alloc: 'SCREEN_CHECK', prob: null, run_id: '',
+    center: P50[i], actor_email: OWNER, saved_at: '2026-10-01T00:00:00+0900',
+  })),
+});
+assert.equal(view(kept).boot.budgetDraft.basis, 'SCREEN_CHECK');
+assert.equal(view(kept).boot.budgetDraft.placeholder, true);
+const over = save(kept, [{ row: 29, adopted: 2222, uplift: 4 }]);
+assert.equal(over.status, 'DONE', over.error || '');
+assert.equal(over.result.draft.basis, 'MANUAL');
+const shown = view(kept).boot.budgetDraft;
+assert.equal(shown.basis, 'MANUAL', '今の予算の basis');
+assert.equal(shown.placeholder, false, '履歴に仮が残っていても、今の予算は仮と出さない');
+assert.ok(drafts(kept).some((r) => r.basis === 'SCREEN_CHECK'), '仮の行は履歴に残る');
+const howJs = uiHtml.slice(uiHtml.indexOf('function fcBudHow'), uiHtml.indexOf('function fcBudDrift'));
+const how = vm.runInNewContext(`${howJs}\nfcBudHow;`, {
+  BUD_ALLOC: { PAST_SHAPE: '過去の平均の形', FORECAST_SHAPE: '予測の月の形', MANUAL: '手で直した形' },
+  BUD_PROBS: [50, 60, 70, 80],
+});
+assert.equal(how(shown).say, '手で直した額', '人が保存したあとは「画面確認の仮」と出さない');
+assert.equal(how({ basis: 'MANUAL', placeholder: true, alloc: 'MANUAL' }).say, '手で直した額', '表示は今の basis で決める');
+assert.equal(how({ basis: 'PROB', prob: 80, placeholder: true, alloc: 'PAST_SHAPE' }).say, '80% で決めた額');
 
 console.log('app-screen-placeholder: all tests passed');

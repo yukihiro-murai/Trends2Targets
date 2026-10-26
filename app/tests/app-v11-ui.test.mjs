@@ -411,6 +411,9 @@ reachOn();
   assert.deepEqual(toasts(), []);
   run('S.fc.budget = {}; S.fc.view.boot.budgetDraft = { basis: "MANUAL", alloc: "MANUAL", prob: null, months: 12 }');
   assert.doesNotMatch(card(), /画面確認の仮の予算が残っています/);
+  run('S.fc.view.boot.budgetDraft = { basis: "MANUAL", placeholder: true, alloc: "MANUAL", prob: null, months: 12, savedAt: "2026-10-21T12:00:00+0900" }');
+  assert.equal(run('fcBudHow(S.fc.view.boot.budgetDraft).say'), '手で直した額', '今の basis が手入力なら、履歴の仮で「画面確認の仮」と出さない');
+  assert.doesNotMatch(card(), /画面確認の仮/);
   run('delete S.fc.view.boot.budgetDraft');
 }
 
