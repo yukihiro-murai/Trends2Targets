@@ -179,6 +179,9 @@ assert.ok(drafts(dummy).some((r) => r.basis === 'SCREEN_CHECK'), '消した下�
 assert.equal(nums(dummy).monthly[0].adopted, beforeDummy[0]);
 assert.equal(nums(dummy).monthly[0].uplift, 999, '戻すときは、書き戻さなかった列も消す前の値に戻す');
 assert.equal(nums(dummy).monthly[diffAt].adopted, beforeDummy[diffAt]);
+assert.equal(nums(dummy).monthly[1].adopted, 2222, '消したあとに人が保存した値は、仮の値へ戻さない');
+assert.equal(nums(dummy).monthly[1].uplift, 3);
+assert.ok(back.result.restored.skippedCells >= 1, '人が保存したセルは飛ばして件数を返す');
 assert.ok(env.table('ENG_CLIENT').some((r) => r.plan_id === dummy && String(r.Reason).indexOf('SCREEN_CHECK') === 0));
 assert.ok(env.table('ENG_CLIENT').some((r) => r.plan_id === legacy && r.Reason === 'SCREEN_CHECK 検証用の仮の動向'));
 const backAgain = task('restoreScreenPlaceholders', { fy: FY, batch: gone.result.batchId });

@@ -1287,7 +1287,8 @@ function appScreenOutputEdits_(planId, removed, kept) {
     if (!wroteH && !wroteI) return;
     edits.push({
       row_no: String(row.row_no), col_from: String(row.col_from), ym: ym,
-      before: [String(cells[7]), String(cells[8])], wrote: [wroteH, wroteI], cells_json: JSON.stringify(copy)
+      before: [String(cells[7]), String(cells[8])], wrote: [wroteH, wroteI],
+      written: [String(copy[7]), String(copy[8])], cells_json: JSON.stringify(copy)
     });
   });
   return edits;
@@ -1313,7 +1314,7 @@ function appScreenDeleteOps_(ctx, scan, ops, holds, counts, batchId, fy, at) {
   const edits = drop.length ? appScreenOutputEdits_(planId, drop, kept) : [];
   edits.forEach(e => {
     holds.push(appScreenHoldRow_(planId, batchId, fy, 'ENG_ROWS', e.row_no + ':' + e.col_from, 'output',
-      { row_no: e.row_no, col_from: e.col_from, ym: e.ym, before: e.before, wrote: e.wrote }, actor, at));
+      { row_no: e.row_no, col_from: e.col_from, ym: e.ym, before: e.before, wrote: e.wrote, written: e.written }, actor, at));
     ops.push({ table: 'ENG_ROWS', mode: 'patch', planId: planId,
       key: { plan_id: planId, sheet: 'OUTPUT', row_no: e.row_no, col_from: e.col_from },
       patch: { cells_json: e.cells_json }, actor: actor });
@@ -1414,6 +1415,40 @@ function appScreenRestoreRowOps_(holds) {
   return { ops: ops, by: by };
 }
 
+/** 控えのセルと、今のセルが同じ値か（表記が違っても、空どうし・円の差が無いなら同じ） */
+function appScreenHoldCellSame_(a, b) {
+  if (String(a) === String(b)) return true;
+  const da = appScreenDecodeNum_(a), db = appScreenDecodeNum_(b);
+  if (da === null && db === null) return String(appScreenDecodeCell_(a) || '') === '' && String(appScreenDecodeCell_(b) || '') === '';
+  return appBudgetSame_(da, db);
+}
+
+/**
+ * OUTPUT の H・I を、消したときに書いた値のままのセルだけ、消す前の値へ戻す。
+ * 今の値が違うセルは飛ばす。返り値 { cells, skipped, changed }
+ */
+function appScreenRestoreOutput_(cells, payload) {
+  const copy = cells.slice();
+  const wrote = payload && payload.wrote || [];
+  const written = payload && payload.written || [];
+  const before = payload && payload.before || [];
+  let skipped = 0;
+  let changed = false;
+  [0, 1].forEach(i => {
+    if (!wrote[i]) return;
+    const was = written[i];
+    const back = before[i];
+    const now = copy[7 + i] === undefined ? 'e' : copy[7 + i];
+    if (was === undefined || was === null || back === undefined || !appScreenHoldCellSame_(now, was)) { skipped += 1; return; }
+    if (!appScreenHoldCellSame_(now, back)) {
+      while (copy.length <= 7 + i) copy.push('e');
+      copy[7 + i] = String(back);
+      changed = true;
+    }
+  });
+  return { cells: copy, skipped: skipped, changed: changed };
+}
+
 function appScreenPlaceholderRestore_(ctx, fy, batch) {
   const y = appScreenFy_(fy);
   appRequireOpenYear_(y);
@@ -1431,41 +1466,38 @@ function appScreenPlaceholderRestore_(ctx, fy, batch) {
       holds = id ? holds.filter(r => r.batch_id === id) : [];
     }
     const batchId = holds.length ? holds[0].batch_id : (want || '');
-    if (!holds.length) return { fy: y, batchId: batchId, restored: { rows: 0, outputMonths: 0 } };
+    if (!holds.length) return { fy: y, batchId: batchId, restored: { rows: 0, outputMonths: 0, skippedCells: 0 } };
     const rows = holds.filter(h => h.kind === 'row');
     const outputs = holds.filter(h => h.kind === 'output');
     const built = appScreenRestoreRowOps_(rows);
     const ops = built.ops.slice();
     const outByPlan = {};
+    let skippedCells = 0;
     outputs.forEach(h => {
       let payload;
       try { payload = JSON.parse(h.payload_json); } catch (e) { throw new Error('消す前の控えが読めません（' + h.hold_id + '）。'); }
       (outByPlan[h.plan_id] = outByPlan[h.plan_id] || []).push(payload);
     });
     Object.keys(outByPlan).forEach(planId => {
+      const nextByKey = {};
       outByPlan[planId].forEach(p => {
         const row = appScreenReadPlan_('ENG_ROWS', planId).filter(r => r.sheet === 'OUTPUT' && String(r.row_no) === String(p.row_no) && String(r.col_from) === String(p.col_from))[0];
-        if (!row || !p.before || p.before.length < 2) return;
+        if (!row || !p.before || p.before.length < 2) { skippedCells += 2; return; }
         let cells;
-        try { cells = JSON.parse(row.cells_json || '[]'); } catch (e) { return; }
-        while (cells.length < 9) cells.push('e');
-        cells[7] = p.before[0];
-        cells[8] = p.before[1];
+        try { cells = JSON.parse(row.cells_json || '[]'); } catch (e) { skippedCells += 2; return; }
+        const back = appScreenRestoreOutput_(cells, p);
+        skippedCells += back.skipped;
+        if (!back.changed) return;
+        const json = JSON.stringify(back.cells);
+        nextByKey[String(p.row_no) + ':' + String(p.col_from)] = json;
         ops.push({ table: 'ENG_ROWS', mode: 'patch', planId: planId,
           key: { plan_id: planId, sheet: 'OUTPUT', row_no: String(row.row_no), col_from: String(row.col_from) },
-          patch: { cells_json: JSON.stringify(cells) }, actor: ctx.actor });
+          patch: { cells_json: json }, actor: ctx.actor });
       });
       const hop = appScreenSheetHashOp_(planId, 'OUTPUT', ctx.actor, bag => {
-        outByPlan[planId].forEach(p => {
-          bag.segs.forEach(seg => {
-            if (String(seg.row_no) !== String(p.row_no) || String(seg.col_from) !== String(p.col_from) || !p.before) return;
-            let cells;
-            try { cells = JSON.parse(seg.cells_json || '[]'); } catch (e) { return; }
-            while (cells.length < 9) cells.push('e');
-            cells[7] = p.before[0];
-            cells[8] = p.before[1];
-            seg.cells_json = JSON.stringify(cells);
-          });
+        bag.segs.forEach(seg => {
+          const json = nextByKey[String(seg.row_no) + ':' + String(seg.col_from)];
+          if (json) seg.cells_json = json;
         });
       });
       if (hop) ops.push(hop);
@@ -1489,6 +1521,6 @@ function appScreenPlaceholderRestore_(ctx, fy, batch) {
       if (op) ops.push(op);
     });
     if (ops.length) appJournalRun_(ctx, '画面確認の仮を戻す', '', ops);
-    return { fy: y, batchId: batchId, restored: { rows: rows.length, outputMonths: outputs.length } };
+    return { fy: y, batchId: batchId, restored: { rows: rows.length, outputMonths: outputs.length, skippedCells: skippedCells } };
   });
 }
