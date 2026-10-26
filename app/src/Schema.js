@@ -188,7 +188,8 @@ const APP_TABLES = {
   // ---- 版 11 の表（追記だけ。1 列目が plan_id: 締めた年度の行は書けず、年度の控えに入る）----
   BUDGET_DRAFTS: {
     // 予算の下書き（4-1）: 予算の保存 1 回で 12 か月分の 12 行。今の下書き = 計画 × 月の一番新しい行。予測し直しても、これで採用予測と上乗せを戻す。
-    // basis = CENTER（真ん中のまま）・PROB（確率で選んだ）・MANUAL（手で直した）・BASELINE（版 11 の移行で今の予算を 1 回写した）、
+    // basis = CENTER（真ん中のまま）・PROB（確率で選んだ）・MANUAL（手で直した）・BASELINE（版 11 の移行で今の予算を 1 回写した）・
+    // SCREEN_CHECK（画面確認の仮。人の入力ではない。BudgetDrafts.js の APP_SCREEN_PLACEHOLDER）、
     // prob = 確率で選んだときの値（50・60・70・80）、alloc = 月への割り振り（PAST_SHAPE 過去の平均の形・FORECAST_SHAPE 予測の月の形・MANUAL）、
     // run_id = 下書きを作ったときの予測の回、center = そのときの月の真ん中。prob は数（num）: 空を 0 と書かない
     key: ['draft_id'], appendOnly: true,

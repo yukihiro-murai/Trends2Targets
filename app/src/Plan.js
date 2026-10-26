@@ -497,6 +497,7 @@ function appPlanEdit_(ctx, p) {
     if (p.inputHash !== inputHash) {
       throw new Error('画面を開いた後に、ほかの人の操作でデータが変わりました。画面を開き直して、もう一度入力してください。');
     }
+    if (p.action === 'BUDGET.SAVE' && p.screenPlaceholder !== true) appScreenPlaceholderRefuseBudget_(plan.plan_id);
     const scratch = appWorkScratch_(plan);
     const token = appId_('SCR');
     const reused = appScratchTryReuse_(scratch, plan.plan_id, act.sheets || null, token);
@@ -512,6 +513,7 @@ function appPlanEdit_(ctx, p) {
     if (new Date().getTime() - t0 > APP_EDIT_WRITE_DEADLINE_MS) {
       throw new Error('時間がかかりすぎたので、保存をやめました（何も書いていません）。もう一度保存してください。');
     }
+    if (draftArgs && p.screenPlaceholder === true) draftArgs.placeholder = true;
     const ops = appChangedOps_(ctx, plan.plan_id, cap.changed, actionId, inLog);
     if (act.local === 'appPlanSetPeople_' && names.length) {
       ops.push({ table: 'PLANS', mode: 'patch', key: { plan_id: plan.plan_id }, patch: { people_csv: call.value.peopleCsv }, actor: ctx.actor });

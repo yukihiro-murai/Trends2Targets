@@ -150,6 +150,18 @@ const APP_OWNER_ACTIONS = {
     opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'LANDING_DUMMY', detail: i,
       after: res => ({ fy: res.fy, filled: (res.filled || []).length, skipped: (res.skipped || []).length, failed: (res.failed || []).length, remaining: (res.remaining || []).length }) }),
     run: (ctx, i) => appSeedDummyLanding_(ctx, i.fy) },
+  // 画面確認の仮が何件あるか（印の付いた行・印を付けられる行・数字だけ似ている行）。書かない
+  previewScreenPlaceholders: { name: 'SCREEN.PREVIEW', args: ['fy'], check: t => appOwnerCheckDummyFy_(t),
+    opts: () => ({ ownerOnly: true, minRole: 'ADMIN', audit: false }),
+    run: (ctx, i) => appScreenPlaceholderPreview_(i.fy) },
+  // いま確実に仮と分かる行へ印を付ける（人の MANUAL は変えない。実行するまで既存の行は触らない）
+  markScreenPlaceholders: { name: 'SCREEN.MARK', args: ['fy'], check: t => appOwnerCheckDummyFy_(t),
+    opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'SCREEN_PLACEHOLDER', detail: i }),
+    run: (ctx, i) => appScreenPlaceholderMark_(ctx, i.fy) },
+  // 印の付いた仮だけ消す。apply が true のときだけ消す（省くと件数だけ）
+  deleteScreenPlaceholders: { name: 'SCREEN.DELETE', args: ['fy', 'apply'], check: t => appOwnerCheckScreenApply_(t),
+    opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'SCREEN_PLACEHOLDER', detail: i }),
+    run: (ctx, i) => appScreenPlaceholderDelete_(ctx, i.fy, i.apply === true) },
   // まとめて動かしている状態（今の計画・残り・済んだ計画と結果）
   bulkStatus: { name: 'BULK.STATUS', opts: () => ({ minRole: 'ADMIN', audit: false }), run: () => appBulkStatus_() },
   // 全メーカーの履歴のみの計画を用意し、取込→集計→予測を保存する。既存の通常計画は保持する。
@@ -325,6 +337,12 @@ function appOwnerCheckBulkFy_(t) {
 /** seedDummyBudgets の年度（省ける。入れるなら 4 桁） */
 function appOwnerCheckDummyFy_(t) {
   if (t.fy !== undefined && !/^\d{4}$/.test(String(t.fy === null ? '' : t.fy).trim())) throw new Error(t.action + ' の fy（年度）は 4 桁の数で入れてください（例: "fy":2026。省くと今の年度）。');
+}
+
+/** deleteScreenPlaceholders の apply（省ける。入れるなら true か false。true のときだけ仮を消す） */
+function appOwnerCheckScreenApply_(t) {
+  appOwnerCheckDummyFy_(t);
+  if (t.apply !== undefined && typeof t.apply !== 'boolean') throw new Error(t.action + ' の apply は true か false で入れてください（省くと消さずに件数だけ出します）。');
 }
 
 function appOwnerCheckCutoffFy_(t) {

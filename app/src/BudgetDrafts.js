@@ -12,12 +12,18 @@
  * 確率で選ぶ（決定 25・27）: 着地見込みと同じ分布（Landing.js の appLandingDist_ を使う appLandingReach_ の届く金額。計画の一覧の控え appPlanShadow_ から読む）で、
  *   50・60・70・80% の見込みで届く年間の金額を出し、月へ割り振る（appBudgetProposal_）。画面はそれを、ふつうの予算の保存（BUDGET.SAVE）で
  *   basis = PROB・prob・alloc を添えて保存する。採用予測 = 約束、上乗せ = 挑戦（確率で選ぶのは採用予測だけ。上乗せは変えない）。
- * 下書きの表は追記だけ（行は消さず書き換えない。足すのは本体の保存と同じ控え: V10.js の appLogOps_ → 控えの書き方 append）。締めた年度の行は書けない。
+ * 下書きの表は追記だけ（ふだんは行を消さず書き換えない。足すのは本体の保存と同じ控え: V10.js の appLogOps_ → 控えの書き方 append）。
+ * 画面確認の仮だけ、所有者の操作で印を付け、その印の行だけを消せる（appScreenPlaceholderMark_ / appScreenPlaceholderDelete_）。人の MANUAL は消さない。締めた年度の行は書けない。
  * 新しい自動の処理とメールは足さない。保存している予測の数字は変えない。
  */
 
 /** 予算の決め方（画面から渡せるもの。BASELINE は版 11 の移行の写しだけ） */
 const APP_BUDGET_BASES = ['CENTER', 'PROB', 'MANUAL'];
+/** 画面確認の仮（人の MANUAL ではない。画面からは選べない。この印の行だけを、所有者の操作で消せる） */
+const APP_SCREEN_PLACEHOLDER = 'SCREEN_CHECK';
+const APP_SCREEN_INPUT_CLIENT = '検証用の仮の動向';
+const APP_SCREEN_INPUT_NOTE = '検証用の仮の見解';
+const APP_SCREEN_INPUT_SPOT = '検証スポット';
 /** 確率で選べる値（%。90% 以上は出さない: Landing.js の APP_LANDING.REACH と同じ） */
 const APP_BUDGET_PROBS = [50, 60, 70, 80];
 /** 月への割り振り */
@@ -151,6 +157,7 @@ function appBudgetProbOf_(v, required) {
  *   - 割り振り: CENTER は FORECAST_SHAPE（月の真ん中そのもの）。ほかは申告のまま、省けば PROB は PAST_SHAPE・MANUAL は MANUAL
  */
 function appBudgetResolve_(a, months) {
+  if (a && a.placeholder === true) return { basis: APP_SCREEN_PLACEHOLDER, prob: null, alloc: APP_SCREEN_PLACEHOLDER };
   const isCenter = months.every(m => appBudgetSame_(m.adopted, m.center));
   let basis = a.basis || (isCenter ? 'CENTER' : 'MANUAL');
   if (basis === 'CENTER' && !isCenter) basis = 'MANUAL';
@@ -280,7 +287,8 @@ function appBudgetDraftView_(planId) {
   const run = last.run_id ? appReadTable_('FORECAST_RUNS').filter(r => r.run_id === last.run_id)[0] : null;
   return { basis: last.basis, prob: last.prob, alloc: last.alloc, runId: last.run_id, runAt: run ? run.finished_at : '', savedAt: last.saved_at,
     centerAtDraft: centerAtDraft, centerNow: centerNow, drift: drift, driftLimit: APP_BUDGET_DRIFT_WARN,
-    warn: drift !== null && Math.abs(drift) >= APP_BUDGET_DRIFT_WARN, adopted: sum(mine, 'adopted'), uplift: sum(mine, 'uplift'), months: mine.length };
+    warn: drift !== null && Math.abs(drift) >= APP_BUDGET_DRIFT_WARN, adopted: sum(mine, 'adopted'), uplift: sum(mine, 'uplift'), months: mine.length,
+    placeholder: rows.some(r => String(r.basis || '') === APP_SCREEN_PLACEHOLDER) };
 }
 
 // ---- 確率で選ぶ（apiBudgetProposal。決定 25・27） ----
@@ -378,6 +386,7 @@ function appBudgetProposal_(input) {
   if (want !== 'PAST_SHAPE' && want !== 'FORECAST_SHAPE') throw new Error('月への割り振りは「過去の平均の形」か「予測の月の形」にしてください。');
   const plan = appPlanOf_(input && input.planId);
   if (appPlanIsMeasure_(plan)) throw new Error(APP_MEASURE_REFUSED['BUDGET.SAVE']);
+  appScreenPlaceholderRefuseBudget_(plan.plan_id);
   const live = appBudgetProbLive_(plan);
   const trial = live ? '' : '試しの計算です。';
   const months = appBudgetStoredMonths_(plan.plan_id);
@@ -511,10 +520,10 @@ function appDummySeedInputs_(ctx, plan, fy, index, item) {
   const step = appDummyPick_(APP_BUDGET_DUMMY_STEPS, index);
   const conf = appDummyPick_(APP_BUDGET_DUMMY_CONF, index);
   const kinds = [
-    ['client', { person: person, ym: ym, step: step, reason: '検証用の仮の動向', selfConf: conf }],
+    ['client', { person: person, ym: ym, step: step, reason: APP_SCREEN_PLACEHOLDER + ' ' + APP_SCREEN_INPUT_CLIENT, selfConf: conf }],
     ['opinions', { person: person, ym: ym, step: appDummyPick_(APP_BUDGET_DUMMY_STEPS, index + 3),
-      conf: String(0.35 + (Math.abs(index) % 5) * 0.12), note: '検証用の仮の見解' }],
-    ['devspot', { person: person, ym: ym, project: '検証スポット' + String((Math.abs(index) % 9) + 1),
+      conf: String(0.35 + (Math.abs(index) % 5) * 0.12), note: APP_SCREEN_PLACEHOLDER + ' ' + APP_SCREEN_INPUT_NOTE }],
+    ['devspot', { person: person, ym: ym, project: APP_SCREEN_PLACEHOLDER + ' ' + APP_SCREEN_INPUT_SPOT + String((Math.abs(index) % 9) + 1),
       amount: 180000 + (Math.abs(index) % 8) * 70000, conf: String(0.4 + (Math.abs(index) % 4) * 0.15) }]
   ];
   kinds.forEach(pair => {
@@ -561,7 +570,8 @@ function appDummyBudgetRows_(planId, scale, upliftRate) {
 }
 
 function appDummySeedEdit_(ctx, planId, action, args) {
-  return appPlanEdit_(ctx, { planId: planId, action: action, args: args, inputHash: appPlanInputHash_(planId) });
+  return appPlanEdit_(ctx, { planId: planId, action: action, args: args, inputHash: appPlanInputHash_(planId),
+    screenPlaceholder: action === 'BUDGET.SAVE' });
 }
 
 /** 1 計画へ、画面確認用の仮の担当者・予算・人間入力を書く（確定版は触らない。予測の月が無ければ予算だけ飛ばす） */
@@ -677,6 +687,7 @@ function appDummyEnsureOutputMonths_(planId, fy, index) {
   const byRow = {};
   all.filter(r => Number(r.col_from) === 1).forEach(r => { byRow[Number(r.row_no)] = r; });
   let changed = false;
+  const budgetWrites = [];
   const next = all.map(r => Object.assign({}, r));
   const put = (rowNo, cells) => {
     const i = next.findIndex(r => Number(r.row_no) === rowNo && Number(r.col_from) === 1);
@@ -707,13 +718,15 @@ function appDummyEnsureOutputMonths_(planId, fy, index) {
       const scale = appDummyPick_(APP_BUDGET_DUMMY_SCALES, index);
       const up = appDummyPick_(APP_BUDGET_DUMMY_UPLIFT, index);
       const ad = Math.round((p50 !== null ? p50 : base) * scale);
+      const uplift = Math.round(ad * up);
       cells[7] = 'n' + ad;
-      cells[8] = 'n' + Math.round(ad * up);
+      cells[8] = 'n' + uplift;
       changed = true;
+      budgetWrites.push({ ym: ym, adopted: ad, uplift: uplift, center: p50 !== null ? p50 : base });
     }
     if (changed || !cur) put(rowNo, cells);
   });
-  return changed ? appOpReplacePlan_('ENG_ROWS', planId, ['OUTPUT'], next) : null;
+  return { op: changed ? appOpReplacePlan_('ENG_ROWS', planId, ['OUTPUT'], next) : null, budgets: budgetWrites };
 }
 
 function appDummyEvalRow_(planId, seq, ym, p10, p50, p90, actual) {
@@ -723,7 +736,8 @@ function appDummyEvalRow_(planId, seq, ym, p10, p50, p90, actual) {
     forecast_total_p10: p10, forecast_total_p50: p50, forecast_total_p90: p90,
     signed_error_p50: actual - p50, abs_error_p50: Math.abs(actual - p50),
     ape_p50: p50 ? Math.abs(actual - p50) / p50 : 0, fy_label: 'FY' + ym.slice(0, 4),
-    range_outside_flag: (actual < p10 || actual > p90) ? 1 : 0
+    range_outside_flag: (actual < p10 || actual > p90) ? 1 : 0,
+    note_for_investigation: APP_SCREEN_PLACEHOLDER
   };
   const o = { plan_id: planId, seq: String(seq) };
   let types = '';
@@ -740,12 +754,21 @@ function appDummyEvalRow_(planId, seq, ym, p10, p50, p90, actual) {
 function appDummyStatusRows_(planId, name, atIso) {
   const mk = (seq, key) => ({
     plan_id: planId, seq: String(seq), step_key: key, last_run_date: atIso, last_run_by: '検証担当',
-    status: 'success', target_client: name || '', record_count: '6', error_summary: '', _types: 'sdsssns'
+    status: 'success', target_client: name || '', record_count: '6', error_summary: APP_SCREEN_PLACEHOLDER, _types: 'sdsssns'
   });
-  const keep = (appReadPlanTable_('ENG_PROCESS_STATUS', planId) || [])
-    .filter(r => r.step_key !== 'step2_status' && r.step_key !== 'step5_status')
-    .map((r, i) => Object.assign({}, r, { seq: String(i + 2) }));
-  return keep.concat([mk(keep.length + 2, 'step2_status'), mk(keep.length + 3, 'step5_status')]);
+  const existing = appReadPlanTable_('ENG_PROCESS_STATUS', planId) || [];
+  const keep = existing.filter(r => {
+    if (r.step_key !== 'step2_status' && r.step_key !== 'step5_status') return true;
+    return String(r.error_summary || '') !== APP_SCREEN_PLACEHOLDER && !appScreenLegacyStatus_(r);
+  }).map(appStripRow_);
+  let n = keep.reduce((m, r) => Math.max(m, Number(r.seq) || 0), 1);
+  const add = [];
+  ['step2_status', 'step5_status'].forEach(key => {
+    if (keep.some(r => r.step_key === key)) return;
+    n += 1;
+    add.push(mk(n, key));
+  });
+  return keep.concat(add);
 }
 
 function appDummyLandingNeeded_(plan, todayYm) {
@@ -772,10 +795,19 @@ function appDummyLandingNeeded_(plan, todayYm) {
   return sky.landing === null || sky.landingSd === null;
 }
 
-function appDummyLandingOps_(plan, fy, index, todayYm, atIso) {
+function appDummyLandingDraftRows_(plan, budgets, actor, atIso) {
+  return (budgets || []).map(m => ({ plan_id: plan.plan_id,
+    draft_id: appStableLogId_(APP_BUDGET_DRAFT_PREFIX, [APP_SCREEN_PLACEHOLDER, plan.plan_id, m.ym]), action_id: APP_SCREEN_PLACEHOLDER,
+    ym: m.ym, adopted: m.adopted, uplift: m.uplift, basis: APP_SCREEN_PLACEHOLDER, prob: null, alloc: APP_SCREEN_PLACEHOLDER,
+    run_id: '', center: m.center, actor_email: actor || '', saved_at: atIso }));
+}
+
+function appDummyLandingOps_(plan, fy, index, todayYm, atIso, actor) {
   const ops = [];
-  const outOp = appDummyEnsureOutputMonths_(plan.plan_id, fy, index);
+  const ensured = appDummyEnsureOutputMonths_(plan.plan_id, fy, index);
+  const outOp = ensured.op;
   if (outOp) ops.push(outOp);
+  ops.push.apply(ops, appLogOps_('BUDGET_DRAFTS', appDummyLandingDraftRows_(plan, ensured.budgets, actor, atIso)));
   const o = {};
   (appReadPlanTable_('ENG_ROWS', plan.plan_id) || []).filter(r => r.sheet === 'OUTPUT' && Number(r.col_from) === 1)
     .forEach(r => { o[Number(r.row_no)] = JSON.parse(r.cells_json || '[]'); });
@@ -785,16 +817,35 @@ function appDummyLandingOps_(plan, fy, index, todayYm, atIso) {
   const months = appLandingMonths_(o);
   const rate = appDummyPick_(APP_LANDING_DUMMY_RATES, index);
   const closed = appLandingFyYms_(fy).filter(ym => ym < todayYm);
-  const evalRows = closed.map((ym, i) => {
+  const fresh = closed.map((ym, i) => {
     const m = months.filter(x => x.ym === ym)[0] || {};
     const p50 = m.p50 === null || m.p50 === undefined ? 1000000 : m.p50;
     const p10 = m.p10 === null || m.p10 === undefined ? Math.round(p50 * 0.85) : m.p10;
     const p90 = m.p90 === null || m.p90 === undefined ? Math.round(p50 * 1.18) : m.p90;
     return appDummyEvalRow_(plan.plan_id, i + 2, ym, p10, p50, p90, Math.round(p50 * rate));
   });
-  ops.push(appOpReplaceOrAppend_('ENG_EVAL_COMPARE_MONTHLY', plan.plan_id, evalRows));
+  ops.push(appOpReplaceOrAppend_('ENG_EVAL_COMPARE_MONTHLY', plan.plan_id, appDummyMergeEval_(plan.plan_id, fresh)));
   ops.push(appOpReplaceOrAppend_('ENG_PROCESS_STATUS', plan.plan_id, appDummyStatusRows_(plan.plan_id, plan.client_label, atIso)));
   return ops;
+}
+
+/** 仮実績は、印の無い同じ月の行を残す（本物の実績は消さない。印の付いた仮だけ入れ替える） */
+function appDummyMergeEval_(planId, evalRows) {
+  const existing = (appReadPlanTable_('ENG_EVAL_COMPARE_MONTHLY', planId) || []).map(appStripRow_);
+  const have = {};
+  existing.forEach(r => {
+    if (String(r.note_for_investigation || '') === APP_SCREEN_PLACEHOLDER) return;
+    if (String(r.target_month || '')) have[String(r.target_month)] = true;
+  });
+  const kept = existing.filter(r => String(r.note_for_investigation || '') !== APP_SCREEN_PLACEHOLDER);
+  let n = kept.reduce((m, r) => Math.max(m, Number(r.seq) || 0), 1);
+  const add = [];
+  (evalRows || []).forEach(r => {
+    if (have[String(r.target_month || '')]) return;
+    n += 1;
+    add.push(Object.assign({}, r, { seq: String(n) }));
+  });
+  return kept.concat(add);
 }
 
 /**
@@ -823,7 +874,7 @@ function appSeedDummyLanding_(ctx, fy) {
         out.skipped.push(Object.assign({ reason: 'done' }, item));
         return;
       }
-      const ops = appDummyLandingOps_(p, y, i, todayYm, atIso).filter(op => op && (op.mode !== 'ensure' || (op.rows && op.rows.length)));
+      const ops = appDummyLandingOps_(p, y, i, todayYm, atIso, ctx.actor).filter(op => op && (op.mode !== 'ensure' || (op.rows && op.rows.length)));
       opsAll.push.apply(opsAll, ops);
       out.filled.push(Object.assign({ did: ['landing'] }, item));
     } catch (e) {
@@ -843,4 +894,421 @@ function appSeedDummyLanding_(ctx, fy) {
   }
   appDummySeedClearSchedule_();
   return out;
+}
+
+// ---- 画面確認の仮を見分ける・印を付ける・仮だけ消す（開いただけでは何も変えない） ----
+
+const APP_SCREEN_BLOCK_MSG = '画面確認の仮が残っているので、本番の予算は保存できません。所有者の操作で markScreenPlaceholders を実行して印を付け、そのあと deleteScreenPlaceholders に "apply":true を入れて仮だけ消してください。人の手入力と MANUAL の予算は消しません。';
+
+function appScreenFy_(fy) {
+  if (fy === undefined || fy === null || fy === '') return appFy_(new Date());
+  const text = String(fy).trim();
+  if (!/^\d{4}$/.test(text)) throw new Error('年度（fy）は 4 桁の数で指定してください。');
+  return Number(text);
+}
+
+function appScreenReadPlan_(name, planId) {
+  try { return appReadPlanTable_(name, planId) || []; }
+  catch (e) { if (/表がありません/.test(String(e && e.message || e))) return []; throw e; }
+}
+
+function appScreenNum_(v) {
+  if (v === '' || v === null || v === undefined || typeof v === 'boolean') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return isFinite(n) ? n : null;
+}
+
+function appScreenDecodeCell_(cell) {
+  if (!cell) return '';
+  const t = String(cell).charAt(0);
+  if (t === 'e' || t === 'f') return '';
+  try { return appCellDecode_(t, String(cell).slice(1)); } catch (e) { return ''; }
+}
+
+function appScreenDecodeNum_(cell) {
+  return appScreenNum_(appScreenDecodeCell_(cell));
+}
+
+/** 仮の文章の先頭が印か（人の文が偶然この印で始まることは、削除の対象にしないための条件にする） */
+function appScreenMarkedText_(v) {
+  return String(v || '').indexOf(APP_SCREEN_PLACEHOLDER) === 0;
+}
+
+function appScreenRetype_(row, header, field) {
+  const i = header.indexOf(field);
+  if (i < 0) return row;
+  const cur = String(row._types || '');
+  if (cur.charAt(i) === 's') return row;
+  const next = cur.split('');
+  while (next.length < header.length) next.push('e');
+  next[i] = 's';
+  row._types = next.join('');
+  return row;
+}
+
+function appScreenInputSpec_(kind) {
+  if (kind === 'client') return { table: 'ENG_CLIENT', field: 'Reason', header: 'CLIENT' };
+  if (kind === 'note') return { table: 'ENG_OPINIONS', field: 'Note', header: 'OPINIONS' };
+  if (kind === 'spot') return { table: 'ENG_DEV_SPOT', field: 'Project', header: 'DEV_SPOT' };
+  return null;
+}
+
+function appScreenInputText_(row, kind) {
+  const spec = appScreenInputSpec_(kind);
+  return spec ? String(row[spec.field] || '') : '';
+}
+
+function appScreenInputMarked_(row, kind) {
+  return appScreenMarkedText_(appScreenInputText_(row, kind));
+}
+
+/** 印を付ける前の仮入力（文章が完全一致。スポットは名前と金額の組も一致するときだけ） */
+function appScreenInputLegacy_(row, kind) {
+  const text = appScreenInputText_(row, kind);
+  if (!text || appScreenMarkedText_(text)) return false;
+  if (kind === 'client') return text === APP_SCREEN_INPUT_CLIENT;
+  if (kind === 'note') return text === APP_SCREEN_INPUT_NOTE;
+  if (kind === 'spot') {
+    const m = /^検証スポット([1-9])$/.exec(text);
+    if (!m) return false;
+    const n = Number(m[1]);
+    const amount = appScreenNum_(row['Amount(JPY)']);
+    for (let index = 0; index < 72; index++) {
+      if ((index % 9) + 1 !== n) continue;
+      if (appBudgetSame_(amount, 180000 + (index % 8) * 70000)) return true;
+    }
+  }
+  return false;
+}
+
+/** 旧来の仮の B-1/B-2（検証担当・件数 6・成功・概要が空）。人の実行はメールが残るので対象にしない */
+function appScreenLegacyStatus_(row) {
+  if (!row || (row.step_key !== 'step2_status' && row.step_key !== 'step5_status')) return false;
+  return String(row.last_run_by || '') === '検証担当' && String(row.record_count || '') === '6' &&
+    String(row.status || '') === 'success' && String(row.error_summary || '') === '';
+}
+
+function appScreenStatusMarked_(row) {
+  if (!row || (row.step_key !== 'step2_status' && row.step_key !== 'step5_status')) return false;
+  return String(row.error_summary || '') === APP_SCREEN_PLACEHOLDER;
+}
+
+function appScreenPairHit_(adopted, uplift, center, scale, rate) {
+  if (center === null || adopted === null || uplift === null) return false;
+  const ad = Math.round(center * scale);
+  return appBudgetSame_(adopted, ad) && appBudgetSame_(uplift, Math.round(ad * rate));
+}
+
+/** 1 回の保存が 12 か月そろっていて、どれも手入力の印のままか */
+function appScreenManualGroup_(rows) {
+  if (!rows || rows.length !== 12) return false;
+  const seen = {};
+  return rows.every(r => {
+    const ym = String(r.ym || '');
+    if (String(r.basis || '') !== 'MANUAL' || String(r.alloc || '') !== 'MANUAL') return false;
+    if (!/^\d{4}\/\d{2}$/.test(ym) || seen[ym]) return false;
+    seen[ym] = true;
+    return true;
+  });
+}
+
+function appScreenGroupMatchesScale_(rows) {
+  if (!appScreenManualGroup_(rows)) return false;
+  return APP_BUDGET_DUMMY_SCALES.some((scale, i) => rows.every(r => appScreenPairHit_(appScreenNum_(r.adopted), appScreenNum_(r.uplift), appScreenNum_(r.center), scale, APP_BUDGET_DUMMY_UPLIFT[i])));
+}
+
+/** 予測が動いていないとき、今の仮予算の式と一致するか（下書きに残した真ん中が、今の真ん中と同じときだけ） */
+function appScreenGroupMatchesCurrent_(planId, rows) {
+  if (!appScreenManualGroup_(rows)) return false;
+  const nums = appPlanNumbers_(planId);
+  if (!nums || !nums.monthly || nums.monthly.length !== 12) return false;
+  const byYm = {};
+  nums.monthly.forEach((m, i) => { byYm[appBudgetYmOf_(m.month)] = { m: m, i: i }; });
+  if (!rows.every(r => {
+    const hit = byYm[String(r.ym)];
+    return hit && appBudgetSame_(appScreenNum_(r.center), hit.m.p50);
+  })) return false;
+  return APP_BUDGET_DUMMY_SCALES.some((scale, s) => {
+    const dummy = appDummyBudgetRows_(planId, scale, APP_BUDGET_DUMMY_UPLIFT[s]);
+    if (!dummy || !dummy.rows || dummy.rows.length !== 12) return false;
+    return rows.every(r => {
+      const hit = byYm[String(r.ym)];
+      const d = dummy.rows[hit.i];
+      return d && appBudgetSame_(appScreenNum_(r.adopted), d.adopted) && appBudgetSame_(appScreenNum_(r.uplift), d.uplift);
+    });
+  });
+}
+
+/** 下書きが無く、12 か月ぜんぶが同じ仮の倍率に合うときだけ（一部の月だけ似ているものは対象にしない） */
+function appScreenOutputMonths_(planId, drafted) {
+  const months = appBudgetStoredMonths_(planId);
+  if (months.length !== 12) return [];
+  const open = months.filter(m => !drafted[m.ym]);
+  if (open.length !== 12) return [];
+  const hit = APP_BUDGET_DUMMY_SCALES.some((scale, i) => open.every(m => appScreenPairHit_(m.adopted, m.uplift, m.center, scale, APP_BUDGET_DUMMY_UPLIFT[i])));
+  return hit ? open.map(m => ({ ym: m.ym, adopted: m.adopted, uplift: m.uplift, center: m.center })) : [];
+}
+
+/** 概要が空の実績が、すべて同じ仮の倍率のとき、その行（1 行でも倍率が違えば空） */
+function appScreenEvalLegacyRows_(rows) {
+  const nums = (rows || []).filter(r => String(r.note_for_investigation || '') === '' && appScreenNum_(r.actual_total) !== null && appScreenNum_(r.forecast_total_p50) !== null);
+  if (!nums.length) return [];
+  const ok = APP_LANDING_DUMMY_RATES.some(rate => nums.every(r => appBudgetSame_(appScreenNum_(r.actual_total), Math.round(appScreenNum_(r.forecast_total_p50) * rate))));
+  return ok ? nums : [];
+}
+
+function appScreenScanPlan_(plan) {
+  const planId = plan.plan_id;
+  const drafts = appScreenReadPlan_('BUDGET_DRAFTS', planId);
+  const markedDrafts = drafts.filter(r => String(r.basis || '') === APP_SCREEN_PLACEHOLDER);
+  const groups = {};
+  drafts.forEach(r => { const id = String(r.action_id || ''); (groups[id] = groups[id] || []).push(r); });
+  const client = appScreenReadPlan_('ENG_CLIENT', planId);
+  const notes = appScreenReadPlan_('ENG_OPINIONS', planId);
+  const spots = appScreenReadPlan_('ENG_DEV_SPOT', planId);
+  const pick = (rows, kind, pred) => rows.filter(r => pred(r, kind)).map(r => Object.assign({}, r, { _screenKind: kind }));
+  const markedInputs = pick(client, 'client', appScreenInputMarked_).concat(pick(notes, 'note', appScreenInputMarked_), pick(spots, 'spot', appScreenInputMarked_));
+  const legacyInputs = pick(client, 'client', appScreenInputLegacy_).concat(pick(notes, 'note', appScreenInputLegacy_), pick(spots, 'spot', appScreenInputLegacy_));
+  const status = appScreenReadPlan_('ENG_PROCESS_STATUS', planId);
+  const markedStatus = status.filter(appScreenStatusMarked_);
+  const legacyStatus = status.filter(appScreenLegacyStatus_);
+  const evals = appScreenReadPlan_('ENG_EVAL_COMPARE_MONTHLY', planId);
+  const markedEvals = evals.filter(r => String(r.note_for_investigation || '') === APP_SCREEN_PLACEHOLDER);
+  const legacyEvals = appScreenEvalLegacyRows_(evals);
+  const companion = markedInputs.length + legacyInputs.length + markedStatus.length + legacyStatus.length > 0;
+  const markableDrafts = [], suspectedDrafts = [];
+  Object.keys(groups).forEach(id => {
+    const rows = groups[id];
+    if (rows.some(r => String(r.basis || '') === APP_SCREEN_PLACEHOLDER)) return;
+    if (!appScreenGroupMatchesScale_(rows) && !appScreenGroupMatchesCurrent_(planId, rows)) return;
+    (companion ? markableDrafts : suspectedDrafts).push.apply(companion ? markableDrafts : suspectedDrafts, rows);
+  });
+  const drafted = {};
+  drafts.forEach(r => { if (r.ym) drafted[String(r.ym)] = true; });
+  const output = appScreenOutputMonths_(planId, drafted);
+  return {
+    planId: planId, name: plan.client_label || '',
+    marked: { drafts: markedDrafts, inputs: markedInputs, evals: markedEvals, status: markedStatus, outputMonths: [] },
+    markable: { drafts: markableDrafts, inputs: legacyInputs, evals: companion ? legacyEvals : [], status: legacyStatus, outputMonths: companion ? output : [] },
+    suspected: { drafts: suspectedDrafts, inputs: [], evals: companion ? [] : legacyEvals, status: [], outputMonths: companion ? [] : output }
+  };
+}
+
+function appScreenPlans_(fy) {
+  const y = appScreenFy_(fy);
+  return appReadTable_('PLANS').filter(p => String(p.fy) === String(y) && p.state !== 'ARCHIVED');
+}
+
+function appScreenScan_(fy) {
+  return appScreenPlans_(fy).map(appScreenScanPlan_);
+}
+
+function appScreenTally_(bag) {
+  return { drafts: (bag.drafts || []).length, inputs: (bag.inputs || []).length, evals: (bag.evals || []).length,
+    status: (bag.status || []).length, outputMonths: (bag.outputMonths || []).length };
+}
+
+function appScreenBagHit_(bag) {
+  const t = appScreenTally_(bag);
+  return t.drafts + t.inputs + t.evals + t.status + t.outputMonths > 0;
+}
+
+function appScreenPlanBlocks_(scan) {
+  return appScreenBagHit_(scan.marked) || appScreenBagHit_(scan.markable);
+}
+
+function appScreenSummary_(scans) {
+  const add = (dst, bag) => {
+    const t = appScreenTally_(bag);
+    if (!appScreenBagHit_(bag)) return;
+    dst.plans += 1;
+    dst.drafts += t.drafts; dst.inputs += t.inputs; dst.evals += t.evals; dst.status += t.status; dst.outputMonths += t.outputMonths;
+  };
+  const blank = () => ({ plans: 0, drafts: 0, inputs: 0, evals: 0, status: 0, outputMonths: 0 });
+  const marked = blank(), markable = blank(), suspected = blank();
+  (scans || []).forEach(s => { add(marked, s.marked); add(markable, s.markable); add(suspected, s.suspected); });
+  return { marked: marked, markable: markable, suspected: suspected, blocks: (scans || []).filter(appScreenPlanBlocks_).length };
+}
+
+function appScreenPlaceholderPreview_(fy) {
+  const y = appScreenFy_(fy);
+  return Object.assign({ fy: y }, appScreenSummary_(appScreenScan_(y)));
+}
+
+/** 本番の予算（保存・確率の案）を止める。印が付いているか、実行すれば印を付けられる仮が残っているとき。数字だけ似ている行では止めない */
+function appScreenPlaceholderRefuseBudget_(planId) {
+  const plan = appReadTable_('PLANS').filter(p => p.plan_id === planId)[0];
+  if (!plan) return;
+  if (appScreenPlanBlocks_(appScreenScanPlan_(plan))) throw new Error(APP_SCREEN_BLOCK_MSG);
+}
+
+function appScreenAssertBudget_(row) {
+  const b = String(row && row.basis || '');
+  if (b !== APP_SCREEN_PLACEHOLDER || APP_BUDGET_BASES.indexOf(b) >= 0 || b === 'BASELINE') throw new Error('人の予算は消せません。');
+}
+
+function appScreenAssertInput_(row, kind) {
+  if (!appScreenInputMarked_(row, kind)) throw new Error('画面確認の印の無い入力は消せません。');
+}
+
+function appScreenAssertEval_(row) {
+  if (String(row && row.note_for_investigation || '') !== APP_SCREEN_PLACEHOLDER) throw new Error('画面確認の印の無い実績は消せません。');
+}
+
+function appScreenAssertStatus_(row) {
+  if (!appScreenStatusMarked_(row)) throw new Error('画面確認の印の無い処理状況は消せません。');
+}
+
+function appScreenStampInput_(row, kind) {
+  const spec = appScreenInputSpec_(kind);
+  const copy = appStripRow_(row);
+  copy[spec.field] = APP_SCREEN_PLACEHOLDER + ' ' + appScreenInputText_(row, kind);
+  return appScreenRetype_(copy, APP_ENGINE_SHEETS[spec.header].header, spec.field);
+}
+
+function appScreenMarkOps_(ctx, scan, ops, counts) {
+  const planId = scan.planId;
+  scan.markable.drafts.forEach(r => {
+    ops.push({ table: 'BUDGET_DRAFTS', mode: 'patch', planId: planId, key: { draft_id: r.draft_id, plan_id: planId },
+      patch: { basis: APP_SCREEN_PLACEHOLDER, alloc: APP_SCREEN_PLACEHOLDER }, actor: ctx.actor });
+    counts.drafts += 1;
+  });
+  [['ENG_CLIENT', 'client'], ['ENG_OPINIONS', 'note'], ['ENG_DEV_SPOT', 'spot']].forEach(pair => {
+    const rows = appScreenReadPlan_(pair[0], planId);
+    const hit = {};
+    scan.markable.inputs.forEach(r => { if (r._screenKind === pair[1]) hit[String(r.seq)] = true; });
+    if (!Object.keys(hit).length) return;
+    const next = rows.map(r => hit[String(r.seq)] ? appScreenStampInput_(r, pair[1]) : appStripRow_(r));
+    ops.push(appOpReplacePlan_(pair[0], planId, null, next));
+    counts.inputs += Object.keys(hit).length;
+  });
+  if (scan.markable.evals.length) {
+    const hit = {};
+    scan.markable.evals.forEach(r => { hit[String(r.seq)] = true; });
+    const header = APP_ENGINE_SHEETS.EVAL_COMPARE_MONTHLY.header;
+    const next = appScreenReadPlan_('ENG_EVAL_COMPARE_MONTHLY', planId).map(r => {
+      if (!hit[String(r.seq)]) return appStripRow_(r);
+      const copy = appStripRow_(r);
+      copy.note_for_investigation = APP_SCREEN_PLACEHOLDER;
+      return appScreenRetype_(copy, header, 'note_for_investigation');
+    });
+    ops.push(appOpReplacePlan_('ENG_EVAL_COMPARE_MONTHLY', planId, null, next));
+    counts.evals += scan.markable.evals.length;
+  }
+  if (scan.markable.status.length) {
+    const hit = {};
+    scan.markable.status.forEach(r => { hit[String(r.seq)] = true; });
+    const header = APP_ENGINE_SHEETS.PROCESS_STATUS.header;
+    const next = appScreenReadPlan_('ENG_PROCESS_STATUS', planId).map(r => {
+      if (!hit[String(r.seq)]) return appStripRow_(r);
+      const copy = appStripRow_(r);
+      copy.error_summary = APP_SCREEN_PLACEHOLDER;
+      return appScreenRetype_(copy, header, 'error_summary');
+    });
+    ops.push(appOpReplacePlan_('ENG_PROCESS_STATUS', planId, null, next));
+    counts.status += scan.markable.status.length;
+  }
+  if (scan.markable.outputMonths.length) {
+    const added = appLogOps_('BUDGET_DRAFTS', appDummyLandingDraftRows_({ plan_id: planId }, scan.markable.outputMonths, ctx.actor, appNowIso_()));
+    if (added.length) { ops.push.apply(ops, added); counts.outputMonths += scan.markable.outputMonths.length; }
+  }
+}
+
+function appScreenRevertOutputOp_(planId, removed, kept) {
+  if (!removed.length) return { op: null, reverted: 0 };
+  const latest = {}, prev = {};
+  removed.forEach(r => { const ym = String(r.ym || ''); if (!latest[ym] || appBudgetNewer_(r, latest[ym])) latest[ym] = r; });
+  kept.forEach(r => {
+    const ym = String(r.ym || '');
+    if (String(r.basis || '') === APP_SCREEN_PLACEHOLDER) return;
+    if (!prev[ym] || appBudgetNewer_(r, prev[ym])) prev[ym] = r;
+  });
+  let reverted = 0;
+  const next = appScreenReadPlan_('ENG_ROWS', planId).map(appStripRow_).map(row => {
+    if (row.sheet !== 'OUTPUT' || Number(row.col_from) !== 1) return row;
+    const rowNo = Number(row.row_no);
+    if (rowNo < APP_BUDGET_ROW_FIRST || rowNo > APP_BUDGET_ROW_FIRST + 11) return row;
+    let cells;
+    try { cells = JSON.parse(row.cells_json || '[]'); } catch (e) { return row; }
+    const ym = appBudgetYmOf_(appScreenDecodeCell_(cells[0]));
+    const scr = latest[ym];
+    if (!scr) return row;
+    if (!appBudgetSame_(appScreenDecodeNum_(cells[7]), appScreenNum_(scr.adopted)) || !appBudgetSame_(appScreenDecodeNum_(cells[8]), appScreenNum_(scr.uplift))) return row;
+    const back = prev[ym];
+    const copy = cells.slice();
+    while (copy.length < 9) copy.push('e');
+    if (back && appScreenNum_(back.adopted) !== null) {
+      copy[7] = 'n' + appScreenNum_(back.adopted);
+      const u = appScreenNum_(back.uplift);
+      copy[8] = u === null ? 'e' : 'n' + u;
+    } else {
+      const p50 = appScreenDecodeNum_(copy[2]);
+      if (p50 === null) return row;
+      copy[7] = 'n' + p50;
+      copy[8] = 'e';
+    }
+    reverted += 1;
+    return Object.assign({}, row, { cells_json: JSON.stringify(copy) });
+  });
+  const output = next.filter(r => r.sheet === 'OUTPUT');
+  return { op: reverted ? appOpReplacePlan_('ENG_ROWS', planId, ['OUTPUT'], output) : null, reverted: reverted };
+}
+
+function appScreenDeleteOps_(scan, ops, counts) {
+  const planId = scan.planId;
+  const drafts = appScreenReadPlan_('BUDGET_DRAFTS', planId);
+  const drop = drafts.filter(r => String(r.basis || '') === APP_SCREEN_PLACEHOLDER);
+  drop.forEach(appScreenAssertBudget_);
+  const keepRows = drafts.filter(r => String(r.basis || '') !== APP_SCREEN_PLACEHOLDER);
+  if (drop.length) {
+    ops.push(appOpReplacePlan_('BUDGET_DRAFTS', planId, null, keepRows.map(appStripRow_)));
+    counts.drafts += drop.length;
+    const back = appScreenRevertOutputOp_(planId, drop, keepRows);
+    if (back.op) ops.push(back.op);
+    counts.outputMonths += back.reverted;
+  }
+  [['ENG_CLIENT', 'client'], ['ENG_OPINIONS', 'note'], ['ENG_DEV_SPOT', 'spot']].forEach(pair => {
+    const rows = appScreenReadPlan_(pair[0], planId);
+    const gone = rows.filter(r => appScreenInputMarked_(r, pair[1]));
+    gone.forEach(r => appScreenAssertInput_(r, pair[1]));
+    if (!gone.length) return;
+    ops.push(appOpReplacePlan_(pair[0], planId, null, rows.filter(r => !appScreenInputMarked_(r, pair[1])).map(appStripRow_)));
+    counts.inputs += gone.length;
+  });
+  const evals = appScreenReadPlan_('ENG_EVAL_COMPARE_MONTHLY', planId);
+  const goneEval = evals.filter(r => String(r.note_for_investigation || '') === APP_SCREEN_PLACEHOLDER);
+  goneEval.forEach(appScreenAssertEval_);
+  if (goneEval.length) {
+    ops.push(appOpReplacePlan_('ENG_EVAL_COMPARE_MONTHLY', planId, null, evals.filter(r => String(r.note_for_investigation || '') !== APP_SCREEN_PLACEHOLDER).map(appStripRow_)));
+    counts.evals += goneEval.length;
+  }
+  const status = appScreenReadPlan_('ENG_PROCESS_STATUS', planId);
+  const goneStatus = status.filter(appScreenStatusMarked_);
+  goneStatus.forEach(appScreenAssertStatus_);
+  if (goneStatus.length) {
+    ops.push(appOpReplacePlan_('ENG_PROCESS_STATUS', planId, null, status.filter(r => !appScreenStatusMarked_(r)).map(appStripRow_)));
+    counts.status += goneStatus.length;
+  }
+}
+
+function appScreenPlaceholderMark_(ctx, fy) {
+  const y = appScreenFy_(fy);
+  appRequireOpenYear_(y);
+  const counts = { drafts: 0, inputs: 0, evals: 0, status: 0, outputMonths: 0 };
+  const ops = [];
+  appScreenScan_(y).forEach(s => appScreenMarkOps_(ctx, s, ops, counts));
+  if (ops.length) appWithLock_(() => { appJournalRun_(ctx, '画面確認の仮に印', '', ops); });
+  return { fy: y, marked: counts };
+}
+
+function appScreenPlaceholderDelete_(ctx, fy, apply) {
+  const y = appScreenFy_(fy);
+  const preview = appScreenPlaceholderPreview_(y);
+  if (apply !== true) return Object.assign({ apply: false, deleted: null }, preview);
+  appRequireOpenYear_(y);
+  const counts = { drafts: 0, inputs: 0, evals: 0, status: 0, outputMonths: 0 };
+  const ops = [];
+  appScreenScan_(y).forEach(s => appScreenDeleteOps_(s, ops, counts));
+  if (ops.length) appWithLock_(() => { appJournalRun_(ctx, '画面確認の仮を削除', '', ops); });
+  return { fy: y, apply: true, deleted: counts };
 }
