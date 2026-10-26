@@ -317,4 +317,28 @@ const morningFc = env.runJob('FORECAST.RUN', { planId: morning });
 assert.equal(morningFc.status, 'DONE', morningFc.error || '');
 assert.equal(nums(morning).monthly[0].adopted, 2222, '正午やその後の仮より、09:01 の人の保存が残る');
 
+const permute = (xs) => xs.reduce((acc, x, i) => acc.concat(permute(xs.slice(0, i).concat(xs.slice(i + 1))).map((rest) => [x].concat(rest))), xs.length ? [] : [[]]);
+const draftRow = (basis, savedAt, adopted, extra) => Object.assign({
+  ym: '2026/04', basis, saved_at: savedAt, adopted, uplift: 0, action_id: basis, alloc: basis === 'MANUAL' ? 'MANUAL' : '',
+}, extra || {});
+const humanRow = draftRow('MANUAL', '2026-10-21T09:01:00+0900', 2222, { action_id: 'ACT-H' });
+const baseRow = draftRow('BASELINE', '2026-10-21T10:00:00+0900', 3333, { action_id: 'BASELINE' });
+const noonRow = draftRow('SCREEN_CHECK', '2026-10-21T12:00:00+0900', 620, { action_id: 'SCREEN_CHECK', alloc: 'SCREEN_CHECK' });
+permute([baseRow, humanRow, noonRow]).forEach((seq) => {
+  const win = env.call('appBudgetPick_(__rows)', { __rows: seq.map((r, i) => Object.assign({}, r, { _row: i + 1 })) });
+  assert.equal(win.basis, 'BASELINE', '仮を外したあとは時刻で、10:00 の写しが勝つ');
+  assert.equal(Number(win.adopted), 3333, 'どの順でも人の側の値が残り、正午の仮にはならない');
+});
+const morningBase = draftRow('BASELINE', '2026-10-21T10:00:00+0900', 1500, { action_id: 'BASELINE' });
+permute([morningBase, noonRow]).forEach((seq) => {
+  const win = env.call('appBudgetPick_(__rows)', { __rows: seq.map((r, i) => Object.assign({}, r, { _row: i + 1 })) });
+  assert.equal(win.basis, 'BASELINE', '人の保存が無くても、午前の BASELINE は正午の仮に負けない');
+  assert.equal(Number(win.adopted), 1500);
+});
+const laterHuman = draftRow('MANUAL', '2026-10-21T11:00:00+0900', 4444, { action_id: 'ACT-L' });
+permute([humanRow, laterHuman]).forEach((seq) => {
+  const win = env.call('appBudgetPick_(__rows)', { __rows: seq.map((r, i) => Object.assign({}, r, { _row: i + 1 })) });
+  assert.equal(Number(win.adopted), 4444, '人の保存どうしは、これまでどおり時刻で新しい方');
+});
+
 console.log('app-screen-placeholder: all tests passed');

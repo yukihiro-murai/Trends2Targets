@@ -218,25 +218,45 @@ function appBudgetPlaceholderRow_(r) {
   return basis === 'MANUAL' && (String(r.action_id || '') === APP_SCREEN_PLACEHOLDER || String(r.alloc || '') === APP_SCREEN_PLACEHOLDER);
 }
 
-/** 人の保存か（仮の MANUAL は含めない） */
-function appBudgetHumanSave_(r) {
+/** 人の側か（手入力・確率・真ん中・人が入れた額の写し BASELINE。仮の MANUAL は含めない） */
+function appBudgetHumanSide_(r) {
   if (!r || appBudgetPlaceholderRow_(r)) return false;
   const basis = String(r.basis || '');
-  return basis === 'MANUAL' || basis === 'PROB' || basis === 'CENTER';
+  return basis === 'MANUAL' || basis === 'PROB' || basis === 'CENTER' || basis === 'BASELINE';
 }
 
-/** 行 a が行 b より新しいか（保存した時刻、同じなら表の後ろの行）。仮は、時刻にかかわらず人の保存より新しいことにしない */
+/** 保存した時刻が新しいか（同じなら表の後ろの行）。人の側どうしはこの順のまま */
+function appBudgetByTime_(a, b) {
+  if (!b) return true;
+  return String(a.saved_at) > String(b.saved_at) || (String(a.saved_at) === String(b.saved_at) && Number(a._row) > Number(b._row));
+}
+
+/** 行 a が行 b より新しいか。人の側が相手の仮より新しいことは、時刻では決めない */
 function appBudgetNewer_(a, b) {
   if (!b) return true;
-  if (appBudgetHumanSave_(a) && appBudgetPlaceholderRow_(b)) return true;
-  if (appBudgetPlaceholderRow_(a) && appBudgetHumanSave_(b)) return false;
-  return String(a.saved_at) > String(b.saved_at) || (String(a.saved_at) === String(b.saved_at) && Number(a._row) > Number(b._row));
+  if (appBudgetHumanSide_(a) && appBudgetPlaceholderRow_(b)) return true;
+  if (appBudgetPlaceholderRow_(a) && appBudgetHumanSide_(b)) return false;
+  return appBudgetByTime_(a, b);
+}
+
+/**
+ * 同じキーの勝ちの行。人の側（手入力・確率・真ん中・BASELINE）が 1 行でもあれば仮を先に外し、残りを時刻で選ぶ。
+ * 行の順では決まらない。人の側が無ければ、これまでどおり時刻だけ
+ */
+function appBudgetPick_(rows) {
+  const list = rows || [];
+  const keep = list.some(appBudgetHumanSide_) ? list.filter(r => r && !appBudgetPlaceholderRow_(r)) : list;
+  let best = null;
+  keep.forEach(r => { if (r && appBudgetByTime_(r, best)) best = r; });
+  return best;
 }
 
 /** 月ごとの一番新しい下書き（{ 'yyyy/MM': 行 }） */
 function appBudgetLatestDrafts_(planId) {
+  const by = {};
+  appBudgetDraftRows_(planId).forEach(r => { if (r.ym) (by[r.ym] || (by[r.ym] = [])).push(r); });
   const best = {};
-  appBudgetDraftRows_(planId).forEach(r => { if (r.ym && appBudgetNewer_(r, best[r.ym])) best[r.ym] = r; });
+  Object.keys(by).forEach(ym => { best[ym] = appBudgetPick_(by[ym]); });
   return best;
 }
 
@@ -295,8 +315,7 @@ function appBudgetRestoreOnForecast_(ctx, plan, book) {
 function appBudgetDraftView_(planId) {
   const rows = appBudgetDraftRows_(planId);
   if (!rows.length) return null;
-  let last = null;
-  rows.forEach(r => { if (appBudgetNewer_(r, last)) last = r; });
+  const last = appBudgetPick_(rows);
   const mine = rows.filter(r => r.action_id === last.action_id);
   const sum = (list, k) => list.reduce((s, r) => (typeof r[k] === 'number' && isFinite(r[k]) ? (s === null ? 0 : s) + r[k] : s), null);
   const centerAtDraft = sum(mine, 'center');
