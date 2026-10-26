@@ -261,4 +261,20 @@ assert.equal(how(shown).say, '手で直した額', '人が保存したあとは�
 assert.equal(how({ basis: 'MANUAL', placeholder: true, alloc: 'MANUAL' }).say, '手で直した額', '表示は今の basis で決める');
 assert.equal(how({ basis: 'PROB', prob: 80, placeholder: true, alloc: 'PAST_SHAPE' }).say, '80% で決めた額');
 
+const clash = env.seedPlan(book('同じ番号の製薬'));
+const markIn = env.runJob('PLAN.EDIT', { planId: clash, action: 'INPUT.SAVE', args: { kind: 'client', rows: [{ person: '鷹野', ym: '2026-04', step: '0', reason: 'SCREEN_CHECK 検証用の仮の動向' }] } });
+assert.equal(markIn.status, 'DONE', markIn.error || '');
+assert.deepEqual(env.table('ENG_CLIENT').filter((r) => r.plan_id === clash).map((r) => String(r.seq)), ['2']);
+const goneClash = task('deleteScreenPlaceholders', { fy: FY, apply: true });
+assert.equal(goneClash.ok, true, JSON.stringify(goneClash));
+assert.equal(env.table('ENG_CLIENT').filter((r) => r.plan_id === clash).length, 0);
+const humanIn = env.runJob('PLAN.EDIT', { planId: clash, action: 'INPUT.SAVE', args: { kind: 'client', rows: [{ person: '鷹野', ym: '2026-05', step: '1', reason: '本物の動向' }] } });
+assert.equal(humanIn.status, 'DONE', humanIn.error || '');
+assert.deepEqual(env.table('ENG_CLIENT').filter((r) => r.plan_id === clash).map((r) => [String(r.seq), r.Reason]), [['2', '本物の動向']]);
+const backClash = task('restoreScreenPlaceholders', { fy: FY, batch: goneClash.result.batchId });
+assert.equal(backClash.ok, true, JSON.stringify(backClash));
+const left = env.table('ENG_CLIENT').filter((r) => r.plan_id === clash);
+assert.deepEqual(left.map((r) => [String(r.seq), r.Reason]), [['2', '本物の動向']], '同じ番号の人の行は残し、仮は足さない');
+assert.equal(env.call('appScreenSheetHashOp_(__id, "CLIENT", "test")', { __id: clash }), null, '戻したあとのハッシュは、実際の中身と合う');
+
 console.log('app-screen-placeholder: all tests passed');

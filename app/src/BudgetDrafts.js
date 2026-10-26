@@ -1516,7 +1516,11 @@ function appScreenPlaceholderRestore_(ctx, fy, batch) {
       const planId = k.split('\u0001')[0];
       const sheet = k.split('\u0001')[1];
       const op = appScreenSheetHashOp_(planId, sheet, ctx.actor, bag => {
-        backBySheet[k].forEach(r => bag.tableRows.push(r));
+        const def = APP_TABLES['ENG_' + sheet];
+        const keyOf = o => def.key.map(c => String(o[c] === undefined || o[c] === null ? '' : o[c])).join('\u0001');
+        const have = {};
+        bag.tableRows.forEach(r => { have[keyOf(r)] = true; });
+        backBySheet[k].forEach(r => { if (!have[keyOf(r)]) bag.tableRows.push(r); });
       });
       if (op) ops.push(op);
     });
