@@ -394,4 +394,27 @@ reachOn();
   assert.doesNotMatch(visible(real), /届く見込み:/);
 }
 
+// ==== 画面確認の仮: 予算のカードに知らせを出す。保存は止めない。中の印は見せない ====
+{
+  run('S.fc.view.boot.budgetDraft = { basis: "SCREEN_CHECK", placeholder: true, alloc: "SCREEN_CHECK", prob: null, months: 12 }');
+  const h = card();
+  assert.match(h, /画面確認の仮の予算が残っています。/);
+  assert.doesNotMatch(h, /止まります/);
+  assert.doesNotMatch(visible(h) + tipsOf(h).join('\n'), /SCREEN_CHECK/);
+  assert.equal(run('fcBudHow(S.fc.view.boot.budgetDraft).say'), '画面確認の仮');
+  run('S.fc.budget = { 29: { adopted: "100", uplift: "" } }');
+  toasts();
+  const sent = savePayload();
+  assert.equal(sent.kind, 'PLAN.EDIT');
+  assert.equal(sent.payload.action, 'BUDGET.SAVE');
+  assert.equal(sent.payload.args.rows[0].row, 29);
+  assert.deepEqual(toasts(), []);
+  run('S.fc.budget = {}; S.fc.view.boot.budgetDraft = { basis: "MANUAL", alloc: "MANUAL", prob: null, months: 12 }');
+  assert.doesNotMatch(card(), /画面確認の仮の予算が残っています/);
+  run('S.fc.view.boot.budgetDraft = { basis: "MANUAL", placeholder: true, alloc: "MANUAL", prob: null, months: 12, savedAt: "2026-10-21T12:00:00+0900" }');
+  assert.equal(run('fcBudHow(S.fc.view.boot.budgetDraft).say'), '手で直した額', '今の basis が手入力なら、履歴の仮で「画面確認の仮」と出さない');
+  assert.match(card(), /画面確認の仮の予算が残っています。/, '月の勝ちに仮があれば知らせる');
+  run('delete S.fc.view.boot.budgetDraft');
+}
+
 console.log('app-v11-ui: ok');

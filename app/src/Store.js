@@ -673,6 +673,28 @@ function appKeySet_(name, sh) {
   return have;
 }
 
+/**
+ * keys のキーの行だけ消す（シートの下の行から消すので、上の行番号はずれない）。すでに無ければ何もしない。
+ * 何度消しても同じ結果になる（控えの書き方 drop）。ほかの行は書かない。ロックの中で呼ぶ
+ */
+function appDropRowsByKey_(name, keys) {
+  const def = APP_TABLES[name];
+  if (!def) throw new Error('未定義の表: ' + name);
+  const list = keys || [];
+  if (!list.length) return { removed: 0 };
+  const keyOf = o => def.key.map(k => String(o[k] === undefined || o[k] === null ? '' : o[k])).join('\u0001');
+  const want = {};
+  list.forEach(k => { want[keyOf(k)] = true; });
+  const rows = appReadTable_(name).filter(r => want[keyOf(r)]).sort((a, b) => Number(b._row) - Number(a._row));
+  if (!rows.length) return { removed: 0 };
+  const sh = appTableSheet_(name, false);
+  appRequireCurrentHead_(name);
+  appStoreForget_(name);
+  rows.forEach(r => sh.deleteRows(Number(r._row), 1));
+  appBumpGen_();
+  return { removed: rows.length };
+}
+
 /** キーの行の列を patch の値にする。すでに同じ値なら書かない（何度呼んでも同じ結果になる）。返り値は書いたかどうか */
 function appPatchRow_(name, keyVals, patch, actor) {
   const def = APP_TABLES[name];

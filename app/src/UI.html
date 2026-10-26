@@ -3447,6 +3447,8 @@ function fcMonthlyTab(d, v, mode){
     + '</tbody></table>';
   // 確率で決める・保存は見出しの右（表の下に浮かせない。2026-10-16 村井さん）
   var ctl = canBudget ? '<span class="fc-insave">' + (dirty ? '<span class="chip warn">未保存</span>' : '') + (closed ? '' : fcProbSel(d)) + '</span>' : '';   // 保存は行の横
+  var held = showBud ? fcBudDraft() : null;
+  if (held && held.placeholder) html += '<p class="note warn-text">画面確認の仮の予算が残っています。</p>';
   html += '<div class="card"><div class="card-head"><h2>' + (showBud ? '月ごとの予算' : '月ごとの見通し') + tip((planningV2 ? '帯 = 従来モデルの80%の幅' : '帯 = 80% の幅') + (showBud ? '・最終予算 = 採用予測 + 上乗せ' : '') + (planning ? '\n' + planningTip + (planningV2 ? '\n月次予測の合計と年度中央値は異なります。下振れ・上振れは年度で計算した値です' : '\n月次予測の合計は年間の中心額。下振れ・上振れは年度で計算した値です') : '\n' + fcAnnualHeadTip(lv))) + '</h2>' + ctl + '</div>'
     + chartOrTable(cv, chart, table)
     + (planning ? '<details class="mt12"><summary class="note">中央値を見る</summary><div class="tblwrap mt8"><table class="tbl scroll"><colgroup><col style="width:96px"><col></colgroup><thead><tr><th>月</th><th class="num" data-tip="各月の売上を何度も試して出した真ん中の値">中央値</th></tr></thead><tbody>'
@@ -3722,6 +3724,7 @@ function fcYm(s){ var m = /(\d{4})\D(\d{1,2})/.exec(String(s || '')); return m ?
 /** 下書きの決め方の言い方（見える短い言葉 say と、説明 tip） */
 function fcBudHow(dd, monthWord){
   var al = BUD_ALLOC[dd.alloc];
+  if (dd.basis === 'SCREEN_CHECK') return { say: '画面確認の仮', tip: '画面確認用の仮の予算です。本番の手入力ではありません。' };
   if (dd.basis === 'PROB' && BUD_PROBS.indexOf(Number(dd.prob)) >= 0) return { say: Number(dd.prob) + '% で決めた額', tip: '採用予測は、届く見込み ' + Number(dd.prob) + '% の額です' + (al ? '（月への割り振りは' + al + '）' : '') };
   if (dd.basis === 'MANUAL') return { say: '手で直した額', tip: '採用予測は、手で直した額です' };
   if (dd.basis === 'BASELINE') return { say: '前に入れた額', tip: '採用予測は、下書きを残し始める前に入れてあった額です' };

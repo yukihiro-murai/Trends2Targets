@@ -512,6 +512,7 @@ function appPlanEdit_(ctx, p) {
     if (new Date().getTime() - t0 > APP_EDIT_WRITE_DEADLINE_MS) {
       throw new Error('時間がかかりすぎたので、保存をやめました（何も書いていません）。もう一度保存してください。');
     }
+    if (draftArgs && p.screenPlaceholder === true) draftArgs.placeholder = true;
     const ops = appChangedOps_(ctx, plan.plan_id, cap.changed, actionId, inLog);
     if (act.local === 'appPlanSetPeople_' && names.length) {
       ops.push({ table: 'PLANS', mode: 'patch', key: { plan_id: plan.plan_id }, patch: { people_csv: call.value.peopleCsv }, actor: ctx.actor });
