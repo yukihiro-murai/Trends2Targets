@@ -361,6 +361,7 @@ assert.equal(gapLatest()[yms[1]].basis, 'BASELINE', '金額のある写しは、
 assert.equal(Number(gapLatest()[yms[1]].adopted), 2500);
 const gapShown = view(gap).boot.budgetDraft;
 assert.equal(gapShown.basis, 'BASELINE');
+assert.equal(gapShown.placeholder, true, '一部の月の勝ちが仮なら、画面は仮と知らせる');
 assert.equal(gapShown.adopted, yms.reduce((s, ym, i) => s + (i === 0 ? 620 : gapAmount(i)), 0), '画面の下書きは、空の月に仮の金額を入れる');
 const gapFc = env.runJob('FORECAST.RUN', { planId: gap });
 assert.equal(gapFc.status, 'DONE', gapFc.error || '');

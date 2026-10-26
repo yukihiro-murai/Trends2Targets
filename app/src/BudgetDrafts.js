@@ -337,7 +337,7 @@ function appBudgetDraftView_(planId) {
   return { basis: last.basis, prob: last.prob, alloc: last.alloc, runId: last.run_id, runAt: run ? run.finished_at : '', savedAt: last.saved_at,
     centerAtDraft: centerAtDraft, centerNow: centerNow, drift: drift, driftLimit: APP_BUDGET_DRIFT_WARN,
     warn: drift !== null && Math.abs(drift) >= APP_BUDGET_DRIFT_WARN, adopted: sum(mine, 'adopted'), uplift: sum(mine, 'uplift'), months: mine.length,
-    placeholder: String(last.basis || '') === APP_SCREEN_PLACEHOLDER };
+    placeholder: winners.some(appBudgetPlaceholderRow_) };
 }
 
 // ---- 確率で選ぶ（apiBudgetProposal。決定 25・27） ----
