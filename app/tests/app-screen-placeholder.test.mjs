@@ -277,4 +277,44 @@ const left = env.table('ENG_CLIENT').filter((r) => r.plan_id === clash);
 assert.deepEqual(left.map((r) => [String(r.seq), r.Reason]), [['2', '本物の動向']], '同じ番号の人の行は残し、仮は足さない');
 assert.equal(env.call('appScreenSheetHashOp_(__id, "CLIENT", "test")', { __id: clash }), null, '戻したあとのハッシュは、実際の中身と合う');
 
+const morning = env.seedPlan(book('午前の製薬', { adopted: yms.map(() => ''), uplift: yms.map(() => '') }));
+const morningLand = task('seedDummyLanding', { fy: FY });
+assert.equal(morningLand.ok, true, JSON.stringify(morningLand));
+assert.ok((morningLand.result.filled || []).some((x) => x.planId === morning), 'その日の仮を書く');
+const noonDrafts = drafts(morning).filter((r) => r.basis === 'SCREEN_CHECK');
+assert.equal(noonDrafts.length, 12);
+assert.ok(noonDrafts.every((r) => r.saved_at === '2026-10-21T12:00:00+0900'), '仮の保存時刻は正午');
+assert.notEqual(Number(noonDrafts.find((r) => r.ym === '2026/04').adopted), 2222);
+env.run(`appWithLock_(() => appAppendLogRows_('BUDGET_DRAFTS', __r, []))`, {
+  __r: [{
+    plan_id: morning, draft_id: 'BDR-MAN-' + morning, action_id: 'SCREEN_CHECK', ym: '2026/04',
+    adopted: 620, uplift: 0, basis: 'MANUAL', alloc: 'SCREEN_CHECK', prob: null, run_id: '',
+    center: P50[0], actor_email: OWNER, saved_at: '2026-10-21T18:00:00+0900',
+  }],
+});
+env.run(`appNowIso_ = function () { return '2026-10-21T09:01:00+0900'; }`);
+const morningSave = save(morning, [{ row: 29, adopted: 2222 }]);
+assert.equal(morningSave.status, 'DONE', morningSave.error || '');
+assert.equal(morningSave.result.draft.basis, 'MANUAL');
+assert.ok(drafts(morning).some((r) => r.basis === 'MANUAL' && r.alloc === 'MANUAL' && Number(r.adopted) === 2222 && r.saved_at === '2026-10-21T09:01:00+0900'));
+env.run(`__P50 = JSON.parse(__p);
+const __origForecast = appLegacyEngine_;
+appLegacyEngine_ = function (svc) {
+  const e = __origForecast(svc);
+  e.runPhase1Forecast = function () {
+    const out = svc.SpreadsheetApp.getActiveSpreadsheet().getSheetByName('OUTPUT');
+    const p = __P50;
+    const tot = p.reduce((s, x) => s + x, 0);
+    out.getRange(26, 1, 1, 4).setValues([['年度合計（予測）', tot * 0.9, tot, tot * 1.1]]);
+    for (let i = 0; i < 12; i++) {
+      out.getRange(29 + i, 2, 1, 3).setValues([[p[i] - 100, p[i], p[i] + 100]]);
+      out.getRange(29 + i, 8, 1, 2).setValues([[p[i], '']]);
+    }
+  };
+  return e;
+};`, { __p: JSON.stringify(P50) });
+const morningFc = env.runJob('FORECAST.RUN', { planId: morning });
+assert.equal(morningFc.status, 'DONE', morningFc.error || '');
+assert.equal(nums(morning).monthly[0].adopted, 2222, '正午やその後の仮より、09:01 の人の保存が残る');
+
 console.log('app-screen-placeholder: all tests passed');

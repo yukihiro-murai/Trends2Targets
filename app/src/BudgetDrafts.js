@@ -210,9 +210,27 @@ function appBudgetDraftRows_(planId) {
   try { return appReadPlanTable_('BUDGET_DRAFTS', planId); } catch (e) { if (/表がありません/.test(String(e && e.message))) return []; throw e; }
 }
 
-/** 行 a が行 b より新しいか（保存した時刻、同じなら表の後ろの行） */
+/** 画面確認の仮か（SCREEN_CHECK。basis が MANUAL のままの仮も含む） */
+function appBudgetPlaceholderRow_(r) {
+  if (!r) return false;
+  const basis = String(r.basis || '');
+  if (basis === APP_SCREEN_PLACEHOLDER) return true;
+  return basis === 'MANUAL' && (String(r.action_id || '') === APP_SCREEN_PLACEHOLDER || String(r.alloc || '') === APP_SCREEN_PLACEHOLDER);
+}
+
+/** 人の保存か（仮の MANUAL は含めない） */
+function appBudgetHumanSave_(r) {
+  if (!r || appBudgetPlaceholderRow_(r)) return false;
+  const basis = String(r.basis || '');
+  return basis === 'MANUAL' || basis === 'PROB' || basis === 'CENTER';
+}
+
+/** 行 a が行 b より新しいか（保存した時刻、同じなら表の後ろの行）。仮は、時刻にかかわらず人の保存より新しいことにしない */
 function appBudgetNewer_(a, b) {
-  return !b || String(a.saved_at) > String(b.saved_at) || (String(a.saved_at) === String(b.saved_at) && Number(a._row) > Number(b._row));
+  if (!b) return true;
+  if (appBudgetHumanSave_(a) && appBudgetPlaceholderRow_(b)) return true;
+  if (appBudgetPlaceholderRow_(a) && appBudgetHumanSave_(b)) return false;
+  return String(a.saved_at) > String(b.saved_at) || (String(a.saved_at) === String(b.saved_at) && Number(a._row) > Number(b._row));
 }
 
 /** 月ごとの一番新しい下書き（{ 'yyyy/MM': 行 }） */
