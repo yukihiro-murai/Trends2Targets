@@ -218,11 +218,17 @@ function appBudgetPlaceholderRow_(r) {
   return basis === 'MANUAL' && (String(r.action_id || '') === APP_SCREEN_PLACEHOLDER || String(r.alloc || '') === APP_SCREEN_PLACEHOLDER);
 }
 
-/** 人の側か（手入力・確率・真ん中・人が入れた額の写し BASELINE。仮の MANUAL は含めない） */
+/** 写し（BASELINE）に、戻せる金額があるか（採用予測が空・数でない月は、人が入れた額ではない） */
+function appBudgetBaselineAmount_(r) {
+  return !!(r && String(r.basis || '') === 'BASELINE' && appBudgetNum_(r.adopted) !== null);
+}
+
+/** 人の側か（手入力・確率・真ん中はこれまでどおり。BASELINE は金額がある月だけ。仮の MANUAL は含めない） */
 function appBudgetHumanSide_(r) {
   if (!r || appBudgetPlaceholderRow_(r)) return false;
   const basis = String(r.basis || '');
-  return basis === 'MANUAL' || basis === 'PROB' || basis === 'CENTER' || basis === 'BASELINE';
+  if (basis === 'MANUAL' || basis === 'PROB' || basis === 'CENTER') return true;
+  return appBudgetBaselineAmount_(r);
 }
 
 /** 保存した時刻が新しいか（同じなら表の後ろの行）。人の側どうしはこの順のまま */
@@ -240,14 +246,16 @@ function appBudgetNewer_(a, b) {
 }
 
 /**
- * 同じキーの勝ちの行。人の側（手入力・確率・真ん中・BASELINE）が 1 行でもあれば仮を先に外し、残りを時刻で選ぶ。
- * 行の順では決まらない。人の側が無ければ、これまでどおり時刻だけ
+ * 同じキーの勝ちの行。人の側（手入力・確率・真ん中・金額のある BASELINE）が 1 行でもあれば仮を先に外し、残りを時刻で選ぶ。
+ * 金額の無い BASELINE は、ほかに行がある月では候補にしない（仮の値を空で上書きしない）。行の順では決まらない。人の側が無ければ時刻だけ
  */
 function appBudgetPick_(rows) {
-  const list = rows || [];
-  const keep = list.some(appBudgetHumanSide_) ? list.filter(r => r && !appBudgetPlaceholderRow_(r)) : list;
+  let list = (rows || []).filter(r => r);
+  const emptyBase = r => String(r.basis || '') === 'BASELINE' && !appBudgetBaselineAmount_(r);
+  if (list.some(r => !emptyBase(r))) list = list.filter(r => !emptyBase(r));
+  const keep = list.some(appBudgetHumanSide_) ? list.filter(r => !appBudgetPlaceholderRow_(r)) : list;
   let best = null;
-  keep.forEach(r => { if (r && appBudgetByTime_(r, best)) best = r; });
+  keep.forEach(r => { if (appBudgetByTime_(r, best)) best = r; });
   return best;
 }
 
@@ -315,8 +323,11 @@ function appBudgetRestoreOnForecast_(ctx, plan, book) {
 function appBudgetDraftView_(planId) {
   const rows = appBudgetDraftRows_(planId);
   if (!rows.length) return null;
-  const last = appBudgetPick_(rows);
-  const mine = rows.filter(r => r.action_id === last.action_id);
+  const by = {};
+  rows.forEach(r => { if (r.ym) (by[r.ym] || (by[r.ym] = [])).push(r); });
+  const winners = Object.keys(by).map(ym => appBudgetPick_(by[ym])).filter(Boolean);
+  const last = appBudgetPick_(winners) || appBudgetPick_(rows);
+  const mine = winners.length ? winners : rows.filter(r => r.action_id === last.action_id);
   const sum = (list, k) => list.reduce((s, r) => (typeof r[k] === 'number' && isFinite(r[k]) ? (s === null ? 0 : s) + r[k] : s), null);
   const centerAtDraft = sum(mine, 'center');
   const now = appBudgetStoredMonths_(planId);

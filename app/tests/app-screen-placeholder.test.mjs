@@ -341,4 +341,30 @@ permute([humanRow, laterHuman]).forEach((seq) => {
   assert.equal(Number(win.adopted), 4444, '人の保存どうしは、これまでどおり時刻で新しい方');
 });
 
+const gap = env.seedPlan(book('空の写しの製薬'));
+const gapAmount = (i) => (i === 0 ? '' : (i === 1 ? 2500 : 1000 + i));
+env.run(`appWithLock_(() => appAppendLogRows_('BUDGET_DRAFTS', __r, []))`, {
+  __r: yms.map((ym, i) => ({
+    plan_id: gap, draft_id: 'BDR-B-' + gap + '-' + i, action_id: 'BASELINE', ym,
+    adopted: gapAmount(i) === '' ? null : gapAmount(i), uplift: null, basis: 'BASELINE', alloc: '', prob: null, run_id: '',
+    center: P50[i], actor_email: OWNER, saved_at: '2026-10-21T18:00:00+0900',
+  })).concat([0, 1].map((i) => ({
+    plan_id: gap, draft_id: 'BDR-P-' + gap + '-' + i, action_id: 'SCREEN_CHECK', ym: yms[i],
+    adopted: 620, uplift: null, basis: 'SCREEN_CHECK', alloc: 'SCREEN_CHECK', prob: null, run_id: '',
+    center: P50[i], actor_email: OWNER, saved_at: '2026-10-21T12:00:00+0900',
+  }))),
+});
+const gapLatest = () => env.call(`appBudgetLatestDrafts_('${gap}')`);
+assert.equal(gapLatest()[yms[0]].basis, 'SCREEN_CHECK', '金額の無い写しの月は、仮が勝つ');
+assert.equal(Number(gapLatest()[yms[0]].adopted), 620);
+assert.equal(gapLatest()[yms[1]].basis, 'BASELINE', '金額のある写しは、仮より残る');
+assert.equal(Number(gapLatest()[yms[1]].adopted), 2500);
+const gapShown = view(gap).boot.budgetDraft;
+assert.equal(gapShown.basis, 'BASELINE');
+assert.equal(gapShown.adopted, yms.reduce((s, ym, i) => s + (i === 0 ? 620 : gapAmount(i)), 0), '画面の下書きは、空の月に仮の金額を入れる');
+const gapFc = env.runJob('FORECAST.RUN', { planId: gap });
+assert.equal(gapFc.status, 'DONE', gapFc.error || '');
+assert.equal(nums(gap).monthly[0].adopted, 620, '予測し直しても、金額の無い月は仮の値が残る');
+assert.equal(nums(gap).monthly[1].adopted, 2500, '予測し直しても、金額のある写しは残る');
+
 console.log('app-screen-placeholder: all tests passed');
