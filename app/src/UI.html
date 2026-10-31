@@ -1118,6 +1118,7 @@ function startJob(kind, payload){
   if (S.job || S.starting || S.writing) { jobFail(kind, { status: 'BUSY' }, payload); return; }
   S.starting = true;
   S.lastError = null;
+  render();   // 受け付け待ちの間も入力を固定し、保存中の追記が完了時に消えるのを防ぐ
   call('apiStartJob', [{ kind: kind, payload: payload }], function(r){ S.starting = false; S.jobScroll = true; watchJob({ jobId: r.jobId, kind: kind, payload: payload, status: r.status, direct: r.direct }); },
     function(){ S.starting = false; jobFail(kind, { status: 'REFUSED' }, payload); });
 }
@@ -1261,7 +1262,8 @@ function render(){
     var toolsEl = $('hdrTools');
     if (toolsEl) toolsEl.innerHTML = headerTools(vt.tools);
     var mainEl = $('main');
-    if (mainEl) mainEl.innerHTML = vt.title + errorBanner() + '<div id="jobBox">' + jobBanner() + '</div>' + String(body || '').slice(head.length);
+    if (mainEl) mainEl.innerHTML = vt.title + errorBanner() + '<div id="jobBox">' + jobBanner() + '</div>' + fcHeldCard() + String(body || '').slice(head.length);
+    fcLockDrafts(mainEl);
     tipFocus($('main'));
     // 画面の中のタブが入りきらず横に送るときは、選んだタブが見える所まで送る（縦には動かさない）
     var on = document.querySelector('#main .tabs .tab.on'), tb = on && on.parentElement;
@@ -1272,6 +1274,7 @@ function render(){
     if (S.jobScroll) { S.jobScroll = false; jobBoxIntoView(); keepY = false; }
     focusRestore(fk);
   } finally {
+    fcGuardSync();
     if (keepY && window.scrollTo) { try { window.scrollTo(0, y); } catch (e) { /* 位置を戻すだけ */ } }
     S._rendering = false;
     if (S._rerender) render();
@@ -2819,8 +2822,8 @@ function fcSetFy(fy){
   ask(FC_DIRTY_MSG + '保存せずに、ほかの年度を開きますか？（入力は消えます）', '開く', empty, true);
   render();   // 選ぶ欄を今の年度に戻しておく（「やめる」のとき）
 }
-/** 保存・実行の後に読み直すとき、消す入力中の値（その操作が書き換えたもの）。見直し案の判断は、案が変わることがあるのでいつも消す */
-var FC_DRAFT_OF = { 'INPUT.SAVE': 'input', 'IMPORT.SALES': 'input', 'BUDGET.SAVE': 'budget', 'INSIGHT.SAVE': 'ins', 'EVAL.INSIGHTS': 'ins' };
+/** 保存・実行の後に消すのは、その操作が保存した入力だけ。別案へ変わった判断は読戻し時に控えへ移す */
+var FC_DRAFT_OF = { 'INPUT.SAVE': 'input', 'IMPORT.SALES': 'input', 'BUDGET.SAVE': 'budget', 'INSIGHT.SAVE': 'ins', 'EVAL.INSIGHTS': 'ins', 'REVIEW.DECIDE': 'dec' };
 /**
  * 計画を読む。force: 同じ計画でも読み直す。saved: { action, kind }（保存・実行が終わって読み直すとき。その操作の入力中の値だけ消し、ほかの欄の入力中の値は残す）
  */
@@ -2832,12 +2835,12 @@ function loadForecast(planId, force, saved){
   f.planId = planId; f.loadingId = planId;
   if (!same) fcDraftsFor(planId, true);
   else if (force) {
-    f.dec = {};
     var w = saved && FC_DRAFT_OF[saved.action];
     if (w === 'input' && saved.kind) { delete f.draft[saved.kind]; delete f.inputDirty[saved.kind]; }
     else if (w === 'input') { f.draft = {}; f.inputDirty = {}; }
     else if (w === 'budget') { f.budget = {}; f.budBasis = null; }
     else if (w === 'ins') f.ins = {};
+    else if (w === 'dec') { f.dec = {}; f.decSource = ''; f.decLabels = {}; }
   }
   // 予測と画面の中身は、根拠・振り返り・確定版と同じ 1 回の通信で読む。先読みの控え（S.fcMem）が 10 分以内なら、それを出して読まない（force のときは使わない）
   fcSecData(force, ['latest', 'view'].filter(function(p){ return force || !fcMemUse(planId, p); }));
@@ -2851,8 +2854,59 @@ function fcRetry(){
   render();
 }
 /** 保存していない入力（予算・入力・人の記入・見直し案の判断）があるか */
-function fcDirty(){ var f = S.fc; return Object.keys(f.inputDirty || {}).some(function(k){ return f.inputDirty[k]; }) || Object.keys(f.budget || {}).length > 0 || Object.keys(f.ins || {}).length > 0 || Object.keys(f.dec || {}).length > 0; }
-function fcDropDrafts(){ var f = S.fc; f.draft = {}; f.inputDirty = {}; f.budget = {}; f.budBasis = null; f.budProb = null; f.ins = {}; f.dec = {}; }
+function fcDirty(){ var f = S.fc; return !!f && (Object.keys(f.inputDirty || {}).some(function(k){ return f.inputDirty[k]; }) || Object.keys(f.budget || {}).length > 0 || Object.keys(f.ins || {}).length > 0 || Object.keys(f.dec || {}).length > 0 || !!(f.budPick && f.budPick.dirty) || Object.keys(f.verNotes || {}).length > 0 || !!(f.held && f.held.length)); }
+function fcDropDrafts(){ var f = S.fc; f.draft = {}; f.inputDirty = {}; f.budget = {}; f.budBasis = null; f.budProb = null; f.ins = {}; f.dec = {}; f.decSource = ''; f.decLabels = {}; f.budPick = null; f.verNotes = {}; f.held = []; fcGuardSync(); }
+/** 未保存の間だけブラウザ標準の離脱確認を使う。送信開始では解除せず、成功後の状態を参照する */
+var FC_LEAVE_ARMED = false;
+function fcBeforeUnload(e){ if (!fcDirty()) return; e.preventDefault(); e.returnValue = ''; }
+function fcGuardSync(){
+  var dirty = fcDirty();
+  if (dirty === FC_LEAVE_ARMED) return;
+  FC_LEAVE_ARMED = dirty;
+  if (dirty) window.addEventListener('beforeunload', fcBeforeUnload);
+  else if (window.removeEventListener) window.removeEventListener('beforeunload', fcBeforeUnload);
+}
+// 行の入力は描き直さないので、入力・選択の後にも保護を合わせる（インライン処理の後に受ける）
+document.addEventListener('input', fcGuardSync);
+document.addEventListener('change', fcGuardSync);
+/** 処理中は表示中の編集欄を固定する。入力済みの値と離脱保護は、成功が確かめられるまで保持する */
+function fcLockDrafts(root){
+  if (!root || !root.querySelectorAll || !fcBusy()) return;
+  root.querySelectorAll('input,select,textarea').forEach(function(el){ el.disabled = true; });
+  root.querySelectorAll('button').forEach(function(el){ if (/fcBud(Set|Apply)/.test(el.getAttribute('onclick') || '')) el.disabled = true; });
+}
+function fcReviewKey(view){
+  var q = view && view.boot && view.boot.quarterly;
+  return JSON.stringify(q ? [q.reviewId, q.applied, (q.proposals || []).map(function(p){ return [p.row, p.pid, p.target, p.current, p.proposed, p.decision]; })] : null);
+}
+/** 案が変わったときは判断を前の案の控えへ移し、新しい案には流用しない */
+function fcDecHold(view){
+  var f = S.fc;
+  if (!f.decSource || f.decSource === fcReviewKey(view) || !Object.keys(f.dec || {}).length) return;
+  f.held = (f.held || []).concat([{ label: '前の見直し案の判断', text: Object.keys(f.dec).map(function(k, i){ return ((f.decLabels || {})[k] || '判断 ' + (i + 1)) + ': ' + f.dec[k]; }).join('\n') }]);
+  f.dec = {}; f.decSource = ''; f.decLabels = {};
+}
+function fcOldNotes(){
+  var notes = S.fc.verNotes || {}, current = verNoteKey('decision');
+  return Object.keys(notes).filter(function(k){ return k !== 'submit' && k !== current; });
+}
+function fcHeldCard(){
+  if (!S.fc) return '';
+  var old = fcOldNotes(), held = S.fc.held || [], items = held.concat(old.map(function(k){ return { label: '前の版の判断メモ', text: S.fc.verNotes[k] }; }));
+  if (!items.length) return '';
+  return '<details class="card" id="fc-held-drafts"><summary>以前の版の未保存入力（' + items.length + '件）</summary><p class="note mt8">新しい版や案には使いません。内容を控えてから破棄できます。</p>'
+    + items.map(function(x){ return '<p class="mt12">' + esc(x.label) + '</p><pre class="pre">' + esc(x.text) + '</pre>'; }).join('')
+    + '<button type="button" class="btn btn-ghost" onclick="fcHeldDiscard()">控えを破棄</button></details>';
+}
+function fcHeldDiscard(){
+  var f = S.fc, held = (f.held || []).slice(), notes = f.verNotes || {}, old = fcOldNotes().map(function(k){ return [k, notes[k]]; });
+  ask('以前の版に入力したメモと判断の控えを破棄しますか？', '破棄する', function(){
+    if (S.fc !== f) return;
+    f.held = (f.held || []).filter(function(x){ return held.indexOf(x) < 0; });
+    old.forEach(function(x){ if (f.verNotes === notes && notes[x[0]] === x[1]) delete notes[x[0]]; });
+    render();
+  }, true);
+}
 /** 読んである計画: 計画の画面の中身の計画。まだ読めていない（読み直しの途中など）ときは、入力中の値を読んだ計画 */
 function fcLoadedPlan(){ var v = S.fc.view; return v && v.plan && v.plan.planId ? v.plan.planId : S.fc.draftPlan; }
 /**
@@ -2927,7 +2981,7 @@ function fcApply(planId, r, ts, req){
     if (S.ld[k] !== t) return;
     if (errs[p] || r[p] === undefined || r[p] === null) { S.ld[k] = { error: errText(errs[p] || '読み込めませんでした'), at: now }; return; }
     S.ld[k] = { at: t.stale ? 0 : now, ms: now - t.start, tag: planId };
-    if (S.fc.planId === planId) S.fc[FC_PARTS[p][1]] = r[p];
+    if (S.fc.planId === planId) { if (p === 'view') fcDecHold(r[p]); S.fc[FC_PARTS[p][1]] = r[p]; }
   });
 }
 // ---- 先読みの控え（計画ごと・中身ごと。10 分。保存・処理の後は捨てる: crossStale）。メーカーを切り替えたとき・予測を開いたときに、待たずに出す ----
@@ -2955,6 +3009,7 @@ function fcMemPut(planId, r, req){
 function fcMemUse(planId, p){
   var m = S.fcMem[planId], x = m && m[p], ld = S.ld[FC_PARTS[p][0]];
   if (!x || Date.now() - x.at >= LD_KEEP || (ld && ld.error)) return false;   // 読み込みに失敗した後は読み直す（「もう一度読み込む」と同じ）
+  if (p === 'view') fcDecHold(x.v);
   S.fc[FC_PARTS[p][1]] = x.v;
   S.ld[FC_PARTS[p][0]] = { at: x.at, ms: 0, tag: planId };
   return true;
@@ -3265,9 +3320,9 @@ function fcBudPick(){
   if (!p || p.planId !== S.fc.planId) p = S.fc.budPick = { planId: S.fc.planId, src: 'FINAL', calib: true, extra: '' };
   return p;
 }
-function fcBudSetSrc(src){ fcBudPick().src = src; render(); }
-function fcBudSetCalib(on){ fcBudPick().calib = !!on; render(); }
-function fcBudSetExtra(v){ fcBudPick().extra = String(v == null ? '' : v).replace(/[,\s]/g, ''); }
+function fcBudSetSrc(src){ if (fcBusy()) return; var p = fcBudPick(); if (p.src !== src) p.dirty = true; p.src = src; render(); }
+function fcBudSetCalib(on){ if (fcBusy()) return; var p = fcBudPick(); if (p.calib !== !!on) p.dirty = true; p.calib = !!on; render(); }
+function fcBudSetExtra(v){ if (fcBusy()) return; var p = fcBudPick(), value = String(v == null ? '' : v).replace(/[,\s]/g, ''); if (p.extra !== value) p.dirty = true; p.extra = value; }
 function fcBudCalFactor(){
   var c = S.fc.basis && S.fc.basis.planId === S.fc.planId && S.fc.basis.calibration;
   return c && isNum(c.factor) && c.factor > 0 ? c.factor : 1;
@@ -3340,6 +3395,7 @@ function fcBudgetCompose(d, v){
     + '</div>';
 }
 function fcBudApply(){
+  if (fcBusy()) return;
   if (!fcCan('plan')) return;
   var d = S.fc.data, v = S.fc.view, pick = fcBudPick();
   var rows = fcBudSrcMonthly(d, v, pick.src);
@@ -3356,6 +3412,7 @@ function fcBudApply(){
   }
   var bd = S.fc.budget = {};
   rows.forEach(function(r, i){ bd[r.row] = { adopted: String(bases[i]), uplift: String(extras[i]) }; });
+  pick.dirty = false;   // 月別の未保存予算へ移ったので、組み立ての未反映状態だけ解除する
   fcBudManual();
   Object.keys(bd).forEach(function(row){ fcMarkDirty('fcSaveBudget(' + row + ')'); });
   toast('月ごとの予算に入れました。保存すると確定します');
@@ -3624,7 +3681,7 @@ function fcYenIn(v){ if (v === null || v === undefined || v === '') return ''; v
 function fcNumFocus(el){ el.value = String(el.value || '').replace(/[,\s]/g, ''); }
 function fcNumBlur(el){ el.value = fcYenIn(el.value); }
 function fcConfirmRun(){ var c = S.fc.confirm; S.fc.confirm = null; startJob('FORECAST.RUN', { planId: c.planId, confirms: c.confirms.concat([c.key]) }); }
-function fcBudget(row, k, val){ var b = S.fc.budget; b[row] = b[row] || {}; b[row][k] = String(val == null ? '' : val).replace(/[,\s]/g, ''); if (k === 'adopted') fcBudManual(); fcMarkDirty('fcSaveBudget(' + row + ')'); }
+function fcBudget(row, k, val){ if (fcBusy()) return; var b = S.fc.budget; b[row] = b[row] || {}; b[row][k] = String(val == null ? '' : val).replace(/[,\s]/g, ''); if (k === 'adopted') fcBudManual(); fcMarkDirty('fcSaveBudget(' + row + ')'); }
 /** 予算を保存する。採用予測の決め方（basis・prob・alloc。fcBudArgs）も送る（表の版 11 の下書きに残す。前のサーバーは rows だけを使う） */
 function fcSaveBudget(row){   // row: 押した行（保存は変えた行をまとめて）
   var sec = S.fc.view.boot.output.sections[0], bd = S.fc.budget;
@@ -4129,12 +4186,13 @@ function fcDraftOk(kind, rows){
   return !!pid && rows.planId === pid && (!f.planId || f.planId === pid) && rows.src === fcInputSrc(kind);
 }
 /** 入力の欄（選ぶ欄）を変えた。kind: 入力の種類（無ければ S.fc.inputKind） */
-function fcInput(i, k, val, kind){ kind = kind || S.fc.inputKind; var dr = fcDraft(kind), added = !dr[i]; if (added) dr[i] = {}; dr[i][k] = val; var first = !dr[i]._dirty; dr[i]._dirty = true; if (!S.fc.inputDirty[kind] || added || first) { S.fc.inputDirty[kind] = true; render(); } }   // 空の行に入れたら次の空の行を出す・その行の保存を押せるように   // 空の行に入れたら、次の空の行を出す
+function fcInput(i, k, val, kind){ if (fcBusy()) return; kind = kind || S.fc.inputKind; var dr = fcDraft(kind), added = !dr[i]; if (added) dr[i] = {}; dr[i][k] = val; var first = !dr[i]._dirty; dr[i]._dirty = true; if (!S.fc.inputDirty[kind] || added || first) { S.fc.inputDirty[kind] = true; render(); } }   // 空の行に入れたら次の空の行を出す・その行の保存を押せるように   // 空の行に入れたら、次の空の行を出す
 /**
  * 文字・数の欄（理由・補足・案件名・確度・金額）は、打つたびに入力中の値へ控える（読み込みや処理の終わりで描き直しても、打ちかけの文字を消さない）。
  * 描き直すと打っている欄から外れるので、描き直さずに、その種類のカードの保存のボタンと未保存の印だけを付ける（人の記入の欄と同じ）
  */
 function fcInputType(i, k, val, kind){
+  if (fcBusy()) return;
   kind = kind || S.fc.inputKind;
   var dr = fcDraft(kind), added = !dr[i];
   if (added) dr[i] = {};   // 最後の空の行に打った（画面だけの行を、入力中の行に足す）
@@ -4293,7 +4351,7 @@ function fcRvNotes(ins, canPlan){
         : clamp(r.hypothesis) + '<td>' + esc(fcInsAct(r)) + '</td>' + clamp(r.reflection) + (who ? '<td>' + esc(r.owner || '-') + '</td>' : '') + '<td>' + esc(fcInsLabel('status', r.status)) + '</td>') + '</tr>'; }).join('')
     + '</tbody></table></div></div>';
 }
-function fcIns(row, k, val){ var x = S.fc.ins; x[row] = x[row] || {}; x[row][k] = val; fcMarkDirty('fcSaveIns(' + row + ')'); }
+function fcIns(row, k, val){ if (fcBusy()) return; var x = S.fc.ins; x[row] = x[row] || {}; x[row][k] = val; fcMarkDirty('fcSaveIns(' + row + ')'); }
 function fcSaveIns(row){   // row: 押した行（保存は変えた行をまとめて）
   var ins = S.fc.ins;
   var rows = (S.fc.view.boot.eval.insights || []).filter(function(r){ return ins[r.row]; }).map(function(r){ var x = ins[r.row], g = function(k){ return x[k] !== undefined ? x[k] : r[k]; };
@@ -4337,7 +4395,14 @@ function fcRvProposals(q){
     + '<th data-tip="' + (edit ? '承認・却下・保留を選びます。選ばなかった案は承認として扱います' : withdrawn ? '取り下げた案です。反映しません' : canApprove ? 'この見直し案は反映済みです' : '承認は承認者ができます') + '">判断</th></tr></thead><tbody>' + body + '</tbody></table></div>'
     + '</div>';
 }
-function fcDec(row, val){ S.fc.dec[row] = val; }
+function fcDec(row, val){
+  if (fcBusy()) return;
+  fcDecHold(S.fc.view);
+  S.fc.decSource = fcReviewKey(S.fc.view);
+  S.fc.dec[row] = val;
+  var q = S.fc.view && S.fc.view.boot && S.fc.view.boot.quarterly;
+  (q && q.proposals || []).forEach(function(p){ if (p.row === row) { S.fc.decLabels = S.fc.decLabels || {}; S.fc.decLabels[row] = qrTarget(p.target, !seePeople()); } });
+}
 /** 承認して反映: 判断の無い案は承認にし、確かめてから判断を保存（PLAN.EDIT）。保存が終わったら続けて反映（PLAN.RUN）を始める */
 function fcRvGo(){
   var v = S.fc.view, q = v && v.boot && v.boot.quarterly, props = (q && q.proposals) || [];
@@ -4485,7 +4550,7 @@ function fcVersionTab(d, v){
 
       + (pend.note ? '<p class="note mt4">メモ: ' + esc(pend.note) + '</p>' : '')
       + (r.pendingChanged ? '<p class="warn-text mt8">出した後に計画が変わっています。承認するのは、出した時点の数字です。</p>' : '')
-      + (r.can.approve && !mine ? '<div class="field mt12"><label for="ver_note">判断のメモ（却下のときは理由を書く）</label><input class="inp lg" id="ver_note" aria-describedby="ver_note_hint"><span class="note warn-text" id="ver_note_hint" role="status"></span></div>'
+      + (r.can.approve && !mine ? '<div class="field mt12"><label for="ver_note">判断のメモ（却下のときは理由を書く）</label><input class="inp lg" id="ver_note" aria-describedby="ver_note_hint" value="' + esc(verNoteGet('decision')) + '" oninput="verNoteSet(\'decision\',this.value)"><span class="note warn-text" id="ver_note_hint" role="status"></span></div>'
         + '<div class="card-foot">' + actBtn('<button class="btn" onclick="verDecide(\'APPROVED\')">承認する</button>', '承認すると、この版が確定版になり、前の確定版は置き換わります')
         + actBtn('<button class="btn btn-ghost" onclick="verDecide(\'REJECTED\')">却下する</button>', '却下のときは、判断のメモに理由を書きます') + '</div>'
         : '<p class="note mt8">' + (mine ? '自分で出した版は、ほかの承認者が承認します。' : '承認者が承認します。') + '</p>') + '</div>';
@@ -4501,7 +4566,7 @@ function fcVersionTab(d, v){
           .map(function(x){ return '<tr><td' + (x[3] ? ' data-tip="' + esc(x[3]) + '"' : '') + '>' + x[0] + '</td><td class="num">' + yen(x[1]) + '</td><td class="num">' + (base ? yen(x[2]) : '-') + '</td><td class="num"' + (base && x[4] ? ' data-tip="' + esc('今 − 確定版\n' + x[4]) + '"' : '') + '>' + (base ? verDiff(x[1], x[2]) : '-') + '</td></tr>'; }).join('')
         + '</tbody></table></div>' : '<p class="note">予測がまだありません。予測を実行してから出してください。</p>')
       // メモと出すボタンは 1 行に（押しやすく、縦を食わない。2026-10-16 村井さん）
-      + '<div class="ver-submit"><input class="inp" id="ver_submit_note" aria-label="メモ（何を見直したか）" placeholder="メモ（何を見直したか）">'
+      + '<div class="ver-submit"><input class="inp" id="ver_submit_note" aria-label="メモ（何を見直したか）" placeholder="メモ（何を見直したか）" value="' + esc(verNoteGet('submit')) + '" oninput="verNoteSet(\'submit\',this.value)">'
       + actBtn('<button class="btn" ' + (fcBusy() ? 'disabled ' : '') + 'onclick="verSubmit()">確定版として出す</button>', '承認者の確認を待ちます' + (pend ? '（承認待ちの v' + pend.no + ' は取り下げ）' : '')) + '</div></div>';
   }
   // 版の一覧
@@ -4523,23 +4588,38 @@ function fcVersionTab(d, v){
   }
   return html;
 }
+/** 判断のメモは承認待ちの版に結び、別の版には流用しない。提出のメモは現在の計画のもの */
+function verNoteKey(kind){ return kind === 'decision' ? 'decision:' + ((S.fc.ver && S.fc.ver.pending && S.fc.ver.pending.versionId) || '') : 'submit'; }
+function verNoteGet(kind){ return (S.fc.verNotes || {})[verNoteKey(kind)] || ''; }
+function verNoteSet(kind, value){
+  var notes = S.fc.verNotes = S.fc.verNotes || {}, key = verNoteKey(kind);
+  if (value) notes[key] = String(value); else delete notes[key];
+  fcGuardSync();
+}
+function verNoteSaved(planId, notes, key, value){
+  if (S.fc.planId === planId && S.fc.verNotes === notes && notes && notes[key] === value) delete notes[key];
+  fcGuardSync();
+}
 function verSubmit(){
   var r = S.fc.ver, note = $('ver_submit_note').value, p = r.pending;
+  var notes = S.fc.verNotes, key = verNoteKey('submit');
   // 承認待ちの版があれば、出すとその版が取り下げになる（ほかの人が出した版でも）。そのことを先に伝える
   var msg = '今の予測と予算を、確定版として出しますか？（承認待ちになります）' + (p ? '\n承認待ちの v' + p.no + '（出した人: ' + fcWho(p.submittedBy) + '）は取り下げになります。' : '');
   ask(msg, '出す', function(){
     call('apiVersionSubmit', [{ planId: r.planId, note: note, inputHash: r.inputHash }], function(x){
+      verNoteSaved(r.planId, notes, key, note);
       var wd = (x.withdrawn || []).map(function(n){ return 'v' + n; }).join('・');
       toast('v' + x.version.no + ' を出しました（承認待ち）' + (wd ? '。' + wd + ' は取り下げました' : '')); crossStale(); fcLoadVersions(); });
   }, !!p);
 }
 function verDecide(decision){
   var r = S.fc.ver, p = r.pending, note = $('ver_note').value, hint = $('ver_note_hint');
+  var notes = S.fc.verNotes, key = verNoteKey('decision');
   // 却下の理由が空なら、欄のすぐ下で知らせて欄を選ぶ（画面の上のエラーにしない。ほかの欄の入力も消さない）
   if (decision === 'REJECTED' && !String(note).trim()) { if (hint) hint.textContent = '却下のときは、理由を書いてください'; var el = $('ver_note'); if (el && el.focus) el.focus(); return; }
   if (hint) hint.textContent = '';
   ask('v' + p.no + ' を' + (decision === 'APPROVED' ? '承認' : '却下') + 'しますか？', decision === 'APPROVED' ? '承認する' : '却下する', function(){
-    call('apiVersionDecide', [{ versionId: p.versionId, decision: decision, note: note, rowVersion: p.rowVersion }], function(x){ toast('v' + x.version.no + ' を' + (decision === 'APPROVED' ? '確定版にしました' : '却下しました')); crossStale(); fcLoadVersions(); });
+    call('apiVersionDecide', [{ versionId: p.versionId, decision: decision, note: note, rowVersion: p.rowVersion }], function(x){ verNoteSaved(r.planId, notes, key, note); toast('v' + x.version.no + ' を' + (decision === 'APPROVED' ? '確定版にしました' : '却下しました')); crossStale(); fcLoadVersions(); });
   }, true);   // 承認も却下も元に戻せない（開き直す操作は無い）ので「やめる」を先に
 }
 // ==== END REGION: FORECAST ====
