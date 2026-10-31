@@ -2,6 +2,8 @@
 
 [DESIGN_data_platform_JA.md](../DESIGN_data_platform_JA.md) の新しい仕組みです。売上予測と予算策定の**現行アプリ**（スタンドアロンの Apps Script）。旧来の計算はルートの `Forecast_Agent.js` を `LegacyEngine.js` に包んで使います。Forecast vNext は凍結し `archive/vnext-2026-10-05/` へ移済みで、これ以上こちらへ移植しません。
 
+直近の公開確認は **@135（2026-10-31、v0.58.5、ソース6dfc6b0）**。保存行より小さくなっていた復元用メタを保全修復し、44計画の読み込みエラーを解消した。非メタ53表の不変、対象132シートの修復残件ゼロ、実ブラウザ3計画の表示、全115テスト、公開55ファイルの一致を確認。所有者用の[保全修復・再開・巻戻し手順](NATIVE_METADATA_REPAIR_JA.md)と[継続改善の記録](PLAN_completion_JA.md)を参照。
+
 | 項目 | 値 |
 |---|---|
 | 名前 | **Trends2Targets 売上予測と予算策定**（2026-10-02 決定。ブラウザのタブは英語だけ。画面の上部は英語と日本語。2026-10-06 に GitHub・フォルダ・Apps Script・Drive のファイル名も Trends2Targets に統一。下の「名前と技術 ID」） |
