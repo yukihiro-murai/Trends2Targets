@@ -123,7 +123,7 @@ const makeUi = () => {
 // ==== 4. 先読みの途中で同じ計画を開いても重ねて読まない ====
 {
   const u = makeUi();
-  u.run("S.view='forecast'; S.fc.planId='p1'; S.fcPreBusy=true; S.fcPreId='p1'");
+  u.run("S.view='forecast'; S.fc.planId='p1'; S.fcPreQ=['p1']; fcPreNext()");
   const n = u.calls.length;
   u.run("fcFetch('p1', ['latest','view','basis','learn','ver'])");
   assert.deepEqual(u.calls.slice(n), [], '先読み中は apiForecastPage を重ねない');
@@ -179,7 +179,79 @@ const makeUi = () => {
   assert.equal(u.queue.length, 0, '通信を始めない');
 }
 
-// ==== 9. 通信の切れだけ、戻ったときに読み直す（権限エラーは読み直さない） ====
+// ==== 9. 逆順で届いた古い応答は、表示にも控えにも戻さない ====
+{
+  const u = makeUi();
+  u.run("S.fc.planId='p1'; fcFetch('p1', ['latest']); fcFetch('p1', ['latest'])");
+  const old = u.queue.shift(), fresh = u.queue.shift();
+  fresh.ok({ latest: { plan: { planId: 'p1' }, label: 'new' } });
+  old.ok({ latest: { plan: { planId: 'p1' }, label: 'old' } });
+  assert.equal(u.run('S.fc.data.label'), 'new', '表示は新しい要求の応答');
+  assert.equal(u.run('S.fcMem.p1.latest.v.label'), 'new', '控えも新しい要求の応答');
+  u.run("fcMemUse('p1', 'latest')");
+  assert.equal(u.run('S.fc.data.label'), 'new', 'メーカーを開き直しても古い応答は復活しない');
+}
+
+// ==== 10. 無効化する前に始めた読み込みは、新しい控えを作らない ====
+{
+  const u = makeUi();
+  u.run("S.fc.planId='p1'; fcFetch('p1', ['basis']); crossStale()");
+  u.queue.shift().ok({ basis: { planId: 'p1', label: 'old' } });
+  assert.equal(u.run("fcMemUse('p1', 'basis')"), false, '保存前の中身は控えから再利用できない');
+  assert.equal(u.run('S.ld.fcBasis.at'), 0, '表示に残す中身も古い印を維持する');
+}
+
+// ==== 11. 無効化した先読みへ合流せず、新しく読んで待ちを終える ====
+{
+  const u = makeUi();
+  u.run("S.fc.planId='p1'; S.fcPreQ=['p1']; fcPreNext(); crossStale(); fcFetch('p1', ['latest','view'])");
+  assert.equal(u.queue.length, 2, '古い先読みとは別に新しい要求を送る');
+  const old = u.queue.shift(), fresh = u.queue.shift();
+  old.ok({ latest: { plan: { planId: 'p1' }, label: 'old' } });
+  assert.equal(u.run('!!S.ld.fcLatest.loading'), true, '古い成功は新しい待ちを終えない');
+  assert.equal(u.run("fcMemUse('p1', 'latest')"), false, '古い成功を控えに戻さない');
+  fresh.ok({ latest: { plan: { planId: 'p1' }, label: 'new' }, view: { plan: { planId: 'p1' } } });
+  assert.equal(u.run('!!S.ld.fcLatest.loading || !!S.ld.fcView.loading'), false, '新しい応答で待ちが終わる');
+  assert.equal(u.run('S.fc.data.label'), 'new');
+}
+
+// ==== 12. 無効化した先読みの失敗は、新しい読み込みを失敗にしない ====
+{
+  const u = makeUi();
+  u.run("S.fc.planId='p1'; S.fcPreQ=['p1']; fcPreNext(); crossStale(); fcFetch('p1', ['latest'])");
+  assert.equal(u.queue.length, 2, '無効化した先読みとは分ける');
+  const old = u.queue.shift(), fresh = u.queue.shift();
+  old.fail({ message: '古い先読みの失敗' });
+  assert.equal(u.run('!!S.ld.fcLatest.loading'), true, '新しい読み込みを待つ');
+  assert.equal(u.run('!!S.ld.fcLatest.error'), false, '古い失敗は伝えない');
+  fresh.ok({ latest: { plan: { planId: 'p1' }, label: 'new' } });
+  assert.equal(u.run('S.fc.data.label'), 'new');
+}
+
+// ==== 13. 別メーカーに移った後の有効な応答は控えに残す ====
+{
+  const u = makeUi();
+  u.run("S.fc.planId='p1'; fcFetch('p1', ['latest']); S.fc.planId='p2'; fcFetch('p2', ['latest'])");
+  const first = u.queue.shift(), second = u.queue.shift();
+  second.ok({ latest: { plan: { planId: 'p2' }, label: 'second' } });
+  first.ok({ latest: { plan: { planId: 'p1' }, label: 'first' } });
+  assert.equal(u.run('S.fc.data.label'), 'second', '開いているメーカーを保つ');
+  u.run("S.fc.planId='p1'; fcMemUse('p1', 'latest')");
+  assert.equal(u.run('S.fc.data.label'), 'first', '有効な応答は再通信せず再利用できる');
+}
+
+// ==== 14. 違う区切りの要求は、互いの控えを無効にしない ====
+{
+  const u = makeUi();
+  u.run("S.fc.planId='p1'; fcFetch('p1', ['latest']); fcFetch('p1', ['basis'])");
+  const latest = u.queue.shift(), basis = u.queue.shift();
+  basis.ok({ basis: { planId: 'p1', label: 'basis' } });
+  latest.ok({ latest: { plan: { planId: 'p1' }, label: 'latest' } });
+  assert.equal(u.run('S.fcMem.p1.latest.v.label'), 'latest');
+  assert.equal(u.run('S.fcMem.p1.basis.v.label'), 'basis');
+}
+
+// ==== 15. 通信の切れだけ、戻ったときに読み直す（権限エラーは読み直さない） ====
 {
   const u = makeUi();
   u.run("S.view='home'; B.home=null; S.ld.home={ error:'通信が途中で切れました。少し待って、もう一度試してください（裏の処理は続いていることがあります）。', at: Date.now() }");

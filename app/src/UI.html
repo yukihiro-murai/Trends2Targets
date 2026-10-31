@@ -2907,9 +2907,10 @@ function fcFetch(planId, parts){
   parts.forEach(function(p){ ts[p] = { loading: true, start: now, tag: planId }; S.ld[FC_PARTS[p][0]] = ts[p]; });
   fcSlowKick();
   // 先読みが同じ計画を通信中なら、その応答を使う（重ねて読まない。先読みの失敗は fcPreNext が印を付ける）
-  if (S.fcPreBusy && S.fcPreId === planId) return;
+  if (S.fcPreBusy && S.fcPreId === planId && S.fcPreReq && S.fcPreReq.gen === S.fcMemGen) return;
+  var req = fcReadStart(planId, parts);
   call('apiForecastPage', [{ planId: planId, parts: parts }], function(r){
-    fcApply(planId, r || {}, ts);
+    fcApply(planId, r || {}, ts, req);
     if (S.fc.planId !== planId) return false;
   }, function(e){
     var msg = errText((e && e.message) || String(e));
@@ -2918,9 +2919,9 @@ function fcFetch(planId, parts){
   });
 }
 /** 届いた中身を入れる（ts: 中身ごとの読み込みの印。印が変わっていれば、その中身はもう待っていない）。届いた中身は先読みの控えにも入れる */
-function fcApply(planId, r, ts){
+function fcApply(planId, r, ts, req){
   var now = Date.now(), errs = r.errors || {};
-  fcMemPut(planId, r);
+  fcMemPut(planId, r, req);
   Object.keys(ts).forEach(function(p){
     var k = FC_PARTS[p][0], t = ts[p];
     if (S.ld[k] !== t) return;
@@ -2931,9 +2932,24 @@ function fcApply(planId, r, ts){
 }
 // ---- 先読みの控え（計画ごと・中身ごと。10 分。保存・処理の後は捨てる: crossStale）。メーカーを切り替えたとき・予測を開いたときに、待たずに出す ----
 S.fcMem = {};
-function fcMemPut(planId, r){
-  var m = S.fcMem[planId] = S.fcMem[planId] || {}, now = Date.now(), errs = r.errors || {};
-  Object.keys(FC_PARTS).forEach(function(p){ if (r[p] !== undefined && r[p] !== null && !errs[p]) m[p] = { v: r[p], at: now }; });
+S.fcMemGen = 0;
+S.fcReads = {};
+/** 世代と、メーカー・中身ごとの最後の要求を控える。画面を移っても有効な応答は再利用できる */
+function fcReadStart(planId, parts){
+  var req = { gen: S.fcMemGen }, m = S.fcReads[planId] = S.fcReads[planId] || {};
+  parts.forEach(function(p){ m[p] = req; });
+  return req;
+}
+function fcReadCurrent(planId, p, req){
+  return req && req.gen === S.fcMemGen && S.fcReads[planId] && S.fcReads[planId][p] === req;
+}
+function fcMemPut(planId, r, req){
+  var now = Date.now(), errs = r.errors || {};
+  Object.keys(FC_PARTS).forEach(function(p){
+    if (!fcReadCurrent(planId, p, req) || r[p] === undefined || r[p] === null || errs[p]) return;
+    var m = S.fcMem[planId] = S.fcMem[planId] || {};
+    m[p] = { v: r[p], at: now };
+  });
 }
 /** 控えが 10 分以内なら画面の中身に入れる（読めた印も付ける）。使えたら true */
 function fcMemUse(planId, p){
@@ -2964,29 +2980,29 @@ function fcPreNext(){
   if (fresh || busyNow) { S.fcPreT = setTimeout(fcPreNext, 0); return; }
   S.fcPreBusy = true;
   S.fcPreId = id;
-  var gen = S.fcMemGen;
+  var req = S.fcPreReq = fcReadStart(id, Object.keys(FC_PARTS));
   var done = function(){ S.fcPreBusy = false; S.fcPreId = ''; S.fcPreT = setTimeout(fcPreNext, 300); };
   var applyOpen = function(r){
     if (S.fc.planId !== id) return;
     var ts = {};
     Object.keys(FC_PARTS).forEach(function(p){ var x = S.ld[FC_PARTS[p][0]]; if (x && x.loading && x.tag === id) ts[p] = x; });
-    if (Object.keys(ts).length) { fcApply(id, r, ts); if (fcView()) render(); }
+    if (Object.keys(ts).length) { fcApply(id, r, ts, req); if (fcView()) render(); }
   };
   try {
     gsRun('apiForecastPage', [{ planId: id }], function(r){
-      if (gen === S.fcMemGen && r) {
-        fcMemPut(id, r);
+      if (req.gen === S.fcMemGen && r) {
+        fcMemPut(id, r, req);
         // 先読みの途中でそのメーカーを開いていたら（まだ読み込み中なら）、届いた中身をそのまま使う
         applyOpen(r);
       }
       done();
     }, function(e){
-      if (S.fc.planId === id) {
+      if (req.gen === S.fcMemGen && S.fc.planId === id) {
         var msg = errText((e && e.message) || String(e) || '読み込めませんでした');
         var hit = false;
         Object.keys(FC_PARTS).forEach(function(p){
           var k = FC_PARTS[p][0], x = S.ld[k];
-          if (x && x.loading && x.tag === id) { S.ld[k] = { error: msg, at: Date.now() }; hit = true; }
+          if (x && x.loading && x.tag === id && fcReadCurrent(id, p, req)) { S.ld[k] = { error: msg, at: Date.now() }; hit = true; }
         });
         if (hit && fcView()) render();
       }
