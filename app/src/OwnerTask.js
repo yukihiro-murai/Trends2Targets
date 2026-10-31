@@ -166,6 +166,14 @@ const APP_OWNER_ACTIONS = {
   restoreScreenPlaceholders: { name: 'SCREEN.RESTORE', args: ['fy', 'batch'], check: t => appOwnerCheckScreenRestore_(t),
     opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'SCREEN_PLACEHOLDER', detail: i }),
     run: (ctx, i) => appScreenPlaceholderRestore_(ctx, i.fy, i.batch) },
+  previewNativeMetadataRepair: { name: 'NATIVE_META.PREVIEW', args: ['planIds'], check: t => appNativeMetaTaskCheck_(t, false),
+    opts: () => ({ ownerOnly: true, minRole: 'ADMIN', audit: false }), run: (ctx, i) => appNativeMetaPreview_(ctx, i) },
+  applyNativeMetadataRepair: { name: 'NATIVE_META.APPLY', args: ['planIds', 'previewSha256', 'backupId'], check: t => appNativeMetaTaskCheck_(t, true),
+    opts: () => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'NATIVE_METADATA' }), run: (ctx, i) => appNativeMetaApply_(ctx, i) },
+  rollbackNativeMetadataRepair: { name: 'NATIVE_META.ROLLBACK', args: ['repairFileId'],
+    opts: () => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'NATIVE_METADATA' }), run: (ctx, i) => appNativeMetaRollback_(ctx, i) },
+  resumeNativeMetadataRepair: { name: 'NATIVE_META.RESUME', args: ['repairFileId'],
+    opts: () => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'NATIVE_METADATA' }), run: (ctx, i) => appNativeMetaResume_(ctx, i) },
   // まとめて動かしている状態（今の計画・残り・済んだ計画と結果）
   bulkStatus: { name: 'BULK.STATUS', opts: () => ({ minRole: 'ADMIN', audit: false }), run: () => appBulkStatus_() },
   // 全メーカーの履歴のみの計画を用意し、取込→集計→予測を保存する。既存の通常計画は保持する。

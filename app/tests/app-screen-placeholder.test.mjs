@@ -39,8 +39,8 @@ function book(client, { adopted, uplift, cmp = [], status = [] } = {}) {
     OUTPUT: { values: output, formulas, formats: { A: '@' } },
     SALES_INPUT: { values: [HS], formats: { D: '@' } },
   };
-  if (cmp.length) sheets.EVAL_COMPARE_MONTHLY = { values: [HC, ...cmp], formats: { A: '@' } };
-  if (status.length) sheets.PROCESS_STATUS = { values: [HP, ...status] };
+  sheets.EVAL_COMPARE_MONTHLY = { values: [HC, ...cmp], formats: { A: '@' } };
+  sheets.PROCESS_STATUS = { values: [HP, ...status] };
   return env.makeBook(client, sheets);
 }
 const nums = (id) => env.call(`appPlanNumbers_('${id}')`);

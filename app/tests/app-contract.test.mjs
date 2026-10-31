@@ -80,7 +80,7 @@ const auditCols = makeEnv().run('APP_LOG_TABLES.AUDIT');
   assert.match(extractFunction(sources['Api.js'], 'doGet'), /api_\('APP\.OPEN', \{ minRole: 'VIEWER', audit: false, allowAnonymousView: true \}/);
   // 業務のコードは SpreadsheetApp を Store / Audit / Setup の外で触らない
   for (const [file, src] of Object.entries(sources)) {
-    if (!['Store.js', 'Audit.js', 'Setup.js', 'Backup.js', 'Engine.js', 'Migrate.js', 'Parity.js', 'Legacy.js', ...WRAPPED].includes(file)) assert.doesNotMatch(src, /SpreadsheetApp\./, `${file} は保存の層を通す`);
+    if (!['Store.js', 'Audit.js', 'Setup.js', 'Backup.js', 'Engine.js', 'Migrate.js', 'Parity.js', 'Legacy.js', 'NativeMetadataRepair.js', ...WRAPPED].includes(file)) assert.doesNotMatch(src, /SpreadsheetApp\./, `${file} は保存の層を通す`);
   }
 }
 

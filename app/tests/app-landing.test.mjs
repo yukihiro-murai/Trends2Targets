@@ -622,6 +622,8 @@ const evalLogSheet = (env, rows) => {
   const book = env.makeBook('着地欠け', {
     CONFIG: { values: [['項目', '値'], ['[必須] メーカー名（外部集計キー）', '着地欠け'], ['[必須] 予測年度FY（YYYY）', 2026], ['[必須] 担当者（カンマ区切り）', '鷹野']] },
     OUTPUT: { values: output, formats: { A: '@' } },
+    EVAL_COMPARE_MONTHLY: { values: [env.call('APP_ENGINE_SHEETS.EVAL_COMPARE_MONTHLY.header')] },
+    PROCESS_STATUS: { values: [env.call('APP_ENGINE_SHEETS.PROCESS_STATUS.header')] },
   });
   const id = env.seedPlan(book);
   const before = env.call('apiPortfolio()').plans.filter((p) => p.planId === id)[0];

@@ -874,6 +874,11 @@ function appDummyLandingOps_(plan, fy, index, todayYm, atIso, actor) {
   });
   ops.push(appOpReplaceOrAppend_('ENG_EVAL_COMPARE_MONTHLY', plan.plan_id, appDummyMergeEval_(plan.plan_id, fresh)));
   ops.push(appOpReplaceOrAppend_('ENG_PROCESS_STATUS', plan.plan_id, appDummyStatusRows_(plan.plan_id, plan.client_label, atIso)));
+  // 行と寸法・ハッシュを同じ控えに残す。実際に書く ensure / replacePlan の結果を使う。
+  ['OUTPUT', 'EVAL_COMPARE_MONTHLY', 'PROCESS_STATUS'].forEach(sheet => {
+    const op = appScreenSheetHashOp_(plan.plan_id, sheet, actor, bag => appScreenOverlaySheetOps_(bag, plan.plan_id, sheet, ops));
+    if (op) ops.push(op);
+  });
   return ops;
 }
 
@@ -1215,43 +1220,144 @@ function appScreenHoldRow_(planId, batchId, fy, table, rowKey, kind, payload, ac
   };
 }
 
+/** 実際の Journal の行操作をメタ計算用の控えへ反映する。ほかの計画・シートは混ぜない */
+function appScreenOverlaySheetOps_(bag, planId, sheet, ops) {
+  (ops || []).forEach(op => {
+    const segs = op.table === 'ENG_ROWS';
+    if (!segs && op.table !== 'ENG_' + sheet) return;
+    const name = segs ? 'segs' : 'tableRows', def = APP_TABLES[op.table];
+    const relevant = row => row && String(row.plan_id) === String(planId) && (!segs || row.sheet === sheet);
+    const key = row => JSON.stringify(def.key.map(k => String(row[k] == null ? '' : row[k])));
+    const incoming = (op.rows || []).filter(relevant).map(appStripRow_);
+    if (op.mode === 'replacePlan') {
+      if (String(op.planId) !== String(planId) || (segs && op.sheets && op.sheets.indexOf(sheet) < 0)) return;
+      bag[name] = incoming;
+    } else if (op.mode === 'ensure' || op.mode === 'append') {
+      const seen = {}, added = {};
+      bag[name].forEach(row => { seen[key(row)] = true; });
+      incoming.forEach(row => {
+        const k = key(row);
+        if (added[k]) throw new Error('「' + sheet + '」へ同じキーの行を二度追加しようとしています。');
+        added[k] = true;
+        if (!seen[k]) { bag[name].push(row); seen[k] = true; }
+      });
+    } else if (op.mode === 'patch') {
+      if (!relevant(op.key)) return;
+      const found = bag[name].filter(row => key(row) === key(op.key));
+      if (found.length !== 1) throw new Error('「' + sheet + '」の更新対象を一意に確認できません。');
+      Object.keys(op.patch || {}).forEach(k => { found[0][k] = op.patch[k]; });
+    } else if (op.mode === 'drop') {
+      const gone = {};
+      (op.keys || []).filter(relevant).forEach(row => { gone[key(row)] = true; });
+      bag[name] = bag[name].filter(row => !gone[key(row)]);
+    } else if (op.mode === 'replace') {
+      throw new Error('「' + sheet + '」のメタ計算で表全体の入れ替えは扱いません。');
+    } else throw new Error('「' + sheet + '」の行操作を確認できません: ' + op.mode);
+  });
+}
+
 /**
- * シートの中身を変えたあとの content_hash（計算用ブックの使い回しが、消す前の表を正と見ないようにする）。
- * mutate は、これから書く行を bag.tableRows / bag.segs に反映する。ハッシュは控えに入れる値で、書くときに作り直さない
+ * 行操作後の寸法と content_hash。欠番を空行で補わず、実際に保存する行の canonical を使う。
+ * mutate は、これから書く行だけ bag.tableRows / bag.segs に反映する。計算結果は Journal に固定して再開でも同じ値を書く。
  */
 function appScreenSheetHashOp_(planId, sheet, actor, mutate) {
-  const meta = appScreenReadPlan_('ENG_SHEETS', planId).filter(r => r.sheet === sheet)[0];
-  if (!meta) return null;
+  const fail = text => { throw new Error('「' + sheet + '」のメタを作れません。' + text); };
+  const check = (ok, text) => { if (!ok) fail(text); };
+  const reg = APP_ENGINE_SHEETS[sheet];
+  check(!!reg, '対象のシートが定義されていません。');
+  const metas = appScreenReadPlan_('ENG_SHEETS', planId).filter(r => r.sheet === sheet);
+  check(metas.length === 1, '保存したシート情報がありません、または重複しています。');
+  const meta = metas[0];
+  check(meta.mode === 'rows' || (meta.mode === 'table' && reg.mode === 'table'), 'シートの形が不正です。');
+  const number = (v, min, label) => {
+    const n = Number(v);
+    check((typeof v === 'string' || typeof v === 'number') && String(v).trim() !== '' && Number.isSafeInteger(n) && n >= min, label + 'が不正です。');
+    return n;
+  };
+  const fit = Object.assign({}, meta);
+  ['max_rows', 'max_columns', 'last_row', 'last_column', 'fmt_columns'].forEach(k => { number(meta[k], k.indexOf('max_') === 0 ? 1 : 0, k); });
+  check(Number(meta.last_row) <= Number(meta.max_rows) && Number(meta.last_column) <= Number(meta.max_columns) && Number(meta.fmt_columns) <= Number(meta.max_columns), '保存した寸法の大小関係が不正です。');
+  const normalize = (table, row) => appRowToObject_(APP_TABLES[table], appObjectToRow_(APP_TABLES[table], row));
   const bag = {
     tableRows: meta.mode === 'table' ? appScreenReadPlan_('ENG_' + sheet, planId).map(appStripRow_) : [],
     segs: appScreenReadPlan_('ENG_ROWS', planId).filter(r => r.sheet === sheet).map(appStripRow_)
   };
   if (mutate) mutate(bag);
-  const fit = Object.assign({}, meta);
-  let lastRow = Number(meta.last_row) || 0;
-  let lastCol = Number(meta.last_column) || 0;
-  bag.tableRows.forEach(r => { if (Number(r.seq) > lastRow) lastRow = Number(r.seq); });
-  bag.segs.forEach(seg => {
-    if (Number(seg.row_no) > lastRow) lastRow = Number(seg.row_no);
-    let n = 0;
-    try { n = JSON.parse(seg.cells_json || '[]').length; } catch (e) { n = 0; }
-    const col = (Number(seg.col_from) || 1) - 1 + n;
-    if (col > lastCol) lastCol = col;
+  check(Array.isArray(bag.tableRows) && Array.isArray(bag.segs) && (meta.mode === 'table' || !bag.tableRows.length), '保存する行の形が不正です。');
+  const tableRows = bag.tableRows.map(r => normalize('ENG_' + sheet, r));
+  const segs = bag.segs.map(r => normalize('ENG_ROWS', r));
+  const fmts = appScreenReadPlan_('ENG_FORMATS', planId).filter(r => r.sheet === sheet).map(r => normalize('ENG_FORMATS', r));
+  let lastRow = Number(meta.last_row), lastCol = Number(meta.last_column);
+  const cell = (type, value) => {
+    check(typeof type === 'string' && type.length === 1 && 'esnbdf'.indexOf(type) >= 0, 'セルの型が不正です。');
+    if (type === 'n') check(String(value).trim() !== '' && isFinite(Number(value)), '数値セルが不正です。');
+    if (type === 'd') check(value !== '' && isFinite(new Date(value).getTime()), '日付セルが不正です。');
+    if (type === 'b') check(value === 'TRUE' || value === 'FALSE', '真偽セルが不正です。');
+    if (type === 'e') check(value === '', '空セルの値が不正です。');
+    if (type === 'f') check(typeof value === 'string' && value.charAt(0) === '=', '数式セルが不正です。');
+  };
+  const seenRows = {};
+  if (meta.mode === 'table') { lastRow = Math.max(lastRow, 1); lastCol = Math.max(lastCol, reg.header.length); }
+  tableRows.forEach(row => {
+    check(row.plan_id === String(planId), '別の計画の行が混ざっています。');
+    const seq = number(row.seq, 2, '保存行の番号');
+    check(!seenRows[seq], '保存行の番号が重複しています。'); seenRows[seq] = true;
+    check(row._types.length === reg.header.length, '保存行の型の数が見出しと一致しません。');
+    reg.header.forEach((h, i) => cell(row._types.charAt(i), row[h]));
+    lastRow = Math.max(lastRow, seq);
   });
-  fit.last_row = String(lastRow);
-  fit.last_column = String(lastCol);
-  if (lastRow > (Number(meta.max_rows) || 0)) fit.max_rows = String(lastRow);
-  if (lastCol > (Number(meta.max_columns) || 0)) fit.max_columns = String(lastCol);
-  const fmts = appScreenReadPlan_('ENG_FORMATS', planId).filter(r => r.sheet === sheet);
-  let enc;
-  try { enc = appEngEncodeSheet_(planId, appEngDecodeSheet_(fit, bag.tableRows, bag.segs, fmts)); }
-  catch (e) { throw new Error('「' + sheet + '」のハッシュを作れません。' + (e && e.message ? e.message : e)); }
-  const patch = { content_hash: enc.sheetRow.content_hash, updated_at: appNowIso_(), updated_by: actor || '' };
-  if (String(fit.last_row) !== String(meta.last_row)) patch.last_row = String(fit.last_row);
-  if (String(fit.last_column) !== String(meta.last_column)) patch.last_column = String(fit.last_column);
-  if (String(fit.max_rows) !== String(meta.max_rows)) patch.max_rows = String(fit.max_rows);
-  if (String(fit.max_columns) !== String(meta.max_columns)) patch.max_columns = String(fit.max_columns);
-  if (String(patch.content_hash) === String(meta.content_hash) && !patch.last_row && !patch.last_column && !patch.max_rows && !patch.max_columns) return null;
+  const segKeys = {}, spans = {};
+  segs.forEach(seg => {
+    check(seg.plan_id === String(planId) && seg.sheet === sheet, '別の計画・シートの行が混ざっています。');
+    const r = number(seg.row_no, 1, 'セル行の番号'), c = number(seg.col_from, 1, 'セル列の番号');
+    let cells;
+    try { cells = JSON.parse(seg.cells_json); } catch (e) { fail('保存したセルの JSON が不正です。'); }
+    check(Array.isArray(cells), '保存したセルが配列ではありません。');
+    check(meta.mode !== 'table' || c > reg.header.length, '表の行とセル行が重なっています。');
+    const key = r + ':' + c;
+    check(!segKeys[key], 'セル行のキーが重複しています。'); segKeys[key] = true;
+    if (cells.length) (spans[r] || (spans[r] = [])).push([c, c + cells.length - 1]);
+    cells.forEach(x => { check(typeof x === 'string' && x.length >= 1, '保存したセルの形が不正です。'); cell(x.charAt(0), x.slice(1)); });
+    lastRow = Math.max(lastRow, r); lastCol = Math.max(lastCol, c - 1 + cells.length);
+  });
+  Object.keys(spans).forEach(r => {
+    spans[r].sort((a, b) => a[0] - b[0]);
+    spans[r].forEach((s, i, a) => { check(!i || s[0] > a[i - 1][1], 'セル行の範囲が重複しています。'); });
+  });
+  fit.last_row = String(lastRow); fit.last_column = String(lastCol);
+  fit.max_rows = String(Math.max(Number(meta.max_rows), lastRow));
+  fit.max_columns = String(Math.max(Number(meta.max_columns), lastCol));
+  const dims = ['max_rows', 'max_columns', 'last_row', 'last_column', 'fmt_columns'].map(k => Number(fit[k]));
+  check(dims[0] <= 200000 && dims[1] <= 1000 && dims[0] * dims[4] <= 2000000 && dims[2] * dims[3] <= 2000000, '復元する範囲が安全な上限を超えています。');
+  const seenFormats = {};
+  fmts.forEach(fr => {
+    check(fr.plan_id === String(planId) && fr.sheet === sheet, '別の計画・シートの形式が混ざっています。');
+    const c = number(fr.col, 1, '形式の列番号');
+    check(c <= dims[4] && !seenFormats[c], '形式の列が範囲外、または重複しています。'); seenFormats[c] = true;
+    let runs;
+    try { runs = JSON.parse(fr.runs_json); } catch (e) { fail('表示形式の JSON が不正です。'); }
+    check(Array.isArray(runs), '表示形式が配列ではありません。');
+    const used = runs.map(run => {
+      check(Array.isArray(run) && run.length === 3 && typeof run[2] === 'string', '表示形式の範囲が不正です。');
+      const a = number(run[0], 1, '形式の開始行'), b = number(run[1], 1, '形式の終了行');
+      check(a <= b && b <= dims[0], '表示形式が行範囲の外にあります。');
+      return [a, b];
+    }).sort((a, b) => a[0] - b[0]);
+    used.forEach((s, i, a) => { check(!i || s[0] > a[i - 1][1], '表示形式の範囲が重複しています。'); });
+  });
+  // 復元できることも確認する。再エンコードは欠番を補うので hash には使わない。
+  try { appEngDecodeSheet_(fit, tableRows, segs, fmts); }
+  catch (e) { fail('保存した行を復元できません。' + (e && e.message ? e.message : e)); }
+  tableRows.sort((a, b) => Number(a.seq) - Number(b.seq));
+  segs.sort((a, b) => Number(a.row_no) - Number(b.row_no) || Number(a.col_from) - Number(b.col_from));
+  fmts.sort((a, b) => Number(a.col) - Number(b.col));
+  const tableContent = tableRows.map(row => { const out = { seq: row.seq }; reg.header.forEach(h => { out[h] = row[h]; }); out._types = row._types; return out; });
+  const rowContent = segs.map(r => ({ sheet: r.sheet, row_no: r.row_no, col_from: r.col_from, cells_json: r.cells_json }));
+  const formatContent = fmts.map(r => ({ sheet: r.sheet, col: r.col, runs_json: r.runs_json }));
+  const hash = appSha256Hex_(JSON.stringify([sheet, meta.mode].concat(dims, [meta.mode === 'table' ? tableContent : [], rowContent, formatContent])));
+  const patch = { content_hash: hash, updated_at: appNowIso_(), updated_by: actor || '' };
+  ['last_row', 'last_column', 'max_rows', 'max_columns'].forEach(k => { if (String(fit[k]) !== String(meta[k])) patch[k] = String(fit[k]); });
+  if (hash === String(meta.content_hash) && !patch.last_row && !patch.last_column && !patch.max_rows && !patch.max_columns) return null;
   return { table: 'ENG_SHEETS', mode: 'patch', planId: planId, key: { plan_id: planId, sheet: sheet }, patch: patch, actor: actor || '' };
 }
 
