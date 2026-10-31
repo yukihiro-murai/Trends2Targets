@@ -3740,9 +3740,11 @@ function fcBudArgs(){
 }
 /** 採用予測を手で直した。描き直さずに（打っている欄を消さずに）、選ぶ欄を「確率で決める」に戻す */
 function fcBudManual(){
+  // 要求後の手入力・組立反映を優先する。遅い案は、この後の入力を置き換えない。
+  S.fc.budProb = null;
   S.fc.budBasis = { planId: S.fc.planId, basis: 'MANUAL' };
   var s = $('fcProb'), a = s && s.parentNode;
-  if (s) s.value = '';
+  if (s) { s.value = ''; s.disabled = fcBusy(); if (s.options && s.options[0]) s.options[0].textContent = '確率で決める'; }
   if (a && a.setAttribute) a.setAttribute('data-tip', fcProbTip());
 }
 /**
@@ -3774,21 +3776,22 @@ function fcProbTip(){
 }
 /**
  * 確率を選んだ: サーバー（apiBudgetProposal）に、その確率で届く額を月に割り振った採用予測を尋ね、採用予測の欄に入れる（保存はまだ）。
- * 手で直した採用予測があれば、置き換えてよいか先に確かめる。答えが来る前に別の計画に移ったら捨てる
+ * 手で直した採用予測があれば、置き換えてよいか先に確かめる。要求後の手入力・別計画・読み直し・処理中には案を適用しない。
  */
 function fcBudProb(val){
   var prob = Number(val), planId = S.fc.planId;
-  if (BUD_PROBS.indexOf(prob) < 0 || S.fc.budProb) return;
+  if (BUD_PROBS.indexOf(prob) < 0 || S.fc.budProb || fcBusy()) return;
   var go = function(){
-    var t = S.fc.budProb = { planId: planId, prob: prob };
+    if (S.fc.planId !== planId || S.fc.budProb || fcBusy()) return;
+    var t = S.fc.budProb = { planId: planId, prob: prob, view: S.fc.view };
     render();
     // 入口の無いサーバー（版 11 より前）でも、尋ねている途中のまま止まらない
     try {
       call('apiBudgetProposal', [{ planId: planId, prob: prob }], function(r){
-        if (S.fc.budProb !== t) return;
+        if (S.fc.budProb !== t) return false;
         S.fc.budProb = null;
-        if (S.fc.planId === planId && S.fc.view && fcLoadedPlan() === planId) fcBudFill(r || {}, prob);
-      }, function(){ if (S.fc.budProb === t) S.fc.budProb = null; });
+        if (!fcBusy() && S.fc.planId === planId && S.fc.view && S.fc.view === t.view && fcLoadedPlan() === planId) fcBudFill(r || {}, prob);
+      }, function(){ if (S.fc.budProb !== t) return false; S.fc.budProb = null; });
     } catch (e) { busy(-1); if (S.fc.budProb === t) S.fc.budProb = null; toast('今は確率からは選べません。画面を読み直してください', true); }
   };
   var b = fcBudBasis();
