@@ -514,6 +514,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .bud-eq{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:0;padding:12px 16px;border-radius:var(--radius-s);background:var(--primary-soft-2);border:1px solid var(--primary-line);font-size:var(--fs-m);color:var(--navy);min-height:52px}
 .bud-eq b{font-weight:400}
 .bud-eq .op{color:var(--muted)}
+@media (min-width:761px) and (max-width:1100px){#bud_preview{min-height:82px}}
+@media (max-width:760px){#bud_preview{min-height:114px}}
 .bud-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
 .bud-grid > .bud-pane:first-child{grid-column:1/-1}
 .bud-pane{min-height:168px;padding:var(--s4);border:1px solid var(--line);border-radius:var(--radius-s);background:var(--surface)}
@@ -3322,7 +3324,7 @@ function fcBudPick(){
 }
 function fcBudSetSrc(src){ if (fcBusy()) return; var p = fcBudPick(); if (p.src !== src) p.dirty = true; p.src = src; render(); }
 function fcBudSetCalib(on){ if (fcBusy()) return; var p = fcBudPick(); if (p.calib !== !!on) p.dirty = true; p.calib = !!on; render(); }
-function fcBudSetExtra(v){ if (fcBusy()) return; var p = fcBudPick(), value = String(v == null ? '' : v).replace(/[,\s]/g, ''); if (p.extra !== value) p.dirty = true; p.extra = value; }
+function fcBudSetExtra(v){ if (fcBusy()) return; var p = fcBudPick(), value = String(v == null ? '' : v).replace(/[,\s]/g, ''); if (p.extra !== value) p.dirty = true; p.extra = value; fcBudRefresh(); }
 function fcBudCalFactor(){
   var c = S.fc.basis && S.fc.basis.planId === S.fc.planId && S.fc.basis.calibration;
   return c && isNum(c.factor) && c.factor > 0 ? c.factor : 1;
@@ -3343,6 +3345,39 @@ function fcBudSrcMonthly(d, v, src){
     return { row: m.row, month: m.month, val: val, uplift: m.uplift };
   });
 }
+/** 「反映する」と同じ月別の候補。画面の値を読むだけで、月別編集や保存済みデータには触れない。 */
+function fcBudPreview(d, v, pick){
+  var rows = fcBudSrcMonthly(d, v, pick.src), f = pick.calib ? fcBudCalFactor() : 1;
+  if (!rows.length) return { ready: false, error: '月ごとの予測がまだありません' };
+  var hasExtra = pick.extra !== '' && pick.extra !== undefined, extra = fcNum(pick.extra);
+  if (hasExtra && !isNum(extra)) return { ready: false, error: '追加額は数で入れてください' };
+  var bases = rows.map(function(r){ return isNum(r.val) ? Math.max(0, Math.round(r.val * f)) : 0; });
+  var sum = bases.reduce(function(a, x){ return a + x; }, 0);
+  var extras = rows.map(function(r){ return isNum(r.uplift) ? Math.round(r.uplift) : 0; });
+  if (hasExtra) {
+    var left = Math.round(extra || 0);
+    if (!Number.isSafeInteger(left)) return { ready: false, error: '金額が大きすぎます' };
+    extras = bases.map(function(b){ return sum ? Math.round(left * b / sum) : Math.round(left / rows.length); });
+    extras[extras.length - 1] += left - extras.reduce(function(a, x){ return a + x; }, 0);
+  }
+  var uplift = extras.reduce(function(a, x){ return a + x; }, 0), total = sum + uplift;
+  if (![sum, uplift, total].every(Number.isSafeInteger) || bases.concat(extras).some(function(x){ return !Number.isSafeInteger(x); })) return { ready: false, error: '金額が大きすぎます' };
+  return { ready: true, rows: rows, bases: bases, extras: extras, adopted: sum, extra: uplift, total: total,
+    calibrated: !!pick.calib && Math.abs(f - 1) >= 0.0005 };
+}
+function fcBudPreviewHtml(p){
+  if (!p.ready) return '最終予算（プレビュー） <span class="warn-text">' + esc(p.error) + '</span>';
+  return '最終予算（プレビュー） <span class="op">＝</span> 採用予測' + (p.calibrated ? '（補正後）' : '') + ' ' + yen(p.adopted) + ' 円'
+    + ' <span class="op">＋</span> 追加 ' + yen(p.extra) + ' 円 <span class="op">→</span><b>' + yen(p.total) + ' 円</b>';
+}
+/** 入力欄は再生成しない。入力位置・選択範囲・月表を保ち、結果と反映可否だけを更新する。 */
+function fcBudRefresh(){
+  var box = $('bud_preview');
+  if (!box || !S.fc.data || !S.fc.view) return;
+  var p = fcBudPreview(S.fc.data, S.fc.view, fcBudPick()), apply = $('bud_apply');
+  box.innerHTML = fcBudPreviewHtml(p);
+  if (apply) apply.disabled = !p.ready || !fcCan('plan') || fcBusy();
+}
 function fcBudgetCompose(d, v){
   var pick = fcBudPick(), canPlan = fcCan('plan'), f = fcBudCalFactor();
   var t = S.fc.basis && S.fc.basis.planId === S.fc.planId && S.fc.basis.triangulation;
@@ -3362,11 +3397,7 @@ function fcBudgetCompose(d, v){
   ].filter(function(x){ return isNum(x.v); });
   if (!srcs.length) srcs = [{ id: 'FINAL', k: '本線の予測', v: annual }];
   if (!srcs.some(function(x){ return x.id === pick.src; })) pick.src = srcs[0].id;
-  var chosen = srcs.filter(function(x){ return x.id === pick.src; })[0] || srcs[0];
-  var adopted = isNum(chosen.v) ? Math.round(chosen.v * (pick.calib ? f : 1)) : null;
-  var extraN = fcNum(pick.extra);
-  var extra = pick.extra === '' || pick.extra === undefined ? null : extraN;
-  var final = isNum(adopted) ? adopted + (isNum(extra) ? extra : 0) : null;
+  var preview = fcBudPreview(d, v, pick);
   var calOff = Math.abs(f - 1) < 0.0005;
   var calLabel = calOff ? 'いま補正なし' : (f < 1 ? Math.round((1 - f) * 1000) / 10 + '% 下げ' : Math.round((f - 1) * 1000) / 10 + '% 上げ');
   var srcBtns = srcs.map(function(x){
@@ -3386,32 +3417,19 @@ function fcBudgetCompose(d, v){
     + '<section class="bud-pane"><h3>3. 営業の追加額</h3>'
     + '<div class="bud-extra"><div class="field"><label for="bud_extra">年度の追加額</label>'
     + '<input class="inp num" id="bud_extra" type="text" inputmode="numeric" value="' + esc(extraVal) + '" ' + (canPlan ? 'onfocus="fcNumFocus(this)" onblur="fcNumBlur(this)" oninput="fcBudSetExtra(this.value)"' : 'disabled') + '></div>'
-    + (canPlan ? '<button type="button" class="btn" onclick="fcBudApply()">反映する</button>' : '') + '</div></section>'
+    + (canPlan ? '<button type="button" class="btn" id="bud_apply" ' + (!preview.ready ? 'disabled ' : '') + 'onclick="fcBudApply()">反映する</button>' : '') + '</div></section>'
     + '</div>'
-    + '<div class="bud-eq">最終予算 <span class="op">＝</span> 採用予測 ' + (isNum(adopted) ? yen(adopted) + ' 円' : '-')
-    + (pick.calib && !calOff ? ' × 補正' : '') + ' <span class="op">＋</span> 追加 '
-    + (isNum(extra) ? yen(extra) + ' 円' : '0 円')
-    + (isNum(final) ? '<span class="op">→</span><b>' + yen(final) + ' 円</b>' : '') + '</div>'
+    + '<div class="bud-eq" id="bud_preview" aria-live="polite" aria-atomic="true">' + fcBudPreviewHtml(preview) + '</div>'
     + '</div>';
 }
 function fcBudApply(){
   if (fcBusy()) return;
   if (!fcCan('plan')) return;
   var d = S.fc.data, v = S.fc.view, pick = fcBudPick();
-  var rows = fcBudSrcMonthly(d, v, pick.src);
-  if (!rows.length) { toast('月ごとの予測がまだありません', true); return; }
-  var f = pick.calib ? fcBudCalFactor() : 1;
-  var bases = rows.map(function(r){ return isNum(r.val) ? Math.max(0, Math.round(r.val * f)) : 0; });
-  var extra = fcNum(pick.extra), hasExtra = pick.extra !== '' && pick.extra !== undefined && isFinite(Number(pick.extra));
-  var sum = bases.reduce(function(a, x){ return a + x; }, 0);
-  var extras = rows.map(function(r){ return isNum(r.uplift) ? Math.round(r.uplift) : 0; });
-  if (hasExtra) {
-    var left = Math.round(extra || 0);
-    extras = bases.map(function(b){ return sum ? Math.round(left * b / sum) : Math.round(left / rows.length); });
-    extras[extras.length - 1] += left - extras.reduce(function(a, x){ return a + x; }, 0);
-  }
+  var preview = fcBudPreview(d, v, pick);
+  if (!preview.ready) { toast(preview.error, true); return; }
   var bd = S.fc.budget = {};
-  rows.forEach(function(r, i){ bd[r.row] = { adopted: String(bases[i]), uplift: String(extras[i]) }; });
+  preview.rows.forEach(function(r, i){ bd[r.row] = { adopted: String(preview.bases[i]), uplift: String(preview.extras[i]) }; });
   pick.dirty = false;   // 月別の未保存予算へ移ったので、組み立ての未反映状態だけ解除する
   fcBudManual();
   Object.keys(bd).forEach(function(row){ fcMarkDirty('fcSaveBudget(' + row + ')'); });
