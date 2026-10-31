@@ -27,6 +27,9 @@ function appNativeMetaIdle_() {
 /** どの入力・形式・寸法から作る補修かを、時刻に依存しない指紋へ固定する */
 function appNativeMetaPreviewState_(ctx, input) {
   appNativeMetaTaskCheck_(input, false);
+  // 多数計画の照合だけは対象表を一度読む。計画ごとの TextFinder・細切れ読取で実行上限に達するのを避ける。
+  // ロック取得後の実行内控えであり、永続キャッシュや別の実行の値は使わない。
+  if (input.planIds.length > 1) ['ENG_SHEETS', 'ENG_ROWS', 'ENG_FORMATS', 'ENG_EVAL_COMPARE_MONTHLY', 'ENG_PROCESS_STATUS'].forEach(name => appReadTable_(name));
   const planIds = input.planIds.slice().sort(), ops = [], entries = [], basis = [];
   planIds.forEach(planId => {
     appRequireOpenPlan_(planId);
