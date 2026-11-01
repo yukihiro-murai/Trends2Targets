@@ -2825,7 +2825,7 @@ function fcSetFy(fy){
   render();   // 選ぶ欄を今の年度に戻しておく（「やめる」のとき）
 }
 /** 保存・実行の後に消すのは、その操作が保存した入力だけ。別案へ変わった判断は読戻し時に控えへ移す */
-var FC_DRAFT_OF = { 'INPUT.SAVE': 'input', 'IMPORT.SALES': 'input', 'BUDGET.SAVE': 'budget', 'INSIGHT.SAVE': 'ins', 'EVAL.INSIGHTS': 'ins', 'REVIEW.DECIDE': 'dec' };
+var FC_DRAFT_OF = { 'INPUT.SAVE': 'input', 'IMPORT.SALES': 'input', 'BUDGET.SAVE': 'budget', 'INSIGHT.SAVE': 'ins', 'REVIEW.DECIDE': 'dec' };
 /**
  * 計画を読む。force: 同じ計画でも読み直す。saved: { action, kind }（保存・実行が終わって読み直すとき。その操作の入力中の値だけ消し、ほかの欄の入力中の値は残す）
  */
@@ -2841,7 +2841,7 @@ function loadForecast(planId, force, saved){
     if (w === 'input' && saved.kind) { delete f.draft[saved.kind]; delete f.inputDirty[saved.kind]; }
     else if (w === 'input') { f.draft = {}; f.inputDirty = {}; }
     else if (w === 'budget') { f.budget = {}; f.budBasis = null; }
-    else if (w === 'ins') f.ins = {};
+    else if (w === 'ins') fcInsSaved(planId);
     else if (w === 'dec') { f.dec = {}; f.decSource = ''; f.decLabels = {}; }
   }
   // 予測と画面の中身は、根拠・振り返り・確定版と同じ 1 回の通信で読む。先読みの控え（S.fcMem）が 10 分以内なら、それを出して読まない（force のときは使わない）
@@ -2857,7 +2857,7 @@ function fcRetry(){
 }
 /** 保存していない入力（予算・入力・人の記入・見直し案の判断）があるか */
 function fcDirty(){ var f = S.fc; return !!f && (Object.keys(f.inputDirty || {}).some(function(k){ return f.inputDirty[k]; }) || Object.keys(f.budget || {}).length > 0 || Object.keys(f.ins || {}).length > 0 || Object.keys(f.dec || {}).length > 0 || !!(f.budPick && f.budPick.dirty) || Object.keys(f.verNotes || {}).length > 0 || !!(f.held && f.held.length)); }
-function fcDropDrafts(){ var f = S.fc; f.draft = {}; f.inputDirty = {}; f.budget = {}; f.budBasis = null; f.budProb = null; f.ins = {}; f.dec = {}; f.decSource = ''; f.decLabels = {}; f.budPick = null; f.verNotes = {}; f.held = []; fcGuardSync(); }
+function fcDropDrafts(){ var f = S.fc; f.draft = {}; f.inputDirty = {}; f.budget = {}; f.budBasis = null; f.budProb = null; f.ins = {}; f.insSource = {}; f.insSent = null; f.dec = {}; f.decSource = ''; f.decLabels = {}; f.budPick = null; f.verNotes = {}; f.held = []; fcGuardSync(); }
 /** 未保存の間だけブラウザ標準の離脱確認を使う。送信開始では解除せず、成功後の状態を参照する */
 var FC_LEAVE_ARMED = false;
 function fcBeforeUnload(e){ if (!fcDirty()) return; e.preventDefault(); e.returnValue = ''; }
@@ -2896,13 +2896,13 @@ function fcHeldCard(){
   if (!S.fc) return '';
   var old = fcOldNotes(), held = S.fc.held || [], items = held.concat(old.map(function(k){ return { label: '前の版の判断メモ', text: S.fc.verNotes[k] }; }));
   if (!items.length) return '';
-  return '<details class="card" id="fc-held-drafts"><summary>以前の版の未保存入力（' + items.length + '件）</summary><p class="note mt8">新しい版や案には使いません。内容を控えてから破棄できます。</p>'
+  return '<details class="card" id="fc-held-drafts"><summary>以前の内容の未保存入力（' + items.length + '件）</summary><p class="note mt8">新しい内容には使いません。必要な記入をコピーしてから破棄できます。</p>'
     + items.map(function(x){ return '<p class="mt12">' + esc(x.label) + '</p><pre class="pre">' + esc(x.text) + '</pre>'; }).join('')
     + '<button type="button" class="btn btn-ghost" onclick="fcHeldDiscard()">控えを破棄</button></details>';
 }
 function fcHeldDiscard(){
   var f = S.fc, held = (f.held || []).slice(), notes = f.verNotes || {}, old = fcOldNotes().map(function(k){ return [k, notes[k]]; });
-  ask('以前の版に入力したメモと判断の控えを破棄しますか？', '破棄する', function(){
+  ask('以前の内容に対する未保存入力の控えを破棄しますか？', '破棄する', function(){
     if (S.fc !== f) return;
     f.held = (f.held || []).filter(function(x){ return held.indexOf(x) < 0; });
     old.forEach(function(x){ if (f.verNotes === notes && notes[x[0]] === x[1]) delete notes[x[0]]; });
@@ -2983,7 +2983,7 @@ function fcApply(planId, r, ts, req){
     if (S.ld[k] !== t) return;
     if (errs[p] || r[p] === undefined || r[p] === null) { S.ld[k] = { error: errText(errs[p] || '読み込めませんでした'), at: now }; return; }
     S.ld[k] = { at: t.stale ? 0 : now, ms: now - t.start, tag: planId };
-    if (S.fc.planId === planId) { if (p === 'view') fcDecHold(r[p]); S.fc[FC_PARTS[p][1]] = r[p]; }
+    if (S.fc.planId === planId) { if (p === 'view') { fcDecHold(r[p]); fcInsHold(r[p]); } S.fc[FC_PARTS[p][1]] = r[p]; }
   });
 }
 // ---- 先読みの控え（計画ごと・中身ごと。10 分。保存・処理の後は捨てる: crossStale）。メーカーを切り替えたとき・予測を開いたときに、待たずに出す ----
@@ -3011,7 +3011,7 @@ function fcMemPut(planId, r, req){
 function fcMemUse(planId, p){
   var m = S.fcMem[planId], x = m && m[p], ld = S.ld[FC_PARTS[p][0]];
   if (!x || Date.now() - x.at >= LD_KEEP || (ld && ld.error)) return false;   // 読み込みに失敗した後は読み直す（「もう一度読み込む」と同じ）
-  if (p === 'view') fcDecHold(x.v);
+  if (p === 'view') { fcDecHold(x.v); fcInsHold(x.v); }
   S.fc[FC_PARTS[p][1]] = x.v;
   S.ld[FC_PARTS[p][0]] = { at: x.at, ms: 0, tag: planId };
   return true;
@@ -3694,8 +3694,12 @@ function fcReachDoneTip(rc, dirty){
     o ? '承認済みの確定版' + (o.versionNo ? '（v' + o.versionNo + '）' : '') + 'の最終予算 ' + yenU(o.budget) + ' には' + said(o.budget) : '',
     dirty ? '入力中の予算は、保存すると比べ直します' : ''].filter(Boolean).join('\n');
 }
-/** 金額の欄に入れる見せ方（数なら 3 けたごとに区切る。打ちかけの文字はそのまま） */
-function fcYenIn(v){ if (v === null || v === undefined || v === '') return ''; var n = Number(String(v).replace(/[,\s]/g, '')); return String(v).trim() !== '' && isFinite(n) ? Math.round(n).toLocaleString('ja-JP') : String(v); }
+/** 金額の編集欄は整数部だけを区切る。数値へ変換せず、小数・符号・元の桁を保つ（打ちかけの文字もそのまま）。 */
+function fcYenIn(v){
+  if (v === null || v === undefined || v === '') return '';
+  var text = Object.is(v, -0) ? '-0' : String(v), m = /^([+-]?)(\d+)(\.\d*)?$/.exec(text.replace(/[,\s]/g, ''));
+  return m ? m[1] + m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (m[3] || '') : text;
+}
 function fcNumFocus(el){ el.value = String(el.value || '').replace(/[,\s]/g, ''); }
 function fcNumBlur(el){ el.value = fcYenIn(el.value); }
 function fcConfirmRun(){ var c = S.fc.confirm; S.fc.confirm = null; startJob('FORECAST.RUN', { planId: c.planId, confirms: c.confirms.concat([c.key]) }); }
@@ -4372,11 +4376,54 @@ function fcRvNotes(ins, canPlan){
         : clamp(r.hypothesis) + '<td>' + esc(fcInsAct(r)) + '</td>' + clamp(r.reflection) + (who ? '<td>' + esc(r.owner || '-') + '</td>' : '') + '<td>' + esc(fcInsLabel('status', r.status)) + '</td>') + '</tr>'; }).join('')
     + '</tbody></table></div></div>';
 }
-function fcIns(row, k, val){ if (fcBusy()) return; var x = S.fc.ins; x[row] = x[row] || {}; x[row][k] = val; fcMarkDirty('fcSaveIns(' + row + ')'); }
+/** 人の記入の元になった表示内容。行番号だけが同じ別の採点には、入力を引き継がない。 */
+function fcInsKey(r){
+  return JSON.stringify([r.row, r.month, r.actual, r.pred, r.errRate, r.insight, r.nextAction, r.annualBreach, r.halfBreach, r.overBreach, r.rangeBreach, r.causeBucket]);
+}
+function fcInsVisible(view){ var e = view && view.can && view.can.plan && view.boot && view.boot.eval; return fcInsRows((e && e.insights) || []).map(function(o){ return o.r; }); }
+var FC_INS_LABELS = { hypothesis: '原因の仮説', actionType: '対応', reflection: '次に反映すること', owner: '担当', status: '状態' };
+/** 出なくなった行・採点内容の変わった行は、保存へ混ぜずに読める控えへ移す。 */
+function fcInsHold(view){
+  var f = S.fc, by = {}, source = f.insSource || {};
+  if (view && view.plan && view.plan.planId === f.planId) fcInsVisible(view).forEach(function(r){ by[r.row] = r; });
+  Object.keys(f.ins || {}).forEach(function(row){
+    var s = source[row], r = by[row], x = f.ins[row];
+    if (s && s.planId === f.planId && r && s.key === fcInsKey(r)) return;
+    var text = Object.keys(x).map(function(k){ var raw = String(x[k] == null ? '' : x[k]), labels = k === 'status' ? INS_STATUS : k === 'actionType' ? FC_ACT_TYPE : null; return (FC_INS_LABELS[k] || k) + ': ' + (labels && Object.prototype.hasOwnProperty.call(labels, raw) ? labels[raw] : raw); }).join('\n');
+    f.held = (f.held || []).concat([{ label: '前の振り返りの人の記入（' + (s && s.month ? s.month : '行 ' + row) + '）', text: text }]);
+    delete f.ins[row]; delete source[row];
+  });
+}
+/** 保存成功で解除するのは、送信時の計画・元行・内容が今も同じ入力だけ。 */
+function fcInsSaved(planId){
+  var f = S.fc, sent = f.insSent;
+  f.insSent = null;
+  if (!sent || sent.planId !== planId || sent.drafts !== f.ins) return;
+  Object.keys(sent.rows).forEach(function(row){
+    var old = sent.rows[row], now = f.ins[row], source = f.insSource && f.insSource[row];
+    if (!now || !source || source.key !== old.key || source.planId !== planId) return;
+    if (Object.keys(now).length !== Object.keys(old.draft).length || Object.keys(old.draft).some(function(k){ return now[k] !== old.draft[k]; })) return;
+    delete f.ins[row]; delete f.insSource[row];
+  });
+}
+function fcIns(row, k, val){
+  if (fcBusy()) return;
+  var f = S.fc, x = f.ins, source = f.insSource = f.insSource || {};
+  if (!x[row]) {
+    var r = fcInsVisible(f.view).filter(function(r){ return r.row === Number(row); })[0];
+    if (r) source[row] = { planId: f.planId, key: fcInsKey(r), month: r.month };
+  }
+  x[row] = x[row] || {}; x[row][k] = val; fcMarkDirty('fcSaveIns(' + row + ')');
+}
 function fcSaveIns(row){   // row: 押した行（保存は変えた行をまとめて）
-  var ins = S.fc.ins;
-  var rows = (S.fc.view.boot.eval.insights || []).filter(function(r){ return ins[r.row]; }).map(function(r){ var x = ins[r.row], g = function(k){ return x[k] !== undefined ? x[k] : r[k]; };
+  if (fcBusy()) return;
+  fcInsHold(S.fc.view);
+  var f = S.fc, ins = f.ins, sent = { planId: f.planId, drafts: ins, rows: {} };
+  var rows = fcInsVisible(f.view).filter(function(r){ return ins[r.row]; }).map(function(r){ var x = ins[r.row], g = function(k){ return x[k] !== undefined ? x[k] : r[k]; };
+    sent.rows[r.row] = { key: f.insSource[r.row].key, draft: Object.assign({}, x) };
     return { row: r.row, hypothesis: g('hypothesis'), actionType: g('actionType'), reflection: g('reflection'), owner: g('owner'), status: g('status') }; });
+  if (!rows.length) { render(); return; }
+  f.insSent = sent;
   fcEdit('INSIGHT.SAVE', { rows: rows });
 }
 /** 自動の学びを止めている間に、承認して反映しても変わらないもの（旧来の C-3 は旗が 0 なら補正の状態も信頼度も書かない） */
