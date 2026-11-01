@@ -556,7 +556,7 @@ function appPlanRunBuild_(ctx, p) {
     appProvisionalRequireWritable_(p);
     if (!p.build) appJournalRecover_(ctx);
     const inputHash = appPlanInputHash_(plan.plan_id);
-    if (p.build && inputHash !== p.inputHash) throw new Error('組み立てている間にデータ本体が変わりました。もう一度実行してください。');
+    if ((p.build || p.inputHash) && inputHash !== p.inputHash) throw new Error('実行を確認した後にデータ本体が変わりました。もう一度確認して実行してください。');
     // A-4 の最初の段: 同じ計画の A-4 が 6 時間以内に失敗・途中で止まっていれば、その回（番号と時刻）を引き継いで控えた答えを使う（Ai.js）
     const run = act.ai && !p.actionId ? appAiRunStart_(plan.plan_id, jobStart) : null;
     const actionId = p.actionId || (run ? run.actionId : appId_('ACT'));
@@ -620,7 +620,9 @@ function appPlanRunSave_(ctx, p, job) {
     appJournalRecover_(ctx);   // 書きかけの控えを先に書き終える（途中の表から控えを作らない）
     if (!p.build || !appScratchOwnedBy_(p.build.token)) throw new Error('計算用ブックがほかの処理で使われました。もう一度実行してください。');
     if (appPlanInputHash_(plan.plan_id) !== p.inputHash) throw new Error('計算している間にデータ本体が変わりました。もう一度実行してください。');
-    const cap = appCaptureChanged_(appWorkScratch_(plan), plan.plan_id, appStoredHashes_(plan.plan_id), act.sheets);
+    const scratch = appWorkScratch_(plan);
+    const cap = appCaptureChanged_(scratch, plan.plan_id, appStoredHashes_(plan.plan_id), act.sheets);
+    appPlanEvaluationSaveGuard_(plan, p.action, cap, scratch);
     const t1 = new Date().getTime();
     const names = cap.changed.map(e => e.sheetRow.sheet);
     const ops = appChangedOps_(ctx, plan.plan_id, cap.changed, p.actionId, { action: p.action });
@@ -635,6 +637,45 @@ function appPlanRunSave_(ctx, p, job) {
       timing: { buildMs: p.buildMs || 0, runMs: p.runMs || 0, captureMs: t1 - t0, saveMs: new Date().getTime() - t1 },
       audit: { entityId: p.actionId, clientId: plan.client_id } };
   });
+}
+
+/** 実績・採点・原因整理は、予定外の表や空の取込で元の業務記録を置換しない。Journalを作る前に検査する。 */
+function appPlanEvaluationSaveGuard_(plan, action, cap, scratch) {
+  const allowed = {
+    'IMPORT.ACTUALS': ['ACTUAL_EVAL_MONTHLY', 'PROCESS_STATUS', 'RUN_LOG'],
+    'EVAL.REPORT': ['EVAL_LOG', 'EVAL_COMPARE_MONTHLY', 'PROCESS_STATUS', 'RUN_LOG', 'CALIBRATION_STATE', 'CALIBRATION_HISTORY'],
+    'EVAL.INSIGHTS': ['EVAL_INSIGHTS', 'PROCESS_STATUS', 'RUN_LOG']
+  }[action];
+  if (!allowed) return;
+  let original = null;
+  cap.changed = cap.changed.filter(e => {
+    const name = e.sheetRow.sheet;
+    if (allowed.indexOf(name) >= 0) return true;
+    // 復元時に文字列月の書式を@へ補うことがある。対象外の表は保存せず、元の形式・寸法も保つ。
+    // 値・型・数式まで変わった場合は、処理全体を止める。
+    original = original || appStoreBook_(plan);
+    if (!appPlanSheetContentSame_(original.getSheetByName(name), scratch.getSheetByName(name))) {
+      throw new Error('実績・採点・原因整理の対象外の表が変わったため、保存しませんでした。');
+    }
+    return false;
+  });
+  if (action !== 'IMPORT.ACTUALS') return;
+  const values = sh => sh ? sh.getDataRange().getValues() : [];
+  const before = values(appStoreBook_(plan).getSheetByName('ACTUAL_EVAL_MONTHLY'));
+  const after = values(scratch.getSheetByName('ACTUAL_EVAL_MONTHLY'));
+  const header = APP_ENGINE_SHEETS.ACTUAL_EVAL_MONTHLY.header;
+  if (!after.length || header.some((name, i) => after[0][i] !== name)) throw new Error('取り込んだ実績の列を確認できないため、保存しませんでした。');
+  const hasRows = rows => rows.slice(1).some(r => r.some(v => v !== '' && v !== null && v !== undefined));
+  if (hasRows(before) && !hasRows(after)) throw new Error('取込元の実績が0件だったため、保存済みの実績を残して停止しました。取込元を確認してください。');
+}
+
+function appPlanSheetContentSame_(before, after) {
+  if (!before || !after || before.getLastRow() !== after.getLastRow() || before.getLastColumn() !== after.getLastColumn()) return false;
+  const cells = sh => {
+    const r = sh.getDataRange(), values = r.getValues(), formulas = r.getFormulas();
+    return values.map((row, i) => row.map((v, j) => appCellEncode_(v, (formulas[i] || [])[j])));
+  };
+  return JSON.stringify(cells(before)) === JSON.stringify(cells(after));
 }
 
 /**

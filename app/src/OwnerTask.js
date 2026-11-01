@@ -85,6 +85,23 @@ const APP_OWNER_ACTIONS = {
   aggregateSales: { job: 'PLAN.RUN', args: ['planId', 'inputHash'], check: t => appOwnerCheckPlanRunHash_(t),
     current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
     payload: i => ({ planId: i.planId, action: 'SALES.AGGREGATE', args: {}, inputHash: i.inputHash }) },
+  // 実績の取り込み・現行基準の採点・原因整理も、指定した 1 計画の既存 B-1 / B-2 / B-4 を個別に始める。
+  importActuals: { job: 'PLAN.RUN', args: ['planId', 'inputHash'], check: t => appOwnerCheckPlanRunHash_(t),
+    current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
+    payload: i => ({ planId: i.planId, action: 'IMPORT.ACTUALS', args: {}, inputHash: i.inputHash }) },
+  runEvalReport: { job: 'PLAN.RUN', args: ['planId', 'inputHash'], check: t => appOwnerCheckPlanRunHash_(t),
+    current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
+    payload: i => ({ planId: i.planId, action: 'EVAL.REPORT', args: {}, inputHash: i.inputHash }) },
+  runEvalInsights: { job: 'PLAN.RUN', args: ['planId', 'inputHash'], check: t => appOwnerCheckPlanRunHash_(t),
+    current: i => ({ inputHash: appOwnerPlanHash_(i.planId) }),
+    payload: i => ({ planId: i.planId, action: 'EVAL.INSIGHTS', args: {}, inputHash: i.inputHash }) },
+  evaluationPreservation: { name: 'EVALUATION.PRESERVATION', args: ['planId', 'backupId', 'verify'],
+    check: t => {
+      appOwnerCheckPlanId_(t);
+      if (typeof t.backupId !== 'string' || !t.backupId.trim()) throw new Error('evaluationPreservation には退避したデータ本体の ID（backupId）を入れてください。');
+      if (t.verify !== undefined && typeof t.verify !== 'boolean') throw new Error('verify は true か false で入れてください。');
+    },
+    opts: () => ({ minRole: 'ADMIN', ownerOnly: true, audit: false }), run: (ctx, i) => appEvaluationPreservation_(ctx, i) },
   runForecast: { job: 'FORECAST.RUN', args: ['planId'], check: t => appOwnerCheckPlanId_(t), payload: i => ({ planId: i.planId }) },
   // 計画の印（測る専用）を付ける・外す（所有者だけ。監査に前と後の値。PlanPurpose.js）
   setPlanPurpose: { name: 'PLAN.PURPOSE', args: ['planId', 'purpose'], check: t => { appOwnerCheckPlanId_(t); appOwnerCheckPurpose_(t); },
