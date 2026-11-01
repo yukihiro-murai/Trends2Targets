@@ -4288,10 +4288,25 @@ function fcReviewTab(d, v){
   if (acc && !hasAcc && (ins.length || props.length || zeroOnly)) html += '<div class="card"><div class="card-head"><h2>AI 補正</h2></div><p class="note">' + esc(noAccLine) + '</p></div>';
   if (hasAcc) html += fcRvWeather(acc) + fcRvTrend(acc);
   if (ins.length) html += fcRvNotes(ins, canPlan);
-  else html += '<div class="card" id="fc-insight-notes"><div class="card-head"><h2>人の記入</h2></div><p class="note">'
-    + esc(frozen ? '記入対象の月はありません。締め済みの年度のため、読み取り専用です。' : '記入対象の月はまだありません。外れた月の原因が整理されると、ここに出ます。') + '</p></div>';
+  else html += fcInsEmpty(boot, frozen);
   if (props.length) html += fcRvProposals(q);
   return html;
+}
+/** 空の理由は保存済み記録の診断で示す。診断が無い応答では従来の案内に留める。 */
+function fcInsEmpty(boot, frozen){
+  var q = boot && boot.eval && boot.eval.readiness, c = q && q.counts || {};
+  var fallback = frozen ? '記入対象の月はありません。理由はまだ確認できていません。締め済みの年度のため、読み取り専用です。' : '記入対象の月はありません。理由はまだ確認できていません。';
+  var html = '<div class="card" id="fc-insight-notes"><div class="card-head"><h2>人の記入</h2></div><p class="note">' + esc(q && q.reason || fallback) + '</p>';
+  if (!q) html += '<p class="note mt8">画面を読み直して確認してください。</p>';
+  if (q && frozen) html += '<p class="note mt8">締め済みの年度のため、読み取り専用です。</p>';
+  if (q) {
+    var count = function(k, unit){ var n = c[k]; return typeof n === 'number' && isFinite(n) && n >= 0 && Math.floor(n) === n ? n.toLocaleString('ja-JP') + unit : '未確認'; };
+    var at = function(v){ if (!v) return q.code === 'UNKNOWN' || q.code === 'NOT_PREPARED' ? '未確認' : '記録なし'; var d = new Date(v); return isNaN(d.getTime()) ? '未確認' : d.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+    var facts = [['比較用の実績', count('actualRows', '行')], ['締まった今期の実績', count('closedCurrentFyMonths', 'か月')], ['今の基準で比較できる採点', count('eligibleMonths', 'か月')], ['保存済みの原因整理', count('insightRows', '行')], ['現在の記入対象', count('displayedRows', '行')], ['最後の採点', at(q.lastB2At)], ['最後の原因整理', at(q.lastB4At)]];
+    html += '<details class="mt12"><summary>確認した記録</summary><div class="note pre mt8">' + facts.map(function(x){ return esc(x[0] + ': ' + x[1]); }).join('\n') + '</div></details>';
+    if (q.code === 'UNKNOWN') html += '<button type="button" class="btn btn-ghost mt12"' + (fcBusy() ? ' disabled' : '') + ' onclick="fcRetry()">もう一度読み込む</button>';
+  }
+  return html + '</div>';
 }
 /**
  * 精度の天気（この計画の外れ幅から。キャラ・名前・外れ幅・幅に収まった割合・読みのクセ）。

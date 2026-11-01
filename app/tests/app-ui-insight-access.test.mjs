@@ -219,7 +219,7 @@ for (const first of ['latest', 'view']) test('partial reads keep the target unti
 test('no insight rows still expose the named notes card as the ready target', () => {
   const u = makeUi({ withInsights: false }); u.run("openPlan('p1','review')");
   assert.equal(u.run('S.fc.jump'), 'review'); u.flush();
-  assert.ok(u.notes()); assert.match(u.notes().textContent, /人の記入/); assert.match(u.notes().textContent, /記入対象の月はまだありません/);
+  assert.ok(u.notes()); assert.match(u.notes().textContent, /人の記入/); assert.match(u.notes().textContent, /記入対象の月はありません。理由はまだ確認できていません/);
   assert.equal(u.notes().querySelectorAll('input,select,textarea,button').length, 0, 'an empty card creates no editable fields or save controls');
   assert.equal(u.scrolls.at(-1).id, 'fc-insight-notes'); assert.equal(u.run('S.fc.jump'), '');
   assert.equal(u.run('fcDirty()'), false); noWrites(u);
@@ -234,7 +234,7 @@ for (const options of [
   const notes = u.notes(); assert.ok(notes, 'normal navigation always identifies the human-notes location');
   assert.match(notes.textContent, /人の記入/); assert.match(notes.textContent, /記入対象の月/);
   if (options.frozen) assert.match(notes.textContent, /締め済み.*読み取り専用/);
-  else assert.match(notes.textContent, /原因が整理されると、ここに出ます/);
+  else assert.match(notes.textContent, /理由はまだ確認できていません/);
   assert.equal(notes.querySelectorAll('input,select,textarea,button,tr').length, 0);
   assert.equal(u.main().querySelector('[onclick="fcSaveIns(8)"]'), null);
   assert.equal(u.run('Object.keys(S.fc.ins).length'), 0); assert.equal(u.run('fcDirty()'), false);

@@ -121,7 +121,7 @@ const OWNER_NOTE = 'owner-approved 2026-10-07 09:30: 自動の学びを止める
 {
   const insights = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hypothesis: '', actionType: 'update', reflection: '', owner: '', status: 'open' }];
   const p = review(planView());
-  assert.match(p, /id="fc-insight-notes"[\s\S]*<h2>人の記入<\/h2>[\s\S]*記入対象の月はまだありません。外れた月の原因が整理されると、ここに出ます。/);
+  assert.match(p, /id="fc-insight-notes"[\s\S]*<h2>人の記入<\/h2>[\s\S]*記入対象の月はありません。理由はまだ確認できていません。/);
   assert.doesNotMatch(p, /振り返りの更新/);
   // 人の記入の説明・保存の説明
   const n = review(planView({ insights }));
@@ -417,7 +417,7 @@ const anGuide = (plans, fy = '2026') => (/<span class="(?:t )?anmiss">([\s\S]*?)
   // 何も無いときは人の記入の空カードだけ。締め済みなら「計算されると」とは言わない
   assert.doesNotMatch(review(planView()), /<h2>AI 補正<\/h2>/);
   const f = review(planView({ can: false, frozen: true }));
-  assert.match(f, /id="fc-insight-notes"[\s\S]*記入対象の月はありません。締め済みの年度のため、読み取り専用です。/);
+  assert.match(f, /id="fc-insight-notes"[\s\S]*記入対象の月はありません。理由はまだ確認できていません。締め済みの年度のため、読み取り専用です。/);
   assert.doesNotMatch(f, /計算されると|まだ振り返りの記録/);
   // 比べた月があれば 1 行は出さない（精度の天気のカード）
   const withAcc = run(`S.fc.learn = { planId: 'P1', accuracy: { months: [{ month: '2026/04', p10: 1, p50: 2, p90: 3, actual: 2, err: 0, inside: true }], mape: 0.05, n: 1, coverage: 1, coverageN: 1 } }; fcReviewTab(S.fc.data, S.fc.view)`);
@@ -509,7 +509,7 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
   for (const o of [{ can: false }, { can: false, frozen: true }]) assert.ok(reviewL(planView(o), { scoredMonths: 2 }).includes(ZERO), '動かせない人・締め済みの年度も同じ: ' + JSON.stringify(o));
   // scoredMonths = 0・無い: 今までどおり（まだ比べた月が無い）
   for (const scoredMonths of [0, undefined]) {
-    assert.match(reviewL(planView(), { scoredMonths }), /id="fc-insight-notes"[\s\S]*記入対象の月はまだありません。/);
+    assert.match(reviewL(planView(), { scoredMonths }), /id="fc-insight-notes"[\s\S]*記入対象の月はありません。理由はまだ確認できていません。/);
     assert.ok(reviewL(planView({ insights: INS1 }), { scoredMonths }).includes('<p class="note">まだ実績と比べた月がありません。</p>'));
     assert.ok(reviewL(planView({ insights: INS1, can: false }), { scoredMonths }).includes('<p class="note">まだ実績と比べた月がありません。</p>'));
     assert.ok(reviewL(planView({ insights: INS1, can: false, frozen: true }), { scoredMonths }).includes('<p class="note">実績と比べた月はありません（締め済みの年度は、当たり具合を計算し直しません）。</p>'));
@@ -523,12 +523,12 @@ const INS1 = [{ row: 5, month: '2026/04', insight: '外れ', nextAction: '', hyp
 // ==== 16. 当たり具合を計算した後・外れの原因を整理の前 ====
 {
   // (a) 振り返り: 当たり具合は出ていて人の記入が無い → 人の記入の場所に 1 行（精度の推移の後）
-  const LINE = (t) => '<div class="card" id="fc-insight-notes"><div class="card-head"><h2>人の記入</h2></div><p class="note">' + t + '</p></div>';
+  const LINE = (t) => '<p class="note">' + t + '</p>';
   const a = reviewL(planView(), { accuracy: ACC1, scoredMonths: 1 });
-  assert.ok(a.includes(LINE('記入対象の月はまだありません。外れた月の原因が整理されると、ここに出ます。')), a.slice(0, 300));
+  assert.ok(a.includes(LINE('記入対象の月はありません。理由はまだ確認できていません。')), a.slice(0, 300));
   assert.ok(a.indexOf('<h2>精度の推移') < a.indexOf('<h2>人の記入</h2>') && a.indexOf('<h2>振り返りの更新') < 0, '精度の推移の後（更新は無い）');
-  assert.ok(reviewL(planView({ can: false }), { accuracy: ACC1 }).includes(LINE('記入対象の月はまだありません。外れた月の原因が整理されると、ここに出ます。')), '動かせない人');
-  assert.ok(reviewL(planView({ can: false, frozen: true }), { accuracy: ACC1 }).includes(LINE('記入対象の月はありません。締め済みの年度のため、読み取り専用です。')), '締め済みでも人の記入の場所と読み取り専用を示す');
+  assert.ok(reviewL(planView({ can: false }), { accuracy: ACC1 }).includes(LINE('記入対象の月はありません。理由はまだ確認できていません。')), '動かせない人');
+  assert.ok(reviewL(planView({ can: false, frozen: true }), { accuracy: ACC1 }).includes(LINE('記入対象の月はありません。理由はまだ確認できていません。締め済みの年度のため、読み取り専用です。')), '締め済みでも人の記入の場所と読み取り専用を示す');
   const ins = reviewL(planView({ insights: INS1 }), { accuracy: ACC1 });
   assert.doesNotMatch(ins, /外れた月の記入は/, '人の記入があれば、その表');
   assert.match(ins, /<h2>人の記入<span/);

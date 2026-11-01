@@ -219,10 +219,10 @@ function appPlanView_(ctx, planId) {
   }
   const inputHash = appPlanInputHash_(plan.plan_id);
   const day = Utilities.formatDate(new Date(), APP_TZ, 'yyyy-MM-dd');   // 旧来の画面は「今日」で変わる（既定の年度など）
-  const key = 'VIEW_' + appSha256Hex_([plan.plan_id, inputHash, day, APP_VERSION].join('|')).slice(0, 32);
+  const key = 'VIEW_' + appSha256Hex_([plan.plan_id, inputHash, day, APP_VERSION, APP_INSIGHT_READINESS_REV].join('|')).slice(0, 32);
   const cached = appJobGetResult_(key);
   let view;
-  if (cached.found) {
+  if (cached.found && appPlanViewCacheable_(cached.value)) {
     view = cached.value;
   } else {
     const t0 = new Date().getTime();
@@ -230,12 +230,14 @@ function appPlanView_(ctx, planId) {
     const call = appLegacyCall_(book, { asOfMs: t0, seed: 'view:' + plan.plan_id, actor: ctx.actor }, 'webGetBootstrap_', []);
     const boot = appSerialize_(call.value);
     delete boot.user; delete boot.bookUrl; delete boot.access;   // 計算用ブックの URL・旧来の管理者の判定は出さない
+    const beforeInsights = boot.eval && Array.isArray(boot.eval.insights) ? boot.eval.insights.slice() : null;
     appPlanViewDropStale_(boot, book);   // 見る人によらない直しは、覚えておく前に（覚えておいた中身はほかの人にも返す）
+    if (boot.eval) boot.eval.readiness = appInsightReadiness_(boot, book, beforeInsights);
     appPlanViewNotes_(boot, book);
     view = { boot: boot, engine: { version: call.version, sourceSha256: call.sourceSha256, webSha256: call.webSha256 },
       builtMs: new Date().getTime() - t0 };
     // 覚えておけなくても画面は出す（次の表示がまた組み立てになるだけ）
-    try { appJobPutResult_(key, view); } catch (e) { Logger.log('画面の中身を覚えておけません: ' + (e && e.message ? e.message : e)); }
+    try { if (appPlanViewCacheable_(view)) appJobPutResult_(key, view); } catch (e) { Logger.log('画面の中身を覚えておけません: ' + (e && e.message ? e.message : e)); }
     if (view.builtMs > 20000) appRunLog_({ requestId: ctx.requestId, kind: 'PLAN.VIEW', status: 'SLOW', durationMs: view.builtMs, detail: { planId: plan.plan_id } });
   }
   const shown = appPlanViewFor_(ctx, view, plan);
@@ -259,6 +261,12 @@ function appPlanView_(ctx, planId) {
         changed: appParseJsonList_(r.changed_sheets_json) }))
   }, shown, { boot: appPlanViewBudgetDraft_(shown && shown.boot, plan) },
   { inputLog: appInputLogView_(ctx, plan) });   // 入力の記録は見る人ごと（InputLog.js。覚えておく中身には入れない）
+}
+
+/** 未確認の診断と旧形式の控えは覚えず、次の読込で確かめ直す。 */
+function appPlanViewCacheable_(view) {
+  const r = view && view.boot && view.boot.eval && view.boot.eval.readiness;
+  return !!r && r.code !== 'UNKNOWN';
 }
 
 /**

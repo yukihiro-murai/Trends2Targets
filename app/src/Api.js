@@ -285,7 +285,7 @@ function appPagePlans_() { return appCachedRead_('PLANS', () => ({ plans: appLis
 function appPageLatest_(ctx, planId) {
   return appForecastLatestFor_(ctx, Object.assign(appCachedRead_('LATEST\u0001' + planId, () => appForecastLatest_(planId)), { shadow: appPlanShadow_(planId) }));
 }
-function appPageView_(ctx, planId) { return appCachedRead_('VIEW\u0001' + ctx.actor + '\u0001' + planId + '\u0001' + appToday_(), () => appPlanView_(ctx, planId)); }
+function appPageView_(ctx, planId) { return appCachedRead_('VIEW\u0001' + APP_INSIGHT_READINESS_REV + '\u0001' + ctx.actor + '\u0001' + planId + '\u0001' + appToday_(), () => appPlanView_(ctx, planId), appPlanViewCacheable_); }
 function appPageBasis_(ctx, planId) { return appForecastBasis_(ctx, planId); }
 function appPageLearn_(ctx, planId) { return appLearningView_(planId); }
 function appPageVer_(ctx, planId) { return appCachedRead_('VERSIONS\u0001' + ctx.actor + '\u0001' + planId, () => appVersionList_(ctx, { planId: planId })); }

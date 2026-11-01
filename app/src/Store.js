@@ -388,15 +388,17 @@ function appCacheChunks_(cache, k) {
  * 読むだけの結果を、版の印が同じ間だけ控えから返す。key は結果を決めるもの（人ごとに違う結果なら人も入れる）。
  * 鍵にはアプリの版（APP_VERSION）も入れる（公開し直した後に、前の版のコードで作った結果を返さない。データ本体が変わらなくても）。
  * 控えが読めない・大きすぎるときは、そのまま fn() を返す（控えは速くするためだけのもの）
+ * cacheIf（任意）が偽の結果は、既存の控えからも返さず、新しく覚えない。未確認の診断の再試行に使う。
  */
-function appCachedRead_(key, fn) {
+function appCachedRead_(key, fn, cacheIf) {
   const cache = CacheService.getScriptCache();
   const k = 'RC_' + appSha256Hex_(appDataGen_() + '\u0001' + APP_VERSION + '\u0001' + key).slice(0, 32);
   try {
     const text = appCacheChunks_(cache, k);
-    if (text !== null) return JSON.parse(text);
+    if (text !== null) { const value = JSON.parse(text); if (!cacheIf || cacheIf(value)) return value; }
   } catch (e) { /* 控えが壊れていれば読み直す */ }
   const v = fn();
+  if (cacheIf && !cacheIf(v)) return v;
   try {
     const text = JSON.stringify(appSerialize_(v));
     const parts = Math.max(1, Math.ceil(text.length / APP_READ_CHUNK));
