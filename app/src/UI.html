@@ -274,8 +274,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-s);table-layout
 .tbl td.ctr,.tbl th.ctr{text-align:center}
 .tbl tr.total td{color:var(--navy);border-top:1.5px solid var(--line-strong);background:var(--head)}
 .tbl td.empty{text-align:center;color:var(--muted);height:64px}
-.tbl .rowlink{color:var(--navy);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--primary-line);cursor:pointer;word-break:keep-all;overflow-wrap:normal}   /* 表のメーカーの名前（押すとその計画を開く。スマホでは「開く」の列の代わり）。名前の途中では折り返さない（空白の所だけ） */
-.tbl .rowlink:hover{text-decoration-color:var(--primary)}
+.tbl .rowlink,.lr-mk .rowlink{color:var(--navy);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--primary-line);cursor:pointer;word-break:keep-all;overflow-wrap:normal}   /* 表のメーカーの名前（押すとその計画を開く。スマホでは「開く」の列の代わり）。名前の途中では折り返さない（空白の所だけ） */
+.tbl .rowlink:hover,.lr-mk .rowlink:hover{text-decoration-color:var(--primary)}
 /* 入力行は見出しの下線と行の下線のあいだでコントロールを上下中央（セル余白 16 + 欄 40 + 余白 16 = 72） */
 .tbl.edit th{height:40px;padding:0 12px;line-height:40px}
 .tbl.edit td{padding:16px 8px;height:72px;vertical-align:middle;line-height:normal}
@@ -2754,16 +2754,16 @@ var FC_SECS = [['forecast','予測結果','年度の予測（下振れ・中心�
   ['tri','手法ごとの予測','線形回帰・直近重視の回帰・季節の中央値・シミュレーションと、それを混ぜた三角測量・本線の予測を並べます。予算を決めるときの補助です']];
 /**
  * 計画の 3 つの画面（2026-10-16 村井さん: 予測準備・予測結果・予算策定を分ける。同じ計画の選び方と読み込みを使う）:
- *   prep（予測準備）= 入力・予測を実行 / forecast（予測結果）= 予測・根拠 / budget（予算策定）= 予算案・確定版
+ *   prep（予測準備）= 入力・振り返り・予測を実行 / forecast（予測結果）= 予測・根拠 / budget（予算策定）= 予算案・確定版
  */
-var FC_VIEWS = { prep: ['input'], forecast: ['forecast', 'basis'], tri: ['tri'], budget: ['budget', 'version'] };
+var FC_VIEWS = { prep: ['input', 'review'], forecast: ['forecast', 'basis'], tri: ['tri'], budget: ['budget', 'version'] };
 var FC_VIEW_TITLE = { prep: '予測準備', forecast: '予測結果', tri: '三角測量', budget: '予算策定' };
 /** 区切り → それを出す画面 */
-var FC_SEC_VIEW = { input: 'prep', forecast: 'forecast', basis: 'forecast', tri: 'tri', budget: 'budget', version: 'budget' };
+var FC_SEC_VIEW = { input: 'prep', review: 'prep', forecast: 'forecast', basis: 'forecast', tri: 'tri', budget: 'budget', version: 'budget' };
 /** 計画の画面（予測準備・予測結果・予算策定）か */
 function fcView(v){ v = v === undefined ? S.view : v; return !!FC_VIEWS[v]; }
 function fcSecsOf(v){ return FC_SECS.filter(function(s){ return FC_VIEWS[v].indexOf(s[0]) >= 0; }).sort(function(a, b){ return FC_VIEWS[v].indexOf(a[0]) - FC_VIEWS[v].indexOf(b[0]); }); }
-/** 振り返りの区切り（予測準備からは外した。学びとテストから描く） */
+/** 振り返りの区切りを単独で描く道具（通常画面は予測準備のFC_VIEWSから描く） */
 function fcReviewSec(){ var s = FC_SECS.filter(function(x){ return x[0] === 'review'; })[0]; return fcSec(s, fcReviewTab(S.fc.data || {}, S.fc.view || {}), ''); }
 var INPUT_KINDS = [['product','製品'],['client','メーカー全体'],['opinions','個人見解'],['devspot','スポット案件']];
 /** 入力のカードの見出し（2026-10-16 村井さん: 何を入れるかが分かる名前） */
@@ -3169,7 +3169,8 @@ function fcRunBtn(){
 }
 /** 画面の中の区切りへ送る（ほかの画面から開いた・処理の後など）。区切りが描けていなければ、描けたときに送る */
 function fcJump(){
-  var t = S.fc.jump, el = t && fcView() ? $('fcs-' + t) : null;
+  var f = S.fc, t = f.jump, ready = fcHas('latest', f.planId) && fcHas('view', f.planId) && !f.view.pendingWrite;
+  var el = t && fcView() && ready ? (t === 'review' && $('fc-insight-notes')) || $('fcs-' + t) : null;
   if (!el || typeof el.scrollIntoView !== 'function') return;
   S.fc.jump = '';
   try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* 送れなくても画面はそのまま */ }
@@ -4365,7 +4366,7 @@ function fcRvNotes(ins, canPlan){
   var cols = canPlan ? [96, 0, 160, 0, 112, 128, 144] : [96, 0, 160, 0].concat(who ? [112] : []).concat([112]);
   var head = '<th data-tip="月にカーソルを合わせると、当たり具合の計算から出た見立てが出ます">月</th><th>原因の仮説</th><th data-tip="外れに対して決めた対応。（自動）は計算が付けたものです">対応</th><th>次に反映すること</th>' + (canPlan || who ? '<th>担当</th>' : '') + '<th>状態</th>' + (canPlan ? '<th></th>' : '');
   var feeds = fcPaused('REVIEW.GENERATE') ? '次の予測' : '次の予測と AI の見直し案';   // 見直し案を作る操作を止めている間は、見直し案の材料とは言わない
-  return '<div class="card"><div class="card-head"><h2>人の記入' + tip('外れた月の原因と対応。' + feeds + 'の材料') + '</h2>'
+  return '<div class="card" id="fc-insight-notes"><div class="card-head"><h2>人の記入' + tip('外れた月の原因と対応。' + feeds + 'の材料') + '</h2>'
     + (dirty ? '<span class="chip warn">未保存</span>' : '') + '</div><div class="tblwrap"><table class="tbl scroll fc-notes' + (canPlan ? ' edit' : '') + '"><colgroup>'
     + cols.map(function(x){ return x ? '<col style="width:' + x + 'px">' : '<col>'; }).join('') + '</colgroup>'
     + '<thead><tr>' + head + '</tr></thead><tbody>'
@@ -5789,7 +5790,7 @@ function lrLessonCard(d, full){
   var rep = {}; (d.repeats || []).forEach(function(r){ rep[r.clientName + '\u0001' + r.month] = r; });
   var pills = '<div class="tabs sub mini" role="tablist" aria-label="並べ方">' + (big.length ? lrPill(v, 'big', '外れの大きい順', 'lrLessonView') : '')
     + (open.length ? lrPill(v, 'open', '残っている対応 ' + open.length, 'lrLessonView') : '') + '</div>';
-  return lrCard('大きく外れた月', '締まった月で、予測が実績から 10% 以上外れたか、見通しの幅（下振れ〜上振れ）の外に出た月です。「開く」で、その計画の振り返りに仮説・対応・担当を書けます',
+  return lrCard('大きく外れた月', '締まった月で、予測が実績から 10% 以上外れたか、見通しの幅（下振れ〜上振れ）の外に出た月です。メーカー名を押すと、その計画の人の記入を開きます',
     pills + '<div class="lr-lessons">' + shown.map(function(x){ return lrLesson(x, full && lrNamed(d, x.planId), rep); }).join('') + '</div>' + (list.length > max ? lrMoreBtn('lessons', list.length - max) : ''));
 }
 function lrLesson(x, full, rep){
@@ -5805,7 +5806,7 @@ function lrLesson(x, full, rep){
     + row('対応', esc(act + (auto ? '（自動）' : '')), (auto ? '計算が自動で付けた対応です。振り返りで変えられます' : '') + (refl ? (auto ? '\n' : '') + '次への反映: ' + lrWords(refl) : ''))
     + (full ? row('担当', x.owner ? esc(x.owner) : '<span class="note">未定</span>') : '')
     + row('状態', st[0] ? '<span class="chip ' + st[1] + '">' + esc(st[0]) + '</span>' : '-');
-  return '<div class="lr-lesson"><div class="lr-lh"><div class="lr-who"><span class="lr-mk">' + esc(x.clientName) + '</span><span class="meta">' + esc(lrYm(x.ym)) + '</span></div>'
+  return '<div class="lr-lesson"><div class="lr-lh"><div class="lr-who"><span class="lr-mk">' + (x.planId ? planLink(x, 'review', x.clientName, x.clientName + 'の人の記入を開く') : esc(x.clientName)) + '</span><span class="meta">' + esc(lrYm(x.ym)) + '</span></div>'
     + '<div class="lr-err" data-tip="' + esc(errTip) + '"><span class="num">' + lrPct(x.absErr) + '</span><small>外れ</small></div></div>'
     + (tags ? '<div class="lr-tags">' + tags + '</div>' : '') + '<dl class="lr-dl">' + dl + '</dl>'
     + '</div>';

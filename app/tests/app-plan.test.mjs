@@ -272,9 +272,9 @@ const engRows = (env, sheet, planId) => env.table('ENG_' + sheet).filter((r) => 
   const page = vm.runInContext(`viewForecastAll()`, ui);
   assert.ok(!/ここを表示できませんでした/.test(page), '区切りをすべて描ける: ' + (page.match(/<p class="note">([^<]*)/) || [])[1]);
   for (const tab of ['forecast', 'basis', 'input', 'version', 'tri']) assert.ok(fcSection(page, tab), tab + ' の区切りがある');
-  assert.equal(fcSection(page, 'review'), '', '予測準備から振り返りを外した');
+  assert.ok(fcSection(page, 'review'), '予測準備に振り返りを表示する');
   assert.ok(fcSection(vm.runInContext(`fcReviewSec()`, ui), 'review'), '振り返り自体は描ける');
-  assert.equal(fcSection(page, 'steps'), '', '進みの区切りは無い（2026-10-16 村井さん: 予測準備は入力だけ）');
+  assert.equal(fcSection(page, 'steps'), '', '進みの区切りは無い（予測準備は入力・振り返り・予測を実行）');
   // 旧来の計算が確認を求めたら、確認の窓（ブラウザが黙って「やめる」にすることがある）ではなく、画面の中のカードで聞く
   vm.runInContext(`S.fc.jump = 'review'; toast = function(){}; JOB_DONE['FORECAST.RUN_CALC']({ needConfirm: { key: 'extreme', title: '極端な入力', message: '増減率 +80%' } }, { planId: S.fc.planId, confirms: [] })`, ui);
   const cf = vm.runInContext(`viewForecast()`, ui);

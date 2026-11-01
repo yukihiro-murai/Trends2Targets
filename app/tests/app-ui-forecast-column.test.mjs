@@ -4,7 +4,7 @@
  * 「予測画面も年度を選択するプルダウンを。メーカーのフィールド幅が広すぎる」）。
  * 画面（UI.html の script）を vm で読み、google.script.run をモックのサーバー（gas-mock）につなぐ（応答は順に流す）。
  *   1. 「メーカーを選ぶ」だけの画面は無い。予測を開くと、見ている年度の最初のメーカー（名前の順）を開く
- *   2. 題の横: 年度（1 マス）とメーカー（1 マス・名前だけ）のプルダウン。中身は 6 つの区切りのカードを上から（タブ・目次は無い）
+ *   2. 題の横: 年度（1 マス）とメーカー（1 マス・名前だけ）のプルダウン。中身は 7 つの区切りのカードを上から（タブ・目次は無い）
  *   3. 年度を選ぶ: 同じ名前のメーカーがあればそれ、無ければ最初のメーカー。計画の無い年度はよみの案内 1 枚。保存していない入力があれば先に確かめる
  *   4. 入力の 4 種類は同時に見える: 未保存の印と「入力を保存」は種類ごとのカード（保存も種類ごと）
  *   5. ほかの画面から区切りを指して開く（openPlan(planId, 'version') など）: その区切りへ画面の中で送る。「開く」は先頭から
@@ -81,7 +81,7 @@ run(`go('forecast')`);
 {
   // 一覧を読むまでも、区切りのカード（見出しと灰色の帯）を出しておく（読めたら同じ場所に中身が入る。2026-10-13 村井さん）
   const w = page();
-  assert.deepEqual([...w.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'forecast', 'basis', 'tri', 'budget', 'version'], '読み込み中も区切り（予測準備・予測結果・三角測量・予算策定の 4 つの画面）');
+  assert.deepEqual([...w.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'review', 'forecast', 'basis', 'tri', 'budget', 'version'], '読み込み中も区切り（予測準備・予測結果・三角測量・予算策定の 4 つの画面）');
   assert.match(w, /class="skel" role="status"/, '中身の場所は灰色の帯');
   assert.doesNotMatch(w, /観測中…/, 'よみの待ちのカードは出さない（中身と大きさが違い、読めたときに画面が動くため）');
 }
@@ -90,16 +90,16 @@ assert.equal(run('S.fc.planId'), P[firstKey][FY], '今の年度の、名前の�
 let h = page();
 assert.doesNotMatch(h, /メーカーを選ぶ/);
 
-// ==== 2. 題の横: 年度とメーカー（1 マスずつ・名前だけ）。中身は 6 つの区切り ====
+// ==== 2. 題の横: 年度とメーカー（1 マスずつ・名前だけ）。中身は 7 つの区切り ====
 assert.match(head(h), /^<div class="page-head"><h1>予測準備<\/h1><span class="fc-sels" data-near="1"><select class="inp sm" id="fc_fy" aria-label="年度"/, '題のすぐ横（data-near）に年度');
 assert.match(head(h), new RegExp('<option value="' + FY + '" selected>FY' + FY + '</option>'), '年度は開いている計画の年度');
 const mk = /<select class="inp sm" id="fc_mk" aria-label="メーカー"[^>]*>([\s\S]*?)<\/select>/.exec(head(h));
 assert.ok(mk, 'メーカーのプルダウン（1 マス: .inp.sm）');
 assert.deepEqual([...mk[1].matchAll(/>([^<]*)<\/option>/g)].map((m) => m[1]), byName, 'その年度のメーカーだけを名前の順に、名前だけ（年度や印を付けない）');
 assert.equal(run(`viewTitle(${JSON.stringify(head(h))}).tools`).startsWith('<span class="fc-sels"'), true, '題の横の道具の位置（ホーム・メーカー一覧と同じ .vnear）');
-assert.deepEqual([...h.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'forecast', 'basis', 'tri', 'budget', 'version']);
+assert.deepEqual([...h.matchAll(/<section class="card fcsec(?: nohead)?" id="fcs-(\w+)"/g)].map((m) => m[1]), ['input', 'review', 'forecast', 'basis', 'tri', 'budget', 'version']);
 // 中身がすぐ小見出しで始まる区切り（入力など）は、区切りの見出しを重ねない（2026-10-16 村井さん）
-assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]), ['入力', '予測結果', '根拠', '手法ごとの予測', '予算案', '確定版'], '見出しのある区切りは同じ形の見出し');
+assert.deepEqual([...h.matchAll(/<h2 id="fcs-h-\w+">([^<]*)/g)].map((m) => m[1]), ['入力', '振り返り', '予測結果', '根拠', '手法ごとの予測', '予算案', '確定版'], '見出しのある区切りは同じ形の見出し');
 assert.match(h, /<section class="card fcsec" id="fcs-input"[\s\S]*<ol class="in-steps"[\s\S]*<div class="card fc-inkind" id="fc-in-product"><div class="card-head"><h2>製品の動向/, '入力は順の案内のあと、製品の動向');
 assert.doesNotMatch(h, /class="tabs"|onclick="fcTab\(|class="tabs sub"><button/, 'タブ・目次は無い（グラフ / 表で見る の切り替えだけ）');
 assert.deepEqual([...fcSection(h, 'input').matchAll(/<div class="card fc-inkind" id="fc-in-(\w+)"><div class="card-head"><h2>([^<]*)</g)].map((m) => [m[1], m[2]]),
