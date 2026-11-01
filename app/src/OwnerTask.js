@@ -102,6 +102,8 @@ const APP_OWNER_ACTIONS = {
       if (t.verify !== undefined && typeof t.verify !== 'boolean') throw new Error('verify は true か false で入れてください。');
     },
     opts: () => ({ minRole: 'ADMIN', ownerOnly: true, audit: false }), run: (ctx, i) => appEvaluationPreservation_(ctx, i) },
+  checkEvaluationMetadata: { name: 'EVALUATION.METADATA', args: ['planId'], check: t => appOwnerCheckPlanId_(t),
+    opts: () => ({ minRole: 'ADMIN', ownerOnly: true, audit: false }), run: (ctx, i) => appEvaluationMetadata_(ctx, i) },
   runForecast: { job: 'FORECAST.RUN', args: ['planId'], check: t => appOwnerCheckPlanId_(t), payload: i => ({ planId: i.planId }) },
   // 計画の印（測る専用）を付ける・外す（所有者だけ。監査に前と後の値。PlanPurpose.js）
   setPlanPurpose: { name: 'PLAN.PURPOSE', args: ['planId', 'purpose'], check: t => { appOwnerCheckPlanId_(t); appOwnerCheckPurpose_(t); },

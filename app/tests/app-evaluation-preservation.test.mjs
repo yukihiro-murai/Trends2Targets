@@ -157,4 +157,38 @@ test('backup external mutation during comparison is detected',()=>{
   const f=fixture(),old=f.backup.getSheets;let reads=0;f.backup.getSheets=()=>{if(++reads===2)f.backup.getSheetByName('CLIENTS').rows[1][1]='external change';return old();};
   assert.throws(()=>f.call(true),/照合中に退避版/);
 });
+
+const metadata=f=>f.e.call('appEvaluationMetadata_(__ctx,__input)',{__ctx:{actor:OWNER,requestId:'SYNTHETIC'},__input:{planId:f.planId}});
+test('metadata reads all physical tables before eight null proofs with no mutation callback',()=>{
+  const f=fixture(),read=[],calls=[],original=f.e.ctx.appReadTable_,names=f.e.call('APP_EVAL_PRESERVE_SHEETS.map(s=>"ENG_"+s).concat(["ENG_SHEETS","ENG_ROWS","ENG_FORMATS"])');
+  f.e.ctx.appReadTable_=(name,...rest)=>{read.push(name);return original(name,...rest);};
+  f.e.ctx.appScreenSheetHashOp_=(...args)=>{assert.ok(f.e.state.lockHeld);assert.equal(args.length,3);assert.ok(names.every(n=>read.includes(n)));calls.push(args);return null;};
+  assert.deepEqual(unchanged(f,()=>metadata(f)),{matched:true,checkedSheets:8,storeWrites:0});
+  assert.deepEqual(calls.map(a=>a[1]),f.e.call('APP_EVAL_PRESERVE_SHEETS'));assert.ok(calls.every(a=>a[0]===f.planId&&a[2]===OWNER));
+});
+test('metadata matches native encoded table/meta fixture without stubs',()=>{
+  const f=fixture();assert.deepEqual(unchanged(f,()=>metadata(f)),{matched:true,checkedSheets:8,storeWrites:0});
+});
+test('metadata mismatch produces no patch writes',()=>{
+  const f=fixture();f.set('ENG_SHEETS','content_hash','0'.repeat(64),f.planId,(r,h)=>r[h.indexOf('sheet')]==='EVAL_LOG');unchanged(f,()=>assert.throws(()=>metadata(f),/保全確認.*一致しません/));
+});
+for(const mode of ['patch','throw','undefined'])test('metadata refuses '+mode,()=>{
+  const f=fixture();let count=0;f.e.ctx.appScreenSheetHashOp_=()=>{count++;if(mode==='throw')throw Error('untrusted failure');return mode==='patch'?{table:'ENG_SHEETS',mode:'patch',patch:{content_hash:'changed'}}:undefined;};
+  unchanged(f,()=>assert.throws(()=>metadata(f),/保全確認/));assert.equal(count,1);
+});
+for(const name of ['ENG_ACTUAL_EVAL_MONTHLY','ENG_EVAL_LOG','ENG_EVAL_COMPARE_MONTHLY','ENG_PROCESS_STATUS','ENG_RUN_LOG','ENG_CALIBRATION_STATE','ENG_CALIBRATION_HISTORY','ENG_EVAL_INSIGHTS','ENG_SHEETS','ENG_ROWS','ENG_FORMATS'])test('metadata rejects missing physical table '+name,()=>{
+  const f=fixture();f.data.sheets.splice(f.data.sheets.findIndex(s=>s.getName()===name),1);let calls=0;f.e.ctx.appScreenSheetHashOp_=()=>{calls++;return null;};
+  // ENG_SHEETS is required by the general full-book digest, so measure direct snapshots here.
+  const before=JSON.stringify(f.data.getSheets().map(s=>[s.name,s.rows,s.fmls,s.fmts])),w=STATS.writes;
+  assert.throws(()=>metadata(f),/必要な表がありません/);assert.equal(calls,0);assert.equal(STATS.writes,w);assert.equal(JSON.stringify(f.data.getSheets().map(s=>[s.name,s.rows,s.fmls,s.fmts])),before);
+});
+test('metadata rejects noncanonical header before hash proof',()=>{
+  const f=fixture();f.sh('ENG_FORMATS').rows[0][2]='bad';let calls=0;f.e.ctx.appScreenSheetHashOp_=()=>{calls++;return null;};unchanged(f,()=>assert.throws(()=>metadata(f),/正規見出し/));assert.equal(calls,0);
+});
+for(const block of ['queued','running','bulk','journal','frozen','missing-plan'])test('metadata idle/open precedes hash work '+block,()=>{
+  const f=fixture();if(block==='queued'||block==='running')f.e.props.APP_JOB_FIXTURE=JSON.stringify({id:'FIXTURE',status:block.toUpperCase(),createdAt:'2026-10-21T00:00:00Z'});
+  if(block==='bulk')f.e.props.APP_BULK_STATE=JSON.stringify({active:true});if(block==='journal')f.e.props.APP_WRITE_JOURNAL=JSON.stringify({id:'JNL-fixture',fileId:'missing',label:'fixture'});
+  if(block==='frozen')f.e.run("appWithLock_(()=>appInsertRows_('YEAR_CLOSURES',[{fy:'2026',state:'CLOSED',file_id:'fixture'}]))");
+  if(block==='missing-plan')f.planId='PL-MISSING';let calls=0;f.e.ctx.appScreenSheetHashOp_=()=>{calls++;return null;};unchanged(f,()=>assert.throws(()=>metadata(f),/処理|保存|締め済み|計画が見つかりません/));assert.equal(calls,0);
+});
 console.log('app-evaluation-preservation: '+cases+' synthetic cases PASS');

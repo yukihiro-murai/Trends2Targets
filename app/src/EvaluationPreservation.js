@@ -134,3 +134,30 @@ function appEvaluationPreservation_(ctx, input) {
       backupSha256: before.digest, currentSha256: after.digest, inputHash: appPlanInputHash_(i.planId), tables: report, storeWrites: 0 }, insightProof);
   });
 }
+
+/** 全表の退避照合とは別に、検証用8シートの復元メタを実データから再計算して読むだけで確かめる。 */
+function appEvaluationMetadata_(ctx, input) {
+  const planId = input && input.planId;
+  appEvalPreserveAssert_(typeof planId === 'string' && /^PL-[A-Za-z0-9-]+$/.test(planId), '対象計画が不正です。');
+  return appWithLock_(() => {
+    appNativeMetaIdle_(); appRequireOpenPlan_(planId);
+    const book = appDataSpreadsheet_();
+    APP_EVAL_PRESERVE_SHEETS.map(s => 'ENG_' + s).concat(['ENG_SHEETS', 'ENG_ROWS', 'ENG_FORMATS']).forEach(name => {
+      const sh = book.getSheetByName(name);
+      appEvalPreserveAssert_(!!sh, '必要な表がありません: ' + name);
+      try {
+        // 同じ実行で見出しを確認済みでも、物理表の現在の見出しを先に照合する。
+        appCheckTableHead_(name, sh, appReadWide_(sh, 1, 1, APP_TABLES[name].columns.length)[0]);
+        appReadTable_(name);
+      }
+      catch (e) { appEvalPreserveAssert_(false, '必要な表の正規見出し・行を確認できません: ' + name); }
+    });
+    APP_EVAL_PRESERVE_SHEETS.forEach(sheet => {
+      let op;
+      try { op = appScreenSheetHashOp_(planId, sheet, ctx.actor); }
+      catch (e) { appEvalPreserveAssert_(false, '復元メタを計算できません: ' + sheet); }
+      appEvalPreserveAssert_(op === null, '保存した復元メタと実データが一致しません: ' + sheet);
+    });
+    return { matched: true, checkedSheets: APP_EVAL_PRESERVE_SHEETS.length, storeWrites: 0 };
+  });
+}
