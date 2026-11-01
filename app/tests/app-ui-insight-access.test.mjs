@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { uiHtml, OWNER } from './gas-mock.mjs';
 
 const decode = value => String(value).replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
-function makeUi({ canPlan = true, frozen = false, withInsights = true } = {}) {
+function makeUi({ canPlan = true, frozen = false, withInsights = true, withScoring = true, withProposals = false } = {}) {
   const queue = [], timers = new Map(), events = {}, docEvents = {}, roots = [];
   let timerId = 0, renders = 0, document, execute;
   const scrolls = [];
@@ -94,10 +94,10 @@ function makeUi({ canPlan = true, frozen = false, withInsights = true } = {}) {
       latest: { plan, latest: { annual_p10: 960, annual_p50: 1200, annual_p90: 1440 } },
       view: { plan, can: { plan: canPlan && !frozen, approve: false }, sourceReady: true, inputHash: 'a'.repeat(64), actions: [], recent: [], boot: {
         setup: { people: ['架空担当'] }, products: [], months: ['2026-04'], stepOptions: [], input: { product: [], client: [], opinions: [], devspot: [] },
-        eval: { insights }, quarterly: { proposals: [] }, output: { sections: [{ monthly, annual: { p10: 960, p50: 1200, p90: 1440, adopted: 1200, uplift: 0, final: 1200 } }] }, learning: {},
+        eval: { insights }, quarterly: { reviewId: 'synthetic-review', title: 'FY2026-Q1', applied: false, proposals: withProposals ? [{ row: 2, pid: 'synthetic-proposal', target: 'bias_correction_factor', current: 1, proposed: 1.1, decision: '承認', rationale: '合成の見直し案', conf: .5 }] : [] }, output: { sections: [{ monthly, annual: { p10: 960, p50: 1200, p90: 1440, adopted: 1200, uplift: 0, final: 1200 } }] }, learning: {},
       } },
       basis: { planId, calibration: { factor: 1 }, triangulation: { sums: { FINAL: 1200 } } },
-      learn: { planId, scoredMonths: 1, accuracy: { n: 1, mape: .2, bias: .2, coverage: 1, coverageN: 1, months: [{ month: '2026/04', err: .2, p10: 800, p50: 1200, p90: 1400, actual: 1000, inside: true }] } },
+      learn: withScoring ? { planId, scoredMonths: 1, accuracy: { n: 1, mape: .2, bias: .2, coverage: 1, coverageN: 1, months: [{ month: '2026/04', err: .2, p10: 800, p50: 1200, p90: 1400, actual: 1000, inside: true }] } } : { planId, scoredMonths: 0, accuracy: { months: [] } },
       ver: { planId, versions: [] },
     };
   }
@@ -216,10 +216,30 @@ for (const first of ['latest', 'view']) test('partial reads keep the target unti
   u.respond(b); assert.equal(u.run('S.fc.jump'), ''); assert.equal(u.scrolls.at(-1).id, 'fc-insight-notes');
 });
 
-test('no insight rows use the review section as the ready fallback target', () => {
+test('no insight rows still expose the named notes card as the ready target', () => {
   const u = makeUi({ withInsights: false }); u.run("openPlan('p1','review')");
   assert.equal(u.run('S.fc.jump'), 'review'); u.flush();
-  assert.equal(u.notes(), null); assert.equal(u.scrolls.at(-1).id, 'fcs-review'); assert.equal(u.run('S.fc.jump'), ''); noWrites(u);
+  assert.ok(u.notes()); assert.match(u.notes().textContent, /人の記入/); assert.match(u.notes().textContent, /記入対象の月はまだありません/);
+  assert.equal(u.notes().querySelectorAll('input,select,textarea,button').length, 0, 'an empty card creates no editable fields or save controls');
+  assert.equal(u.scrolls.at(-1).id, 'fc-insight-notes'); assert.equal(u.run('S.fc.jump'), '');
+  assert.equal(u.run('fcDirty()'), false); noWrites(u);
+});
+
+for (const options of [
+  { withScoring: false }, { withScoring: false, withProposals: true },
+  { withScoring: false, frozen: true }, { withScoring: false, canPlan: false },
+]) test('empty insight location remains visible without creating rows: ' + JSON.stringify(options), () => {
+  const u = makeUi({ withInsights: false, ...options }), before = JSON.stringify(u.pages.p1.view.boot);
+  u.nav('prep'); u.flush();
+  const notes = u.notes(); assert.ok(notes, 'normal navigation always identifies the human-notes location');
+  assert.match(notes.textContent, /人の記入/); assert.match(notes.textContent, /記入対象の月/);
+  if (options.frozen) assert.match(notes.textContent, /締め済み.*読み取り専用/);
+  else assert.match(notes.textContent, /原因が整理されると、ここに出ます/);
+  assert.equal(notes.querySelectorAll('input,select,textarea,button,tr').length, 0);
+  assert.equal(u.main().querySelector('[onclick="fcSaveIns(8)"]'), null);
+  assert.equal(u.run('Object.keys(S.fc.ins).length'), 0); assert.equal(u.run('fcDirty()'), false);
+  assert.equal(JSON.stringify(u.pages.p1.view.boot), before, 'showing an empty card does not add saved records');
+  noWrites(u);
 });
 
 test('pending writes keep the target until the normal view is recovered', () => {

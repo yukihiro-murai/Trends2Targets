@@ -4278,22 +4278,18 @@ function fcReviewTab(d, v){
   var html = '';
   // 当たり具合は別に読む（読み込み中・失敗はその場所だけ。人の記入と見直し案は先に出す）
   if (!acc) html += slot('fcLearn', '当たり具合を読み込んでいます', 'fcLoadLearning()') || loading('当たり具合を読み込んでいます');
-  // 何も無いときは、「まだありません」を重ねず、よみの案内 1 枚と更新の操作だけ（2026-10-06 村井さん）。見直し案を作る操作を止めている間は、見直し案が出るとは言わない
+  // 対象月が無くても人の記入の場所を示し、空の案内はそのカードにまとめる。対象行は作らない。
   // 締め済みの年度は、当たり具合を計算し直さない（ずっと出ない。「まだ」とは言わない）。動かせない人には「計算されると出ます」
   var frozen = !!(v.plan && v.plan.frozen), FROZEN_NOTE = '（締め済みの年度は、当たり具合を計算し直しません）。';
   // 実績と比べた月の数（サーバーの scoredMonths。売上が 0 円の月も数える。無いサーバーでは今までどおり）。比べた月があるのに外れ幅の月が無い = どの月も売上が 0 円で、外れ幅を % にできない
   var scored = acc && isNum(lr.scoredMonths) ? lr.scoredMonths : null, zeroOnly = !!acc && !hasAcc && scored > 0;
   var noAccLine = zeroOnly ? '比べた ' + scored + ' か月は、どれも売上が 0 円のため、外れ幅を % で出せません。'
     : frozen ? '実績と比べた月はありません' + FROZEN_NOTE : 'まだ実績と比べた月がありません。';
-  if (acc && !hasAcc && !zeroOnly && !ins.length && !props.length) html += guide('explain', frozen ? '振り返りの記録はありません' + FROZEN_NOTE : 'まだ振り返りの記録がありません。月の実績が締まると、ここに出ます。');
-  // 人の記入・見直し案はあるのに、比べた月がまだ無い（または売上が 0 円の月だけ）: 精度の天気の場所に 1 行だけ（案内 1 枚とは重ねない）
-  else if (acc && !hasAcc) html += '<div class="card"><div class="card-head"><h2>AI 補正</h2></div><p class="note">' + esc(noAccLine) + '</p></div>';
+  if (acc && !hasAcc && (ins.length || props.length || zeroOnly)) html += '<div class="card"><div class="card-head"><h2>AI 補正</h2></div><p class="note">' + esc(noAccLine) + '</p></div>';
   if (hasAcc) html += fcRvWeather(acc) + fcRvTrend(acc);
   if (ins.length) html += fcRvNotes(ins, canPlan);
-  // 当たり具合は出ているのに人の記入が無い（当たり具合を計算した後、外れの原因を整理の前）: 人の記入の場所に 1 行だけ。
-  // 締め済みの年度・外れの原因を整理を止めている間は言わない。動かせない人には「整理されると出ます」
-  else if (hasAcc && !frozen && !fcPaused('EVAL.INSIGHTS')) html += '<div class="card"><div class="card-head"><h2>人の記入</h2></div><p class="note">'
-    + esc('外れた月の記入は、' + RUN_DONE['EVAL.INSIGHTS'] + 'ると出ます。') + '</p></div>';
+  else html += '<div class="card" id="fc-insight-notes"><div class="card-head"><h2>人の記入</h2></div><p class="note">'
+    + esc(frozen ? '記入対象の月はありません。締め済みの年度のため、読み取り専用です。' : '記入対象の月はまだありません。外れた月の原因が整理されると、ここに出ます。') + '</p></div>';
   if (props.length) html += fcRvProposals(q);
   return html;
 }
