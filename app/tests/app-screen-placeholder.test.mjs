@@ -368,4 +368,44 @@ assert.equal(gapFc.status, 'DONE', gapFc.error || '');
 assert.equal(nums(gap).monthly[0].adopted, 620, '予測し直しても、金額の無い月は仮の値が残る');
 assert.equal(nums(gap).monthly[1].adopted, 2500, '予測し直しても、金額のある写しは残る');
 
+const rowTables = ['BUDGET_DRAFTS', 'ENG_CLIENT', 'ENG_OPINIONS', 'ENG_DEV_SPOT', 'ENG_EVAL_COMPARE_MONTHLY', 'ENG_PROCESS_STATUS'];
+const rowCount = () => rowTables.reduce((n, name) => n + env.table(name).length, 0);
+const tally = env.seedPlan(book('件数の製薬'));
+const tallyClient = env.runJob('PLAN.EDIT', { planId: tally, action: 'INPUT.SAVE', args: { kind: 'client', rows: [{ person: '鷹野', ym: '2026-04', step: '0', reason: 'SCREEN_CHECK 検証用の仮の動向' }] } });
+assert.equal(tallyClient.status, 'DONE', tallyClient.error || '');
+const tallyNote = env.runJob('PLAN.EDIT', { planId: tally, action: 'INPUT.SAVE', args: { kind: 'opinions', rows: [{ person: '鷹野', ym: '2026-04', step: '0', conf: '0.5', note: 'SCREEN_CHECK 検証用の仮の見解' }] } });
+assert.equal(tallyNote.status, 'DONE', tallyNote.error || '');
+const goneTally = task('deleteScreenPlaceholders', { fy: FY, apply: true });
+assert.equal(goneTally.ok, true, JSON.stringify(goneTally));
+assert.equal(env.table('ENG_CLIENT').filter((r) => r.plan_id === tally).length, 0);
+assert.equal(env.table('ENG_OPINIONS').filter((r) => r.plan_id === tally).length, 0);
+const tallyHuman = env.runJob('PLAN.EDIT', { planId: tally, action: 'INPUT.SAVE', args: { kind: 'client', rows: [{ person: '鷹野', ym: '2026-05', step: '1', reason: '人手の動向' }] } });
+assert.equal(tallyHuman.status, 'DONE', tallyHuman.error || '');
+const holdStat = env.call(`(() => {
+  const holds = appReadTable_('SCREEN_HOLD').filter(r => r.batch_id === __b && r.kind === 'row');
+  const keyOf = (def, o) => def.key.map(c => String(o[c] == null ? '' : o[c])).join('\\u0001');
+  let present = 0;
+  holds.forEach(h => {
+    const def = APP_TABLES[h.table_name];
+    const row = JSON.parse(h.payload_json);
+    const key = keyOf(def, row);
+    if (appReadTable_(h.table_name).some(r => keyOf(def, r) === key)) present += 1;
+  });
+  return { holds: holds.length, present: present };
+})()`, { __b: goneTally.result.batchId });
+assert.ok(holdStat.holds >= 2 && holdStat.present >= 1, JSON.stringify(holdStat));
+const beforeTally = rowCount();
+const backTally = task('restoreScreenPlaceholders', { fy: FY, batch: goneTally.result.batchId });
+assert.equal(backTally.ok, true, JSON.stringify(backTally));
+const addedTally = rowCount() - beforeTally;
+assert.equal(backTally.result.restored.rows, addedTally, '戻した行数は、同じキーが既にあって足さなかった控えを除く（控え ' + holdStat.holds + '・既にある ' + holdStat.present + '・増分 ' + addedTally + '）');
+assert.equal(addedTally, holdStat.holds - holdStat.present, JSON.stringify({ holdStat, addedTally, returned: backTally.result.restored.rows }));
+assert.deepEqual(env.table('ENG_CLIENT').filter((r) => r.plan_id === tally).map((r) => [String(r.seq), r.Reason]), [['2', '人手の動向']], '同じ番号の人の行は残し、仮は足さない');
+assert.equal(env.table('ENG_OPINIONS').filter((r) => r.plan_id === tally && String(r.Note).indexOf('SCREEN_CHECK') === 0).length, 1, 'キーが空いている行は戻る');
+const beforeAgain = rowCount();
+const backTallyAgain = task('restoreScreenPlaceholders', { fy: FY, batch: goneTally.result.batchId });
+assert.equal(backTallyAgain.ok, true, JSON.stringify(backTallyAgain));
+assert.equal(rowCount() - beforeAgain, 0, '同じ控えの2回目は行が増えない');
+assert.equal(backTallyAgain.result.restored.rows, 0, '2回目に足した行は 0（控え ' + holdStat.holds + ' 件は数えない）');
+
 console.log('app-screen-placeholder: all tests passed');
