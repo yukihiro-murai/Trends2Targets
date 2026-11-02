@@ -334,10 +334,11 @@ function appBudgetDraftView_(planId) {
   const centerNow = now.length ? sum(now, 'center') : null;
   const drift = centerAtDraft !== null && centerAtDraft > 0 && centerNow !== null ? (centerNow - centerAtDraft) / centerAtDraft : null;
   const run = last.run_id ? appReadTable_('FORECAST_RUNS').filter(r => r.run_id === last.run_id)[0] : null;
+  // 知らせは消す行と同じ（basis が SCREEN_CHECK の月だけ）。印付きの MANUAL は出さない。
   return { basis: last.basis, prob: last.prob, alloc: last.alloc, runId: last.run_id, runAt: run ? run.finished_at : '', savedAt: last.saved_at,
     centerAtDraft: centerAtDraft, centerNow: centerNow, drift: drift, driftLimit: APP_BUDGET_DRIFT_WARN,
     warn: drift !== null && Math.abs(drift) >= APP_BUDGET_DRIFT_WARN, adopted: sum(mine, 'adopted'), uplift: sum(mine, 'uplift'), months: mine.length,
-    placeholder: winners.some(appBudgetPlaceholderRow_) };
+    placeholder: winners.some(r => String(r.basis || '') === APP_SCREEN_PLACEHOLDER) };
 }
 
 // ---- 確率で選ぶ（apiBudgetProposal。決定 25・27） ----
@@ -1131,6 +1132,8 @@ function appScreenScanPlan_(plan) {
     const rows = groups[id];
     if (rows.some(r => String(r.basis || '') === APP_SCREEN_PLACEHOLDER)) return;
     if (!appScreenGroupMatchesScale_(rows) && !appScreenGroupMatchesCurrent_(planId, rows)) return;
+    // 印が付いていても basis が MANUAL の行は消さない。疑いの件数にも入れない。
+    if (rows.some(appBudgetPlaceholderRow_)) return;
     suspectedDrafts.push.apply(suspectedDrafts, rows);
   });
   const drafted = {};
