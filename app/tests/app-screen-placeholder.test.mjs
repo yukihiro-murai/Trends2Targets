@@ -475,5 +475,33 @@ assert.equal(drafts(savedLater).filter((r) => r.basis === 'SCREEN_CHECK').length
 assert.equal(backLater.result.restored.skippedPlans, 1, '消したあとに保存した計画は 1 件飛ばす');
 assert.equal(nums(savedLater).monthly[0].adopted, 2222, '保存した採用予測は残る');
 assert.equal(drafts(quietLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 12, '保存していない計画の仮は戻る');
+const holdDate = new Date('2100-01-01T00:00:00+09:00');
+const saveDate = new Date('2100-01-01T00:00:01+09:00');
+assert.ok(env.call('appScreenTimeMs_(__d)', { __d: saveDate }) > env.call('appScreenTimeMs_(__h)', { __h: holdDate }), 'Date どうしはミリ秒で後を見る');
+assert.equal(env.call('appScreenTimeMs_(__d)', { __d: saveDate }), env.call('appScreenTimeMs_(__s)', { __s: '2100-01-01T00:00:01+0900' }), 'Date と保存の文字は同じ時刻');
+env.run(`(() => {
+  const asDate = (iso) => new Date(String(iso).replace(/([+-]\\d\\d)(\\d\\d)$/, '$1:$2'));
+  const stamp = (name, col, pred, value) => {
+    const sh = appDataSpreadsheet_().getSheetByName(name);
+    const width = Math.max(sh.getLastColumn(), sh.rows[0].length);
+    const head = sh.getRange(1, 1, 1, width).getValues()[0].map((v) => String(v));
+    const j = head.indexOf(col);
+    const n = sh.getLastRow() - 1;
+    if (j < 0 || n < 1) throw new Error('時刻の列がありません: ' + name + ' ' + col);
+    sh.getRange(2, 1, n, width).getValues().forEach((r, i) => {
+      if (pred(r, head)) sh.rows[i + 1][j] = value;
+    });
+  };
+  stamp('SCREEN_HOLD', 'saved_at', (r, h) => String(r[h.indexOf('batch_id')]) === __b, asDate('2100-01-01T00:00:00+0900'));
+  stamp('PLAN_ACTIONS', 'finished_at', (r, h) => String(r[h.indexOf('plan_id')]) === __id && String(r[h.indexOf('action')]) === 'BUDGET.SAVE' && String(r[h.indexOf('finished_at')]) === '2100-01-01T00:00:01+0900', asDate('2100-01-01T00:00:01+0900'));
+  appStoreForget_();
+})()`, { __id: savedLater, __b: goneLater.result.batchId });
+assert.equal(env.call(`appReadTable_('PLAN_ACTIONS').filter(r => r.plan_id === __id && r.finished_at === '2100-01-01T00:00:01+0900').length`, { __id: savedLater }), 1, 'シートの Date は、保存と同じ文字で読める');
+assert.ok(env.call(`appReadTable_('SCREEN_HOLD').some(r => r.batch_id === __b && r.saved_at === '2100-01-01T00:00:00+0900')`, { __b: goneLater.result.batchId }), '控えの Date も、保存と同じ文字で読める');
+const backDate = task('restoreScreenPlaceholders', { fy: FY, batch: goneLater.result.batchId });
+assert.equal(backDate.ok, true, JSON.stringify(backDate));
+assert.equal(backDate.result.restored.skippedPlans, 1, 'Date で来た保存も、控えより後なら飛ばす');
+assert.equal(drafts(savedLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 0, 'Date の保存時刻でも、保存した計画の仮は戻さない');
+assert.equal(drafts(quietLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 12, 'Date にしても、保存していない計画の仮は残る');
 
 console.log('app-screen-placeholder: all tests passed');

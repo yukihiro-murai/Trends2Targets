@@ -278,6 +278,19 @@ function appReadWide_(sh, row, rows, n) {
   }
 }
 
+/**
+ * getValues の 1 セルを、表に入れる文字にする。
+ * 書式なしテキスト（@）なら文字のまま。日付の書式のセルは Date で来るので、保存と同じ秒の文字にそろえる（String(Date) は並びが違う）。
+ */
+function appStoreCellText_(v) {
+  if (v === null || v === undefined) return '';
+  if (appIsDate_(v)) {
+    const ms = v.getTime();
+    if (!isNaN(ms)) return Utilities.formatDate(v, APP_TZ, "yyyy-MM-dd'T'HH:mm:ssZ");
+  }
+  return String(v);
+}
+
 /** 読んだ行を、今の列の数にそろえる（列を足す前の表は、足した列を空にする） */
 function appPadRow_(r, w, n) {
   if (w >= n && r.length === n) return r;
@@ -302,7 +315,7 @@ function appRawTable_(name, known) {
   const sh = known ? known.sh : appTableSheet_(name, false, true);
   const last = known ? known.last : sh.getLastRow();
   const n = def.columns.length;
-  const text = r => r.map(v => (v === null || v === undefined ? '' : String(v)));
+  const text = r => r.map(appStoreCellText_);
   if (checked) {
     const w = appTableWidth_(name);
     raw[name] = last < 2 ? [] : sh.getRange(2, 1, last - 1, w).getValues().map(r => appPadRow_(text(r), w, n));
@@ -437,7 +450,7 @@ function appReadPlanTable_(name, planId) {
       let j = i;
       while (j + 1 < rowsNo.length && rowsNo[j + 1] === rowsNo[j] + 1) j++;
       sh.getRange(rowsNo[i], 1, j - i + 1, w).getValues().forEach((r, k) => {
-        out.push({ row: rowsNo[i] + k, cells: appPadRow_(r.map(v => (v === null || v === undefined ? '' : String(v))), w, def.columns.length) });
+        out.push({ row: rowsNo[i] + k, cells: appPadRow_(r.map(appStoreCellText_), w, def.columns.length) });
       });
       i = j + 1;
     }

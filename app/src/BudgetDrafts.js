@@ -1606,9 +1606,27 @@ function appScreenRestoreOutput_(cells, payload) {
   return { cells: copy, skipped: skipped, changed: changed };
 }
 
+/** 控えと保存の時刻をミリ秒に（Date・保存と同じ文字・ずれの付いた ISO。読めなければ null） */
+function appScreenTimeMs_(v) {
+  if (appIsDate_(v)) {
+    const ms = v.getTime();
+    return isNaN(ms) ? null : ms;
+  }
+  if (v === null || v === undefined || v === '') return null;
+  const ms = appLandingTime_('', v);
+  return ms === null || !isFinite(ms) ? null : ms;
+}
+
+/** 保存の時刻が、控えの時刻より後か（両方読めたらミリ秒。片方だけなら文字のまま） */
+function appScreenTimeAfter_(saved, hold) {
+  const a = appScreenTimeMs_(saved), b = appScreenTimeMs_(hold);
+  if (a !== null && b !== null) return a > b;
+  return String(saved || '') > String(hold || '');
+}
+
 /**
- * 消したあと（SCREEN_HOLD.saved_at より後）に人が保存した計画か。
- * 保存の終わりは PLAN_ACTIONS.finished_at（kind が edit の操作だけ。実行は数えない）。
+ * 消したあと（SCREEN_HOLD.saved_at より後）に、画面の保存（kind が edit）がある計画か。
+ * 保存の終わりは PLAN_ACTIONS.finished_at。実行・POINT.APPLY・取り込み・承認・seedDummyLanding・シートの直接の書き換えは見ない。
  * 書き終えた Journal は消えるので、ここには使わない。同じ秒は後と分からない。
  * 計画の年度が、戻す年度と同じときだけ見る。
  */
@@ -1635,7 +1653,7 @@ function appScreenSavedAfterHold_(planIds, fy) {
   });
   Object.keys(want).forEach(id => {
     const holdAt = String(planIds[id] || '');
-    if (holdAt && savedAt[id] && savedAt[id] > holdAt) skipped[id] = true;
+    if (holdAt && savedAt[id] && appScreenTimeAfter_(savedAt[id], holdAt)) skipped[id] = true;
   });
   return skipped;
 }
