@@ -370,6 +370,47 @@ assert.equal(gapFc.status, 'DONE', gapFc.error || '');
 assert.equal(nums(gap).monthly[0].adopted, 620, '予測し直しても、金額の無い月は仮の値が残る');
 assert.equal(nums(gap).monthly[1].adopted, 2500, '予測し直しても、金額のある写しは残る');
 
+assert.equal(env.call('appBudgetNum_(0)'), 0, '採用予測 0 は空にならない');
+assert.equal(env.call('appBudgetBaselineAmount_(__r)', { __r: { basis: 'BASELINE', adopted: 0 } }), true, '採用予測 0 の BASELINE は金額がある');
+assert.equal(env.call('appBudgetHumanSide_(__r)', { __r: { basis: 'BASELINE', adopted: 0 } }), true, '採用予測 0 の BASELINE は人の側');
+assert.equal(env.call('appBudgetPlaceholderRow_(__r)', { __r: { basis: 'BASELINE', adopted: 0 } }), false, '採用予測 0 の BASELINE は仮ではない');
+assert.equal(env.call('appBudgetBaselineAmount_(__r)', { __r: { basis: 'BASELINE', adopted: null } }), false, '空の BASELINE は金額が無い');
+const zeroBase = draftRow('BASELINE', '2026-10-21T08:00:00+0900', 0, { action_id: 'BASELINE' });
+permute([zeroBase, noonRow]).forEach((seq) => {
+  const win = env.call('appBudgetPick_(__rows)', { __rows: seq.map((r, i) => Object.assign({}, r, { _row: i + 1 })) });
+  assert.equal(win.basis, 'BASELINE', '採用予測 0 の BASELINE は、時刻や順に関係なく仮より残る');
+  assert.equal(win.adopted, 0);
+  assert.equal(typeof win.adopted, 'number');
+});
+const zeroPlan = env.seedPlan(book('ゼロの写しの製薬'));
+env.run(`appWithLock_(() => appAppendLogRows_('BUDGET_DRAFTS', __r, []))`, {
+  __r: yms.map((ym, i) => ({
+    plan_id: zeroPlan, draft_id: 'BDR-Z-' + zeroPlan + '-' + i, action_id: 'BASELINE', ym,
+    adopted: 0, uplift: null, basis: 'BASELINE', alloc: '', prob: null, run_id: '',
+    center: P50[i], actor_email: OWNER, saved_at: '2026-10-21T08:00:00+0900',
+  })).concat([0, 1].map((i) => ({
+    plan_id: zeroPlan, draft_id: 'BDR-ZP-' + zeroPlan + '-' + i, action_id: 'SCREEN_CHECK', ym: yms[i],
+    adopted: 620, uplift: null, basis: 'SCREEN_CHECK', alloc: 'SCREEN_CHECK', prob: null, run_id: '',
+    center: P50[i], actor_email: OWNER, saved_at: i === 0 ? '2026-10-21T12:00:00+0900' : '2026-10-21T07:00:00+0900',
+  }))),
+});
+assert.equal(drafts(zeroPlan).filter((r) => r.basis === 'BASELINE').length, 12, '採用予測 0 の BASELINE は 12 件残る');
+assert.ok(drafts(zeroPlan).filter((r) => r.basis === 'BASELINE').every((r) => r.adopted === '0'), '表の採用予測 0 は空文字にならない');
+const zeroLatest = () => env.call(`appBudgetLatestDrafts_('${zeroPlan}')`);
+yms.forEach((ym, i) => {
+  assert.equal(zeroLatest()[ym].basis, 'BASELINE', i < 2 ? '仮より、採用予測 0 の写しが残る' : '仮の無い月も、採用予測 0 の写しが残る');
+  assert.equal(zeroLatest()[ym].adopted, 0);
+  assert.equal(typeof zeroLatest()[ym].adopted, 'number');
+});
+const zeroShown = view(zeroPlan).boot.budgetDraft;
+assert.equal(zeroShown.basis, 'BASELINE');
+assert.equal(zeroShown.placeholder, false, '勝ちがすべて採用予測 0 の写しなら、仮の知らせは出ない');
+assert.equal(zeroShown.adopted, 0, '画面の採用予測の合計は 0');
+assert.equal(zeroShown.months, 12, '採用予測 0 の月も、下書きの件数から消えない');
+const zeroFc = env.runJob('FORECAST.RUN', { planId: zeroPlan });
+assert.equal(zeroFc.status, 'DONE', zeroFc.error || '');
+yms.forEach((_, i) => assert.equal(nums(zeroPlan).monthly[i].adopted, 0, '予測し直しても、採用予測 0 の写しが残る'));
+
 const rowTables = ['BUDGET_DRAFTS', 'ENG_CLIENT', 'ENG_OPINIONS', 'ENG_DEV_SPOT', 'ENG_EVAL_COMPARE_MONTHLY', 'ENG_PROCESS_STATUS'];
 const rowCount = () => rowTables.reduce((n, name) => n + env.table(name).length, 0);
 const tally = env.seedPlan(book('件数の製薬'));
