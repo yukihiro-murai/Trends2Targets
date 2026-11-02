@@ -408,4 +408,42 @@ assert.equal(backTallyAgain.ok, true, JSON.stringify(backTallyAgain));
 assert.equal(rowCount() - beforeAgain, 0, '同じ控えの2回目は行が増えない');
 assert.equal(backTallyAgain.result.restored.rows, 0, '2回目に足した行は 0（控え ' + holdStat.holds + ' 件は数えない）');
 
+const markedManual = env.seedPlan(book('印付き手入力の製薬'));
+const allocManual = env.seedPlan(book('割り振り印の製薬'));
+const beforeNotice = task('previewScreenPlaceholders', { fy: FY });
+assert.equal(beforeNotice.ok, true, JSON.stringify(beforeNotice));
+env.run(`appWithLock_(() => appAppendLogRows_('BUDGET_DRAFTS', __r, []))`, {
+  __r: legacyDrafts(markedManual, 0.62, 0.02).map((r) => Object.assign({}, r, {
+    action_id: 'SCREEN_CHECK', draft_id: 'BDR-MM-' + markedManual + '-' + r.ym,
+  })).concat(yms.map((ym, i) => ({
+    plan_id: allocManual, draft_id: 'BDR-AL-' + allocManual + '-' + i, action_id: 'ACT-AL-' + allocManual, ym,
+    adopted: 1111, uplift: 0, basis: 'MANUAL', alloc: 'SCREEN_CHECK', prob: null, run_id: '',
+    center: P50[i], actor_email: OWNER, saved_at: '2026-10-21T18:00:00+0900',
+  }))),
+});
+const notice = task('previewScreenPlaceholders', { fy: FY });
+assert.equal(notice.ok, true, JSON.stringify(notice));
+assert.equal(notice.result.marked.drafts, beforeNotice.result.marked.drafts, '印付き MANUAL は、消す件数に入れない');
+assert.equal(notice.result.suspected.drafts, beforeNotice.result.suspected.drafts, '印付き MANUAL は、数字が似ていても疑いの件数に入れない');
+assert.equal(notice.result.markable.drafts, beforeNotice.result.markable.drafts);
+const shownManual = view(markedManual).boot.budgetDraft;
+assert.equal(shownManual.basis, 'MANUAL');
+assert.equal(shownManual.placeholder, false, 'action_id が印でも、消さない MANUAL は画面で仮と出さない');
+const shownAlloc = view(allocManual).boot.budgetDraft;
+assert.equal(shownAlloc.basis, 'MANUAL');
+assert.equal(shownAlloc.alloc, 'SCREEN_CHECK');
+assert.equal(shownAlloc.placeholder, false, 'alloc が印でも、消さない MANUAL は画面で仮と出さない');
+const markManual = task('markScreenPlaceholders', { fy: FY });
+assert.equal(markManual.ok, true, JSON.stringify(markManual));
+assert.equal(markManual.result.marked.drafts, 0);
+assert.ok(drafts(markedManual).every((r) => r.basis === 'MANUAL' && r.alloc === 'MANUAL' && r.action_id === 'SCREEN_CHECK'));
+assert.ok(drafts(allocManual).every((r) => r.basis === 'MANUAL' && r.alloc === 'SCREEN_CHECK'));
+const keepIds = (id) => drafts(id).map((r) => r.draft_id).sort();
+const beforeMarkedIds = keepIds(markedManual);
+const beforeAllocIds = keepIds(allocManual);
+const delManual = task('deleteScreenPlaceholders', { fy: FY, apply: true });
+assert.equal(delManual.ok, true, JSON.stringify(delManual));
+assert.deepEqual(keepIds(markedManual), beforeMarkedIds, '印付き MANUAL は削除しない');
+assert.deepEqual(keepIds(allocManual), beforeAllocIds, 'alloc が印の MANUAL は削除しない');
+
 console.log('app-screen-placeholder: all tests passed');
