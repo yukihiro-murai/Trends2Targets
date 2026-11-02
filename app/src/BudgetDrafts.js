@@ -1606,22 +1606,37 @@ function appScreenRestoreOutput_(cells, payload) {
   return { cells: copy, skipped: skipped, changed: changed };
 }
 
-/** 控えと保存の時刻をミリ秒に（Date・保存と同じ文字・ずれの付いた ISO。読めなければ null） */
+/**
+ * 控えと保存の時刻をミリ秒に。読む経路は変えず、比べるときだけそろえる。
+ * Date、String(Date)（Fri Jan 01 2100 00:00:00 GMT+0900 (日本標準時) など）、
+ * yyyy-MM-dd'T'HH:mm:ss+0900、+09:00、yyyy/MM/dd HH:mm。空や読めなければ null。
+ */
 function appScreenTimeMs_(v) {
+  if (v === null || v === undefined || v === '') return null;
   if (appIsDate_(v)) {
     const ms = v.getTime();
     return isNaN(ms) ? null : ms;
   }
-  if (v === null || v === undefined || v === '') return null;
-  const ms = appLandingTime_('', v);
+  const s = String(v).trim();
+  if (!s) return null;
+  const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+  const shown = /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+GMT([+-])(\d{2}):?(\d{2})\b/.exec(s);
+  if (shown) {
+    const mon = months[shown[1]];
+    if (mon === undefined) return null;
+    const off = (shown[7] === '-' ? -1 : 1) * (Number(shown[8]) * 60 + Number(shown[9]));
+    const ms = Date.UTC(Number(shown[3]), mon, Number(shown[2]), Number(shown[4]), Number(shown[5]), Number(shown[6])) - off * 60000;
+    return isNaN(ms) ? null : ms;
+  }
+  const ms = appLandingTime_('', s);
   return ms === null || !isFinite(ms) ? null : ms;
 }
 
-/** 保存の時刻が、控えの時刻より後か（両方読めたらミリ秒。片方だけなら文字のまま） */
+/** 保存の時刻が控えより後か。空や読めない値は戻す側（偽） */
 function appScreenTimeAfter_(saved, hold) {
   const a = appScreenTimeMs_(saved), b = appScreenTimeMs_(hold);
-  if (a !== null && b !== null) return a > b;
-  return String(saved || '') > String(hold || '');
+  if (a === null || b === null) return false;
+  return a > b;
 }
 
 /**
@@ -1630,10 +1645,10 @@ function appScreenTimeAfter_(saved, hold) {
  * 書き終えた Journal は消えるので、ここには使わない。同じ秒は後と分からない。
  * 計画の年度が、戻す年度と同じときだけ見る。
  */
-function appScreenSavedAfterHold_(planIds, fy) {
+function appScreenSavedAfterHold_(holdMs, fy) {
   const skipped = {};
   const want = {};
-  Object.keys(planIds).forEach(id => { want[id] = true; });
+  Object.keys(holdMs).forEach(id => { want[id] = true; });
   let plans = [];
   let actions = [];
   try { plans = appReadTable_('PLANS'); }
@@ -1642,18 +1657,19 @@ function appScreenSavedAfterHold_(planIds, fy) {
   catch (e) { if (!/表がありません/.test(String(e && e.message || e))) throw e; }
   const fyOf = {};
   plans.forEach(p => { fyOf[String(p.plan_id)] = String(p.fy); });
-  const savedAt = {};
+  const savedMs = {};
   actions.forEach(r => {
     const id = String(r.plan_id || '');
     if (!want[id] || fyOf[id] !== String(fy)) return;
     const spec = APP_PLAN_ACTIONS[String(r.action || '')];
     if (!spec || spec.kind !== 'edit') return;
-    const at = String(r.finished_at || '');
-    if (at > String(savedAt[id] || '')) savedAt[id] = at;
+    const ms = appScreenTimeMs_(r.finished_at);
+    if (ms === null) return;
+    if (savedMs[id] === undefined || ms > savedMs[id]) savedMs[id] = ms;
   });
   Object.keys(want).forEach(id => {
-    const holdAt = String(planIds[id] || '');
-    if (holdAt && savedAt[id] && appScreenTimeAfter_(savedAt[id], holdAt)) skipped[id] = true;
+    const hold = holdMs[id];
+    if (hold !== undefined && savedMs[id] !== undefined && savedMs[id] > hold) skipped[id] = true;
   });
   return skipped;
 }
@@ -1687,14 +1703,15 @@ function appScreenPlaceholderRestore_(ctx, fy, batch) {
     }
     const batchId = holds.length ? holds[0].batch_id : (want || '');
     if (!holds.length) return { fy: y, batchId: batchId, restored: { rows: 0, outputMonths: 0, skippedCells: 0, skippedPlans: 0 } };
-    const holdAt = {};
+    const holdMs = {};
     holds.forEach(h => {
       const id = String(h.plan_id || '');
       if (!id) return;
-      const at = String(h.saved_at || '');
-      if (at > String(holdAt[id] || '')) holdAt[id] = at;
+      const ms = appScreenTimeMs_(h.saved_at);
+      if (ms === null) return;
+      if (holdMs[id] === undefined || ms > holdMs[id]) holdMs[id] = ms;
     });
-    const skipped = appScreenSavedAfterHold_(holdAt, y);
+    const skipped = appScreenSavedAfterHold_(holdMs, y);
     const skippedPlans = Object.keys(skipped).length;
     const live = holds.filter(h => !skipped[String(h.plan_id || '')]);
     const rows = live.filter(h => h.kind === 'row');
