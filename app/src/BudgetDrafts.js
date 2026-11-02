@@ -1603,6 +1603,17 @@ function appScreenRestoreOutput_(cells, payload) {
   return { cells: copy, skipped: skipped, changed: changed };
 }
 
+/** 戻す書き込みで表に足した行の数（同じキーが既にあり足さなかった控えは数えない） */
+function appScreenRestoredRowCount_(written, tables) {
+  let n = 0;
+  Object.keys(tables || {}).forEach(table => {
+    const res = written && written[table];
+    const list = Array.isArray(res) ? res : (res ? [res] : []);
+    list.forEach(r => { n += Number(r && r.appended) || 0; });
+  });
+  return n;
+}
+
 function appScreenPlaceholderRestore_(ctx, fy, batch) {
   const y = appScreenFy_(fy);
   appRequireOpenYear_(y);
@@ -1678,7 +1689,7 @@ function appScreenPlaceholderRestore_(ctx, fy, batch) {
       });
       if (op) ops.push(op);
     });
-    if (ops.length) appJournalRun_(ctx, '画面確認の仮を戻す', '', ops);
-    return { fy: y, batchId: batchId, restored: { rows: rows.length, outputMonths: outputs.length, skippedCells: skippedCells } };
+    const restoredRows = ops.length ? appScreenRestoredRowCount_(appJournalRun_(ctx, '画面確認の仮を戻す', '', ops), built.by) : 0;
+    return { fy: y, batchId: batchId, restored: { rows: restoredRows, outputMonths: outputs.length, skippedCells: skippedCells } };
   });
 }
