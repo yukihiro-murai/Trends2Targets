@@ -181,7 +181,7 @@ const APP_OWNER_ACTIONS = {
   deleteScreenPlaceholders: { name: 'SCREEN.DELETE', args: ['fy', 'apply'], check: t => appOwnerCheckScreenApply_(t),
     opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'SCREEN_PLACEHOLDER', detail: i }),
     run: (ctx, i) => appScreenPlaceholderDelete_(ctx, i.fy, i.apply === true) },
-  // 消す直前の控えから戻す。batch を省くと、その年度でいちばん新しい控え。印の付いた行を消し直すまで、仮が戻る
+  // 消す直前の控えから戻す。batch を省くと、その年度でいちばん新しい控え。消したあとに人が保存した計画は自動で飛ばす。保存していない計画は、印の付いた行を消し直すまで仮が戻る
   restoreScreenPlaceholders: { name: 'SCREEN.RESTORE', args: ['fy', 'batch'], check: t => appOwnerCheckScreenRestore_(t),
     opts: i => ({ ownerOnly: true, minRole: 'ADMIN', entityType: 'SYSTEM', entityId: 'SCREEN_PLACEHOLDER', detail: i }),
     run: (ctx, i) => appScreenPlaceholderRestore_(ctx, i.fy, i.batch) },

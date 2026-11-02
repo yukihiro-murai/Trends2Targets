@@ -138,6 +138,8 @@ env.run(`appWithLock_(() => {
 })`, { __id: dummy });
 const hashOf = (id) => Object.fromEntries(env.table('ENG_SHEETS').filter((r) => r.plan_id === id && (r.sheet === 'OUTPUT' || r.sheet === 'CLIENT')).map((r) => [r.sheet, r.content_hash]));
 const hashBefore = hashOf(dummy);
+// 削除と、その直後の保存を同じ秒に固定する。秒をまたぐと、保存済み計画の飛ばしに当たり、この区間の確認が揺れる。
+env.run(`appNowIso_ = function () { return '2099-01-01T00:00:00+0900'; }`);
 const gone = task('deleteScreenPlaceholders', { fy: FY, apply: true });
 assert.equal(gone.ok, true, JSON.stringify(gone));
 assert.equal(gone.result.apply, true);
@@ -375,6 +377,8 @@ const tallyClient = env.runJob('PLAN.EDIT', { planId: tally, action: 'INPUT.SAVE
 assert.equal(tallyClient.status, 'DONE', tallyClient.error || '');
 const tallyNote = env.runJob('PLAN.EDIT', { planId: tally, action: 'INPUT.SAVE', args: { kind: 'opinions', rows: [{ person: '鷹野', ym: '2026-04', step: '0', conf: '0.5', note: 'SCREEN_CHECK 検証用の仮の見解' }] } });
 assert.equal(tallyNote.status, 'DONE', tallyNote.error || '');
+// 前の保存より後の秒にする。09:01 のまま消すと、それより時計が進んでいた保存まで「消したあと」に見える。
+env.run(`appNowIso_ = function () { return '2099-06-01T00:00:00+0900'; }`);
 const goneTally = task('deleteScreenPlaceholders', { fy: FY, apply: true });
 assert.equal(goneTally.ok, true, JSON.stringify(goneTally));
 assert.equal(env.table('ENG_CLIENT').filter((r) => r.plan_id === tally).length, 0);
@@ -445,5 +449,31 @@ const delManual = task('deleteScreenPlaceholders', { fy: FY, apply: true });
 assert.equal(delManual.ok, true, JSON.stringify(delManual));
 assert.deepEqual(keepIds(markedManual), beforeMarkedIds, '印付き MANUAL は削除しない');
 assert.deepEqual(keepIds(allocManual), beforeAllocIds, 'alloc が印の MANUAL は削除しない');
+
+const screenDrafts = (id) => yms.map((ym, i) => ({
+  plan_id: id, draft_id: 'BDR-SKP-' + id + '-' + i, action_id: 'SCREEN_CHECK', ym,
+  adopted: 626, uplift: null, basis: 'SCREEN_CHECK', alloc: 'SCREEN_CHECK', prob: null, run_id: '',
+  center: P50[i], actor_email: OWNER, saved_at: '2026-10-01T00:00:00+0900',
+}));
+const savedLater = env.seedPlan(book('後から保存した製薬'));
+const quietLater = env.seedPlan(book('保存していない製薬'));
+env.run(`appWithLock_(() => appAppendLogRows_('BUDGET_DRAFTS', __r, []))`, { __r: screenDrafts(savedLater).concat(screenDrafts(quietLater)) });
+assert.equal(drafts(savedLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 12);
+assert.equal(drafts(quietLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 12);
+env.run(`appNowIso_ = function () { return '2100-01-01T00:00:00+0900'; }`);
+const goneLater = task('deleteScreenPlaceholders', { fy: FY, apply: true });
+assert.equal(goneLater.ok, true, JSON.stringify(goneLater));
+assert.equal(drafts(savedLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 0);
+assert.equal(drafts(quietLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 0);
+env.run(`appNowIso_ = function () { return '2100-01-01T00:00:01+0900'; }`);
+const laterSave = save(savedLater, [{ row: 29, adopted: 2222, uplift: 4 }]);
+assert.equal(laterSave.status, 'DONE', laterSave.error || '');
+assert.equal(nums(savedLater).monthly[0].adopted, 2222);
+const backLater = task('restoreScreenPlaceholders', { fy: FY, batch: goneLater.result.batchId });
+assert.equal(backLater.ok, true, JSON.stringify(backLater));
+assert.equal(drafts(savedLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 0, '消したあとに保存した計画の仮は戻さない');
+assert.equal(backLater.result.restored.skippedPlans, 1, '消したあとに保存した計画は 1 件飛ばす');
+assert.equal(nums(savedLater).monthly[0].adopted, 2222, '保存した採用予測は残る');
+assert.equal(drafts(quietLater).filter((r) => r.basis === 'SCREEN_CHECK').length, 12, '保存していない計画の仮は戻る');
 
 console.log('app-screen-placeholder: all tests passed');

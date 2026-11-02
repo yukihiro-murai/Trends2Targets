@@ -1606,6 +1606,40 @@ function appScreenRestoreOutput_(cells, payload) {
   return { cells: copy, skipped: skipped, changed: changed };
 }
 
+/**
+ * 消したあと（SCREEN_HOLD.saved_at より後）に人が保存した計画か。
+ * 保存の終わりは PLAN_ACTIONS.finished_at（kind が edit の操作だけ。実行は数えない）。
+ * 書き終えた Journal は消えるので、ここには使わない。同じ秒は後と分からない。
+ * 計画の年度が、戻す年度と同じときだけ見る。
+ */
+function appScreenSavedAfterHold_(planIds, fy) {
+  const skipped = {};
+  const want = {};
+  Object.keys(planIds).forEach(id => { want[id] = true; });
+  let plans = [];
+  let actions = [];
+  try { plans = appReadTable_('PLANS'); }
+  catch (e) { if (!/表がありません/.test(String(e && e.message || e))) throw e; }
+  try { actions = appReadTable_('PLAN_ACTIONS'); }
+  catch (e) { if (!/表がありません/.test(String(e && e.message || e))) throw e; }
+  const fyOf = {};
+  plans.forEach(p => { fyOf[String(p.plan_id)] = String(p.fy); });
+  const savedAt = {};
+  actions.forEach(r => {
+    const id = String(r.plan_id || '');
+    if (!want[id] || fyOf[id] !== String(fy)) return;
+    const spec = APP_PLAN_ACTIONS[String(r.action || '')];
+    if (!spec || spec.kind !== 'edit') return;
+    const at = String(r.finished_at || '');
+    if (at > String(savedAt[id] || '')) savedAt[id] = at;
+  });
+  Object.keys(want).forEach(id => {
+    const holdAt = String(planIds[id] || '');
+    if (holdAt && savedAt[id] && savedAt[id] > holdAt) skipped[id] = true;
+  });
+  return skipped;
+}
+
 /** 戻す書き込みで表に足した行の数（同じキーが既にあり足さなかった控えは数えない） */
 function appScreenRestoredRowCount_(written, tables) {
   let n = 0;
@@ -1634,14 +1668,25 @@ function appScreenPlaceholderRestore_(ctx, fy, batch) {
       holds = id ? holds.filter(r => r.batch_id === id) : [];
     }
     const batchId = holds.length ? holds[0].batch_id : (want || '');
-    if (!holds.length) return { fy: y, batchId: batchId, restored: { rows: 0, outputMonths: 0, skippedCells: 0 } };
-    const rows = holds.filter(h => h.kind === 'row');
+    if (!holds.length) return { fy: y, batchId: batchId, restored: { rows: 0, outputMonths: 0, skippedCells: 0, skippedPlans: 0 } };
+    const holdAt = {};
+    holds.forEach(h => {
+      const id = String(h.plan_id || '');
+      if (!id) return;
+      const at = String(h.saved_at || '');
+      if (at > String(holdAt[id] || '')) holdAt[id] = at;
+    });
+    const skipped = appScreenSavedAfterHold_(holdAt, y);
+    const skippedPlans = Object.keys(skipped).length;
+    const live = holds.filter(h => !skipped[String(h.plan_id || '')]);
+    const rows = live.filter(h => h.kind === 'row');
     const outputs = holds.filter(h => h.kind === 'output');
+    const liveOutputs = live.filter(h => h.kind === 'output');
     const built = appScreenRestoreRowOps_(rows);
     const ops = built.ops.slice();
     const outByPlan = {};
     let skippedCells = 0;
-    outputs.forEach(h => {
+    liveOutputs.forEach(h => {
       let payload;
       try { payload = JSON.parse(h.payload_json); } catch (e) { throw new Error('消す前の控えが読めません（' + h.hold_id + '）。'); }
       (outByPlan[h.plan_id] = outByPlan[h.plan_id] || []).push(payload);
@@ -1693,6 +1738,6 @@ function appScreenPlaceholderRestore_(ctx, fy, batch) {
       if (op) ops.push(op);
     });
     const restoredRows = ops.length ? appScreenRestoredRowCount_(appJournalRun_(ctx, '画面確認の仮を戻す', '', ops), built.by) : 0;
-    return { fy: y, batchId: batchId, restored: { rows: restoredRows, outputMonths: outputs.length, skippedCells: skippedCells } };
+    return { fy: y, batchId: batchId, restored: { rows: restoredRows, outputMonths: outputs.length, skippedCells: skippedCells, skippedPlans: skippedPlans } };
   });
 }
