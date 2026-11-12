@@ -21,7 +21,7 @@
 2. `git pull --ff-only` (push 直前の最終同期)。
 3. `git push origin <branch>` (新規ブランチは `git push -u origin <branch>`)。
 4. push が拒否されても force push はしない。fetch して状況を報告する。
-5. `.clasp.json` があるプロジェクトでは、git push 後に `clasp status` で対象ファイルを確認してから `clasp push` で GAS に反映する。`.clasp.json` が無いプロジェクトでは、GAS エディタへの手動反映が別途必要なことをユーザーに伝える。
+5. 新アプリ（`app/`）への GAS 反映は、下の「Trends2Targets 固有の決まり」に従い、git push 後に `cd app && clasp -P . status` のあと `cd app && clasp -P . push -f` を使う。ルートの旧 GAS へは push しない。`.clasp.json` が無い場合は、GAS エディタへの手動反映が必要なことをユーザーに伝える。
 
 ### 禁止事項
 
@@ -33,3 +33,31 @@
 ## 共通開発規約
 
 ワークスペースルート (`~/Documents/GAS/`) の `AGENTS.md`・`CLAUDE.md`・`GIT_SYNC_RULES.md` に、GAS 共通のコーディング規約 (V8 / プレーンJS / Logger.log / Script Properties 等) と同期ルールの詳細版がある。読める環境では必ず参照すること。このリポジトリ固有の README・規約ファイルがあればそちらも必ず読むこと。
+
+## Trends2Targets 固有の決まり
+
+このリポジトリで作業するエージェントは、上の同期手順に加えて、次を守る。clasp の手順（このファイルの 24 行、および gas-workspace の `AGENTS.md`「作業終了・中断時プロトコル（必須）」）については、この節を優先する。承認方針（gas-workspace の `AGENTS.md`「承認ポリシー（2026-08-24 ユーザー指示・全エージェント共通）」）は上書きしない。
+
+### 承認が先の範囲
+
+- 計算・保存・権限・予測の判定・`LegacyEngine.js` の変更は、村井さんの判断が先。公開範囲、oauthScopes、保存先も、明示承認なしに変更しない。
+
+### 公開の許可と手順
+
+- 公開の許可は、新しい作業のたびに Techi 本人へ確認する。許可がある場合の手順は、`app/` で `clasp -P . status` → `clasp -P . push -f` → `clasp -P . deploy -i <公開用デプロイID>`。公開したら版の番号（`@`）を記録し、公開版を読み戻して Git と照合する。
+- `clasp push` は HEAD（エディタのコード）を更新するだけで、バージョン固定の Web アプリ公開 URL には反映されない。エディタ HEAD の更新だけで公開済みと報告しない。
+- ルートの旧 GAS へは push しない。
+- 公開範囲、oauthScopes、保存先、権限の拡大は、明示承認なしに変更しない。
+
+### clasp の push
+
+- 新アプリは `app/` を対象に、`clasp -P . push -f` を使う。これは GAS 側への反映用であり、このファイルの禁止事項および gas-workspace の `AGENTS.md`「禁止事項」にある `git push --force` の禁止とは別物。
+
+### 消さない
+
+- データとファイルは消さず、ゴミ箱にも送らない。古いものはアーカイブへ。削除の判断は村井さん。
+
+### clone と `.clasp.json`
+
+- 公開版の clone は、新規の一時ディレクトリを cwd にして実施する。元の `app/.clasp.json` の rootDir が `src` のままかを確認する。`app/` から clone すると rootDir が書き換わることがある。
+- `.clasp.json` はコミットしない。
