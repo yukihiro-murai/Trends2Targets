@@ -21,7 +21,7 @@
 2. `git pull --ff-only` (push 直前の最終同期)。
 3. `git push origin <branch>` (新規ブランチは `git push -u origin <branch>`)。
 4. push が拒否されても force push はしない。fetch して状況を報告する。
-5. 新アプリ（`app/`）への GAS 反映は、下の「Trends2Targets 固有の決まり」に従い、git push 後に `cd app && clasp -P . status` のあと `clasp -P . push -f` を使う。ルートの旧 GAS へは push しない。`.clasp.json` が無い場合は、GAS エディタへの手動反映が必要なことをユーザーに伝える。
+5. 新アプリ（`app/`）への GAS 反映は、下の「Trends2Targets 固有の決まり」に従い、git push 後に `cd app && clasp -P . status` のあと `cd app && clasp -P . push -f` を使う。ルートの旧 GAS へは push しない。`.clasp.json` が無い場合は、GAS エディタへの手動反映が必要なことをユーザーに伝える。
 
 ### 禁止事項
 
@@ -36,7 +36,7 @@
 
 ## Trends2Targets 固有の決まり
 
-このリポジトリで作業するエージェントは、上の同期手順に加えて、次を守る。clasp の手順（このファイルの 24 行、および gas-workspace の `AGENTS.md` 106 行）については、この節を優先する。承認方針（gas-workspace の `AGENTS.md` 155〜158 行）は上書きしない。
+このリポジトリで作業するエージェントは、上の同期手順に加えて、次を守る。clasp の手順（このファイルの 24 行、および gas-workspace の `AGENTS.md`「作業終了・中断時プロトコル（必須）」）については、この節を優先する。承認方針（gas-workspace の `AGENTS.md`「承認ポリシー（2026-08-24 ユーザー指示・全エージェント共通）」）は上書きしない。
 
 ### 承認が先の範囲
 
@@ -51,7 +51,7 @@
 
 ### clasp の push
 
-- 新アプリは `app/` を対象に、`clasp -P . push -f` を使う。これは GAS 側への反映用であり、このファイルの禁止事項および gas-workspace の `AGENTS.md` 118 行にある `git push --force` の禁止とは別物。
+- 新アプリは `app/` を対象に、`clasp -P . push -f` を使う。これは GAS 側への反映用であり、このファイルの禁止事項および gas-workspace の `AGENTS.md`「禁止事項」にある `git push --force` の禁止とは別物。
 
 ### 消さない
 
