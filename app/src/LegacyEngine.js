@@ -1,6 +1,6 @@
 /**
  * LegacyEngine.js — 旧来の計算（Forecast_Agent.js）と旧来の Web アプリ（Forecast_WebApp.js）をそのまま関数で包んだもの。自動生成: app/tools/build-engine.mjs（手で編集しない）。
- * 元のファイル: Forecast_Agent.js（VERSION 2.7.12-dev、SHA-256 14860fd41e151938e3e5e5799cc15aedf1a86530fe675ec431cb3deda53dd75b）
+ * 元のファイル: Forecast_Agent.js（VERSION 2.7.12-dev、SHA-256 b0c9e754a71e7511f4147cd752e03f29737a817a42e008789e9cf77453014cc4）
  *               Forecast_WebApp.js（SHA-256 8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4）
  * 包んだ中の旧来の関数は外から呼べない。差し替えるもの（SpreadsheetApp・Date・Utilities・PropertiesService・UrlFetchApp・HtmlService・Session・AppTriangulation・AppLearning）は Engine.js の appLegacyServices_ が渡す。
  */
@@ -5996,7 +5996,7 @@ function normalizeStepDisplay_(v) {
 
   if (typeof v === 'number') {
     if (!isFinite(v)) return null;
-    numPct = (Math.abs(v) > 2) ? v : v * 100;
+    numPct = (Math.abs(v) > 1) ? v : v * 100;
   } else {
     const s0 = String(v).trim();
     if (!s0) return '';
@@ -6007,7 +6007,7 @@ function normalizeStepDisplay_(v) {
     } else {
       const x = Number(s);
       if (isFinite(x)) {
-        numPct = (Math.abs(x) > 2) ? x : x * 100;
+        numPct = (Math.abs(x) > 1) ? x : x * 100;
       } else {
         return s0;
       }
@@ -13375,7 +13375,7 @@ function webAuditLogUrl_() {
     AI_MAX_ABS_EFFECT: typeof AI_MAX_ABS_EFFECT === 'undefined' ? undefined : AI_MAX_ABS_EFFECT,
     aiMonthWeights_: typeof aiMonthWeights_ === 'undefined' ? undefined : aiMonthWeights_,
     readLearnedEffects_: typeof readLearnedEffects_ === 'undefined' ? undefined : readLearnedEffects_,
-    SOURCE_SHA256: '14860fd41e151938e3e5e5799cc15aedf1a86530fe675ec431cb3deda53dd75b',
+    SOURCE_SHA256: 'b0c9e754a71e7511f4147cd752e03f29737a817a42e008789e9cf77453014cc4',
     WEB_SOURCE_SHA256: '8c0bb94d87f4ab3b7601ad0cb81b1ceca2cb1cce2a939554d5af26437b860de4'
   };
 }

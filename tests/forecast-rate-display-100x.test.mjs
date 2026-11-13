@@ -1,19 +1,17 @@
 #!/usr/bin/env node
 /*
- * forecast-rate-display-100x.test.mjs — 増減率の画面と計算の食い違いを、今の値のまま固定する。
- * 100倍の組: 現状は100倍ずれている。PR2で解析をまとめたら期待値を反転する。
- * 0.2% の組: 丸めで画面が0%になる（PR2で反転）。
+ * forecast-rate-display-100x.test.mjs — 増減率の画面と計算が、1 < |x| <= 2 でも揃うことを確かめる。
+ * 0.2% の組: 丸めで画面が0%になる（0.5% 刻みは変えていない）。
  *
  * 同じセル値を、画面（webParseInputs_ の step = normalizeStepDisplay_）と
  * 予測倍率（readFactorsProduct_ の parseRate_ を、重み 1・信頼度 1 の 1 行で productFactorsMultiplier_ に入れた 1 + step）
- * で読む。本体は直さない。期待値は今動いている値そのもの（直したあとの正しい値ではない）。
+ * で読む。期待値は display・savedCalc・savedMultiplier の値で確かめる（呼び出しの字面は見ない）。
  *
- *   100倍の組（1.5・2）: 現状は100倍ずれている。PR2で解析をまとめたら期待値を反転する。
- *     計算（parseRate_）は |x| > 1 なら百分率（/100）、そうでなければ比率のまま。
- *     画面（normalizeStepDisplay_）は |x| > 2 なら数値を百分率のまま使い、そうでなければ比率として *100 する。
- *     100倍が残るのは 1 < |x| <= 2。入力 2 は |2| > 2 が偽なので *100 側（+200%）。
- *   丸めの組（0.2%）: 丸めで画面が0%になる（PR2で反転）。0.5 刻みで画面が 0% になり、保存すると計算は 0。100倍の閾値とは別。
- *   一致する組（+10%・10・1.5%・0.5）: 画面の百分率と計算が同じ。PR2 でもこの期待値は反転しない。
+ *   揃えた組（1.5・2）: 画面の閾値を計算と同じ |x| > 1 にした。画面は +1.5% / +2%。
+ *     計算（parseRate_）は |x| > 1 なら百分率（/100）、そうでなければ比率のまま。1.5 は 0.015、2 は 0.02。
+ *     画面の文字を保存し直すと、次回の計算（savedCalc）と予測倍率（savedMultiplier）も同じ比率になる。
+ *   丸めの組（0.2%）: 丸めで画面が0%になる。0.5 刻みで画面が 0% になり、保存すると計算は 0。閾値とは別。
+ *   一致する組（+10%・10・1.5%・0.5）: 画面の百分率と計算が同じ。
  *
  * 新アプリの入力画面も、LegacyEngine.js に包んだ同じ関数を使う（包みが原文と一致することは app/tests/app-engine.test.mjs）。
  * GAS は使わない。シートは Node の中の最小のモック。
@@ -26,8 +24,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
-const HUNDRED_NAME = '現状は100倍ずれている。PR2で解析をまとめたら期待値を反転する';
-const ROUND_NAME = '丸めで画面が0%になる（PR2で反転）';
+const ROUND_NAME = '丸めで画面が0%になる（0.5% 刻みは変えていない）';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const agentSrc = await readFile(path.join(root, 'Forecast_Agent.js'), 'utf8');
@@ -46,9 +43,6 @@ function extractFunction(src, name) {
 
 const sheetsDecl = agentSrc.match(/const SHEETS = \{[\s\S]*?\n\};/);
 assert.ok(sheetsDecl, 'SHEETS が Forecast_Agent.js にある');
-assert.match(webSrc, /const step = \(v\) => normalizeStepDisplay_\(v\);/, '画面の step は normalizeStepDisplay_');
-assert.match(agentSrc, /const step = parseRate_\(stepRaw\);/, '予測の step は parseRate_');
-assert.match(agentSrc, /const mult = 1 \+ aggStep;/, '製品の予測倍率は 1 + step');
 
 const ctx = vm.createContext({
   TZ: 'Asia/Tokyo',
@@ -109,16 +103,16 @@ function near(actual, expected, label) {
 }
 
 /**
- * 現状の組。display / calc / multiplier は今の画面と今の予測倍率。
+ * display / calc / multiplier は画面と予測倍率。
  * savedCalc は、画面の step を webSaveInputs と同じく文字にして戻したあとの計算（次回の予測）。
- * 100倍の組の失敗時の文は HUNDRED_NAME。0.2% の失敗時の文は ROUND_NAME（丸めで画面が0%になる（PR2で反転））。
+ * 0.2% の失敗時の文は ROUND_NAME（丸めで画面が0%になる）。
  */
 const CASES = [
-  { input: 1.5, display: '+150%', calc: 0.015, multiplier: 1.015, savedCalc: 1.5, savedMultiplier: 2.5, flip: true, note: HUNDRED_NAME },
+  { input: 1.5, display: '+1.5%', calc: 0.015, multiplier: 1.015, savedCalc: 0.015, savedMultiplier: 1.015, flip: false },
   { input: '0.2%', display: '0%', calc: 0.002, multiplier: 1.002, savedCalc: 0, savedMultiplier: 1, flip: true, note: ROUND_NAME },
   { input: '+10%', display: '+10%', calc: 0.1, multiplier: 1.1, savedCalc: 0.1, savedMultiplier: 1.1, flip: false },
   { input: 10, display: '+10%', calc: 0.1, multiplier: 1.1, savedCalc: 0.1, savedMultiplier: 1.1, flip: false },
-  { input: 2, display: '+200%', calc: 0.02, multiplier: 1.02, savedCalc: 2, savedMultiplier: 3, flip: true, note: HUNDRED_NAME },
+  { input: 2, display: '+2%', calc: 0.02, multiplier: 1.02, savedCalc: 0.02, savedMultiplier: 1.02, flip: false },
   { input: '1.5%', display: '+1.5%', calc: 0.015, multiplier: 1.015, savedCalc: 0.015, savedMultiplier: 1.015, flip: false },
   { input: 0.5, display: '+50%', calc: 0.5, multiplier: 1.5, savedCalc: 0.5, savedMultiplier: 1.5, flip: false },
 ];
@@ -127,7 +121,7 @@ assert.equal(CASES.length, 7, '入力の組は 7 つ');
 const shown = [];
 for (const row of CASES) {
   const label = typeof row.input === 'number' ? String(row.input) : JSON.stringify(row.input);
-  const note = row.note || '画面と計算は一致する（PR2 でも反転しない）';
+  const note = row.note || '画面と計算は一致する';
   ctx.__step = row.input;
   const got = vm.runInContext(`(() => {
     const month = new Date(2026, 3, 1);
@@ -173,11 +167,10 @@ for (const row of CASES) {
   shown.push(label + ' → 計算 ' + got.calc + '、画面 ' + got.product + '、予測倍率 ' + got.multiplier);
 }
 
-assert.equal(displayAsRate('+150%') / 0.015, 100, '1.5 の画面は計算の 100 倍。' + HUNDRED_NAME);
-assert.equal(displayAsRate('+200%') / 0.02, 100, '2 の画面は計算の 100 倍。入力 2 は |x| > 2 が偽なので *100 側。' + HUNDRED_NAME);
+assert.equal(displayAsRate('+1.5%') / 0.015, 1, '1.5 の画面（+1.5%）は計算 0.015 と一致する');
+assert.equal(displayAsRate('+2%') / 0.02, 1, '2 の画面（+2%）は計算 0.02 と一致する');
 assert.equal(displayAsRate('0%'), 0, '0.2% は' + ROUND_NAME);
 
-console.log(HUNDRED_NAME);
 console.log(ROUND_NAME);
 shown.forEach((line) => console.log('  ' + line));
 console.log('forecast-rate-display-100x: all tests passed');

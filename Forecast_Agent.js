@@ -5979,7 +5979,7 @@ function normalizeStepDisplay_(v) {
 
   if (typeof v === 'number') {
     if (!isFinite(v)) return null;
-    numPct = (Math.abs(v) > 2) ? v : v * 100;
+    numPct = (Math.abs(v) > 1) ? v : v * 100;
   } else {
     const s0 = String(v).trim();
     if (!s0) return '';
@@ -5990,7 +5990,7 @@ function normalizeStepDisplay_(v) {
     } else {
       const x = Number(s);
       if (isFinite(x)) {
-        numPct = (Math.abs(x) > 2) ? x : x * 100;
+        numPct = (Math.abs(x) > 1) ? x : x * 100;
       } else {
         return s0;
       }
