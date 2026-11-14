@@ -7,8 +7,9 @@
  * 予測倍率（readFactorsProduct_ の parseRate_ を、重み 1・信頼度 1 の 1 行で productFactorsMultiplier_ に入れた 1 + step）
  * で読む。期待値は display・savedCalc・savedMultiplier の値で確かめる（呼び出しの字面は見ない）。
  *
- *   揃えた組（1.5・2）: 画面の閾値を計算と同じ |x| > 1 にした。画面は +1.5% / +2%。
- *     計算（parseRate_）は |x| > 1 なら百分率（/100）、そうでなければ比率のまま。1.5 は 0.015、2 は 0.02。
+ *   揃えた組（1.5・2、文字 "1.5"・"2"、負の -1.5・-2）: 画面の閾値を計算と同じ |x| > 1 にした。
+ *     数値も、同じ数字の文字列も、同じ規則。画面は +1.5% / +2% / -1.5% / -2%。
+ *     計算（parseRate_）は |x| > 1 なら百分率（/100）、そうでなければ比率のまま。
  *     画面の文字を保存し直すと、次回の計算（savedCalc）と予測倍率（savedMultiplier）も同じ比率になる。
  *   丸めの組（0.2%）: 丸めで画面が0%になる。0.5 刻みで画面が 0% になり、保存すると計算は 0。閾値とは別。
  *   一致する組（+10%・10・1.5%・0.5）: 画面の百分率と計算が同じ。
@@ -115,8 +116,12 @@ const CASES = [
   { input: 2, display: '+2%', calc: 0.02, multiplier: 1.02, savedCalc: 0.02, savedMultiplier: 1.02, flip: false },
   { input: '1.5%', display: '+1.5%', calc: 0.015, multiplier: 1.015, savedCalc: 0.015, savedMultiplier: 1.015, flip: false },
   { input: 0.5, display: '+50%', calc: 0.5, multiplier: 1.5, savedCalc: 0.5, savedMultiplier: 1.5, flip: false },
+  { input: '1.5', display: '+1.5%', calc: 0.015, multiplier: 1.015, savedCalc: 0.015, savedMultiplier: 1.015, flip: false },
+  { input: '2', display: '+2%', calc: 0.02, multiplier: 1.02, savedCalc: 0.02, savedMultiplier: 1.02, flip: false },
+  { input: -1.5, display: '-1.5%', calc: -0.015, multiplier: 0.985, savedCalc: -0.015, savedMultiplier: 0.985, flip: false },
+  { input: -2, display: '-2%', calc: -0.02, multiplier: 0.98, savedCalc: -0.02, savedMultiplier: 0.98, flip: false },
 ];
-assert.equal(CASES.length, 7, '入力の組は 7 つ');
+assert.equal(CASES.length, 11, '入力の組は 11 つ');
 
 const shown = [];
 for (const row of CASES) {
