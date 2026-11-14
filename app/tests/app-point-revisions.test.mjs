@@ -539,4 +539,69 @@ for (const bad of ['__kkBadHigher','__kkBadHalf','__kkBadYear']) {
   assert.equal(env.call('apiForecastLatest(__in)',{__in:{planId:id}}).planning.method,KK_METHOD);
 }
 
+// A KK revision stamped with the previous engine source stays readable. Current stamps still use the new hash.
+{
+  const OLD = '14860fd41e151938e3e5e5799cc15aedf1a86530fe675ec431cb3deda53dd75b';
+  const f = kkFixture();
+  previewKKFixture(f);
+  f.applyAll();
+  const before = latest(f);
+  assert.equal(before.planning.method, KK_METHOD);
+  assert.equal(before.planning.pointPolicySourceSha256, f.kkPolicy.engineSourceSha256);
+  assert.notEqual(f.kkPolicy.engineSourceSha256, OLD);
+  assert.ok(f.env.call('appPointPolicy_(__m).acceptedEngineSourceSha256s', { __m: KK_METHOD }).includes(OLD));
+  assert.ok(f.env.call('appPointPolicy_(__m).acceptedEngineSourceSha256s', { __m: KK_METHOD }).includes(f.kkPolicy.engineSourceSha256));
+  f.env.run(`(()=>{const r=appReadTable_('PLAN_ACTIONS').find(x=>x.action_id===__id),v=JSON.parse(r.result_json);
+    v.policySourceSha256=__old;v.planning.pointPolicySourceSha256=__old;
+    appPatchRow_('PLAN_ACTIONS',{action_id:r.action_id},{engine_sha256:__old,result_json:JSON.stringify(v)},'constructed');appStoreForget_();})()`,
+  { __id: before.pointRevision.revisionId, __old: OLD });
+  const back = latest(f);
+  assert.equal(back.planning.method, KK_METHOD, '旧エンジンハッシュの KK 修正は読み戻しで消えない');
+  assert.equal(back.pointRevision.revisionId, before.pointRevision.revisionId);
+  assert.equal(back.planning.pointPolicySourceSha256, OLD);
+  assert.equal(back.planning.annualTarget, before.planning.annualTarget);
+  const payload = f.env.call(`(()=>{const r=appReadTable_('PLAN_ACTIONS').find(x=>x.action_id===__id),s=appPointSnapshot_(),p=appPlanOf_(__plan),run=appPointLatest_(__plan,s);return appPointRevisionPayload_(r.result_json,p,run);})()`,
+    { __id: before.pointRevision.revisionId, __plan: f.ids[0] });
+  assert.ok(payload, '旧ハッシュの KK 改訂ペイロードは null にならない');
+  assert.equal(payload.policySourceSha256, OLD);
+  assert.equal(payload.planning.method, KK_METHOD);
+  const unknown = J(back.planning);
+  unknown.pointPolicySourceSha256 = '0'.repeat(64);
+  assert.equal(f.env.call('appForecastPlanningOf_(__raw,2026,100)', { __raw: unknown }), null);
+}
+
+// oldEngineRejectsNewSave: 旧ハッシュの読み戻しは許す。旧ハッシュのエンジンによる新しい保存は拒否する。
+{
+  const OLD = '14860fd41e151938e3e5e5799cc15aedf1a86530fe675ec431cb3deda53dd75b';
+  const f = kkFixture();
+  const oldEngine = () => f.env.run(`appPointEngine_=function(){return {VERSION:'constructed-kk-old',SOURCE_SHA256:__old,WEB_SOURCE_SHA256:'${'c'.repeat(64)}',
+    appHistoryInactiveCalendarForecast_:function(){throw Error('old engine must not compute');}};};`, { __old: OLD });
+  oldEngine();
+  assert.throws(() => f.env.task('previewPointRevision(__in)', { __in: { fy: FY, method: KK_METHOD, policySha256: f.kkPolicy.policySha256 } }),
+    /方式が未承認か計算APIがありません/, 'oldEngineRejectsNewSave: 旧ハッシュのエンジンでは新しいプレビューが拒否される');
+  enableKKFixture(f);
+  previewKKFixture(f);
+  oldEngine();
+  assert.throws(() => f.env.task('applyPointRevision(__in)', { __in: f.applyInput }),
+    /方式・版が変わりました/, 'oldEngineRejectsNewSave: 旧ハッシュのエンジンでは用意済みの保存が拒否される');
+  enableKKFixture(f);
+  f.applyAll();
+  const saved = latest(f);
+  assert.equal(saved.planning.method, KK_METHOD);
+  assert.equal(saved.planning.pointPolicySourceSha256, f.kkPolicy.engineSourceSha256);
+  const oldStamped = J(saved.planning);
+  oldStamped.pointPolicySourceSha256 = OLD;
+  const read = f.env.call('appForecastPlanningOf_(__raw,2026,100)', { __raw: oldStamped });
+  assert.ok(read, 'oldEngineRejectsNewSave: 旧ハッシュで押した計画の読み戻しは許される');
+  assert.equal(read.pointPolicySourceSha256, OLD);
+  assert.equal(read.annualTarget, saved.planning.annualTarget);
+  const native = J(saved.planning);
+  delete native.pointPolicySha256;
+  delete native.pointPolicySourceSha256;
+  assert.equal(f.env.call('appPointNativePlanning_(__raw,{sourceSha256:__sha},2026,100)', { __raw: native, __sha: OLD }), null,
+    'oldEngineRejectsNewSave: 旧ハッシュのエンジンでは新しい保存が拒否される');
+  const current = f.env.call('appPointNativePlanning_(__raw,{sourceSha256:__sha},2026,100)', { __raw: native, __sha: f.kkPolicy.engineSourceSha256 });
+  assert.equal(current.pointPolicySourceSha256, f.kkPolicy.engineSourceSha256, '現行ハッシュの新しい保存は現行ハッシュで押される');
+}
+
 console.log('app-point-revisions: all tests passed');
